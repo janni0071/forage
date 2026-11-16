@@ -10,7 +10,10 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(project(":source-youtube"))
+    implementation(project(":embedding-onnx"))
     implementation(libs.sqldelight.sqlite.driver)
+    // Libraries log through SLF4J; the CLI has nothing to say on their behalf.
+    runtimeOnly(libs.slf4j.nop)
 }
 
 application {

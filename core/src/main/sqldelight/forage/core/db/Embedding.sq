@@ -1,0 +1,19 @@
+-- One vector per video and model. `text_hash` identifies the exact text that was embedded,
+-- so a changed description, note or text recipe shows up as a stale row.
+
+CREATE TABLE embedding (
+    video_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    text_hash TEXT NOT NULL,
+    vector BLOB NOT NULL,            -- float32, little-endian
+    PRIMARY KEY (video_id, model)
+);
+
+selectEmbedding:
+SELECT text_hash, vector FROM embedding WHERE video_id = ? AND model = ?;
+
+selectEmbeddingsForModel:
+SELECT video_id, vector FROM embedding WHERE model = ?;
+
+upsertEmbedding:
+INSERT OR REPLACE INTO embedding VALUES (?, ?, ?, ?);

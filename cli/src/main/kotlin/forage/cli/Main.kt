@@ -1,7 +1,11 @@
 package forage.cli
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import forage.core.PlatformId
 import forage.core.db.ForageDatabase
+import forage.core.embedding.EmbeddingStore
+import forage.core.embedding.EmbeddingText
+import forage.core.embedding.Vectors
 import forage.core.importer.ImportResult
 import forage.core.importer.TakeoutCsv
 import forage.core.importer.TakeoutWatchHistory
@@ -15,11 +19,15 @@ import forage.core.metadata.MetadataFetcher
 import forage.core.profile.ProfileFile
 import forage.core.source.SourceException
 import forage.core.source.VideoStub
+import forage.embedding.onnx.ModelFiles
+import forage.embedding.onnx.ModelSpec
+import forage.embedding.onnx.OnnxEmbedder
 import forage.source.youtube.YouTubeSource
 import java.io.File
 import java.io.FileDescriptor
 import java.io.FileOutputStream
 import java.io.PrintStream
+import java.nio.file.Path
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -51,6 +59,13 @@ private const val USAGE = """Usage:
       With a profile file, fetches every video in it; cached videos are skipped, so an
       interrupted or blocked run can simply be started again. Default cache: data/forage.db
 
+  forage embed [--db FILE] [--models DIR]
+      Compute an embedding for every cached video that lacks one. Downloads the model
+      (about 470 MB) into data/models on first use.
+
+  forage similar <url-or-id> [--top N] [--db FILE] [--models DIR]
+      List the cached videos most similar to one of them: a sanity check for the embeddings.
+
   forage search <query>
       Search YouTube for videos (needs network)."""
 
@@ -64,6 +79,8 @@ fun main(args: Array<String>) {
             "pick" -> pick(Args(rest, setOf("--channel", "--title", "--min-watches", "--since", "--until", "--limit", "--db")))
             "profile" -> profile(Args(rest, emptySet()))
             "fetch" -> fetch(Args(rest, setOf("--db")))
+            "embed" -> embed(Args(rest, setOf("--db", "--models")))
+            "similar" -> similar(Args(rest, setOf("--db", "--models", "--top")))
             "search" -> search(Args(rest, emptySet()))
             else -> throw UsageError(USAGE)
         }
@@ -137,10 +154,14 @@ private fun fetch(args: Args) {
     if (File(arg).isFile) fetchProfile(File(arg), fetcher) else fetchOne(arg, fetcher)
 }
 
-private fun fetchOne(arg: String, fetcher: MetadataFetcher) {
-    // Accept a bare YouTube id too, the form people copy most often.
+/** A single video given as URL, `platform:id` or bare YouTube id, the form people copy most often. */
+private fun videoId(arg: String): PlatformId {
     val entry = if (Regex("[A-Za-z0-9_-]{11}").matches(arg)) "youtube:$arg" else arg
-    val id = ProfileFile.parse(entry).videos.singleOrNull() ?: throw UsageError("Not a file, video URL or id: $arg")
+    return ProfileFile.parse(entry).videos.singleOrNull() ?: throw UsageError("Not a video URL or id: $arg")
+}
+
+private fun fetchOne(arg: String, fetcher: MetadataFetcher) {
+    val id = videoId(arg)
     val (video, related) = when (val outcome = fetcher.fetch(id)) {
         is FetchOutcome.Cached -> outcome.details.also { println("(from cache)") }
         is FetchOutcome.Fetched -> outcome.details
@@ -188,6 +209,44 @@ private fun openDatabase(file: File): ForageDatabase {
     file.absoluteFile.parentFile.mkdirs()
     // The driver creates the schema on first use and migrates it on later versions.
     return ForageDatabase(JdbcSqliteDriver("jdbc:sqlite:${file.path}", Properties(), ForageDatabase.Schema))
+}
+
+/** Embeds every cached video that has no current vector and returns all vectors with their metadata. */
+private fun embedAll(args: Args): Pair<MetadataCache, Map<PlatformId, FloatArray>> {
+    val db = openDatabase(File(args.one("--db") ?: "data/forage.db"))
+    val cache = MetadataCache(db)
+    val texts = cache.ids().associateWith { EmbeddingText.of(cache.video(it)!!.metadata) }
+    val spec = ModelSpec.MULTILINGUAL_MINILM
+    val files = ModelFiles.ensure(spec, Path.of(args.one("--models") ?: "data/models", "minilm")) {
+        System.err.println("Downloading $it from ${spec.repo} ...")
+    }
+    OnnxEmbedder(spec, files).use { embedder ->
+        val vectors = EmbeddingStore(db, embedder).embed(texts) { done ->
+            System.err.println("Embedded $done of ${texts.size}")
+        }
+        return cache to vectors
+    }
+}
+
+private fun embed(args: Args) {
+    if (args.positional.isNotEmpty()) throw UsageError(USAGE)
+    val (_, vectors) = embedAll(args)
+    println("${vectors.size} videos have embeddings")
+}
+
+private fun similar(args: Args) {
+    val id = videoId(args.positional.singleOrNull() ?: throw UsageError(USAGE))
+    val (cache, vectors) = embedAll(args)
+    val target = vectors[id] ?: throw UsageError("$id is not in the cache; run 'forage fetch $id' first")
+    println("Most similar to: ${cache.video(id)!!.metadata.title}\n")
+    vectors.filterKeys { it != id }
+        .mapValues { Vectors.dot(target, it.value) }
+        .entries.sortedByDescending { it.value }
+        .take(args.int("--top") ?: 10)
+        .forEach { (other, score) ->
+            val v = cache.video(other)!!.metadata
+            println("  %.3f  %s  %s — %s".format(score, other, v.title, v.channelName ?: "?"))
+        }
 }
 
 private fun search(args: Args) {
