@@ -1,9 +1,12 @@
 [versions]
 kotlin = "2.2.20"
 serialization = "1.9.0"
+newpipe-extractor = "v0.27.1"
 
 [libraries]
 serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+newpipe-extractor = { module = "com.github.TeamNewPipe:NewPipeExtractor", version.ref = "newpipe-extractor" }
+jsoup = { module = "org.jsoup:jsoup", version = "1.24.1" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 
 [plugins]

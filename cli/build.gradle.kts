@@ -9,6 +9,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+    implementation(project(":source-youtube"))
 }
 
 application {

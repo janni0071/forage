@@ -9,9 +9,13 @@ dependencyResolutionManagement {
     repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS
     repositories {
         mavenCentral()
+        // NewPipeExtractor is only published through JitPack.
+        maven("https://jitpack.io") {
+            content { includeGroupByRegex("com\\.github\\..*") }
+        }
     }
 }
 
 rootProject.name = "forage"
 
-include(":core", ":cli")
+include(":core", ":source-youtube", ":cli")
