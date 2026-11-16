@@ -1,6 +1,7 @@
 package forage.core.embedding
 
 import forage.core.source.VideoMetadata
+import forage.core.source.VideoStub
 
 /**
  * The text a video is embedded from: title, channel, tags, notes and the start of the description
@@ -22,6 +23,12 @@ object EmbeddingText {
         notes?.trim()?.takeIf { it.isNotEmpty() }?.let(::add)
         cleanDescription(video.description).takeIf { it.isNotEmpty() }?.let(::add)
     }.joinToString("\n")
+
+    /** For videos known only from a list result: there is nothing but title and channel to go on. */
+    fun of(stub: VideoStub): String = listOfNotNull(stub.title, stub.channelName).joinToString("\n")
+
+    /** What cluster keywords are drawn from. */
+    fun keywordsSource(video: VideoMetadata): String = (listOf(video.title) + video.tags).joinToString(" ")
 
     /** Descriptions are full of links, sponsor codes and chapter lists; keep the leading prose. */
     private fun cleanDescription(description: String): String =
