@@ -3,7 +3,10 @@ package forage.cli
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import forage.core.db.ForageDatabase
 import forage.core.importer.ImportResult
+import forage.core.importer.TakeoutCsv
 import forage.core.importer.TakeoutWatchHistory
+import forage.core.importer.TakeoutWatchHistoryHtml
+import forage.core.importer.WatchEvent
 import forage.core.library.HistoryFilter
 import forage.core.library.WatchHistory
 import forage.core.metadata.FetchOutcome
@@ -25,12 +28,14 @@ import java.util.Properties
 import kotlin.system.exitProcess
 
 private const val USAGE = """Usage:
-  forage takeout <watch-history.json> [--top N]
-      Summarise a Google Takeout watch history.
+  forage takeout <file> [--top N]
+      Summarise a Google Takeout video list. <file> is watch-history.json, watch-history.html
+      or a playlist such as "playlists/Watch later-videos.csv".
 
-  forage pick <watch-history.json> [filters] [--limit N]
+  forage pick <file> [filters] [--limit N] [--db FILE]
       Print matching videos as profile lines, most watched first. Append them to your profile:
-        forage pick history.json --channel "Workshop Wren" >> profile.txt
+        forage pick watch-history.html --channel "Workshop Wren" >> profile.txt
+      Playlists list ids only; titles are filled in from the metadata cache once fetched.
       Filters (combined with AND; --channel may be repeated and matches any):
         --channel TEXT       channel name contains TEXT, or a full channel id (youtube:UC...)
         --title TEXT         title contains TEXT
@@ -56,7 +61,7 @@ fun main(args: Array<String>) {
         val rest = args.drop(1)
         when (args.firstOrNull()) {
             "takeout" -> takeout(Args(rest, setOf("--top")))
-            "pick" -> pick(Args(rest, setOf("--channel", "--title", "--min-watches", "--since", "--until", "--limit")))
+            "pick" -> pick(Args(rest, setOf("--channel", "--title", "--min-watches", "--since", "--until", "--limit", "--db")))
             "profile" -> profile(Args(rest, emptySet()))
             "fetch" -> fetch(Args(rest, setOf("--db")))
             "search" -> search(Args(rest, emptySet()))
@@ -102,7 +107,13 @@ private fun pick(args: Args) {
         until = args.one("--until")?.let { day(it).plusDays(1).atStartOfDay(zone).toInstant() },
         minWatches = args.int("--min-watches") ?: 1,
     )
-    val matches = WatchHistory.select(readHistory(args).events, filter)
+    // Playlists and old history entries carry no titles; borrow them from the metadata cache where it has them.
+    val cache = args.one("--db").let { File(it ?: "data/forage.db") }.takeIf { it.isFile }?.let { MetadataCache(openDatabase(it)) }
+    val events = readHistory(args).events.map { e ->
+        if (e.title != null || cache == null) e
+        else cache.video(e.video)?.metadata?.let { e.copy(title = it.title, channel = it.channel, channelName = it.channelName) } ?: e
+    }
+    val matches = WatchHistory.select(events, filter)
     val shown = matches.take(args.int("--limit") ?: Int.MAX_VALUE)
     shown.forEach { println(ProfileFile.line(it)) }
     // Status goes to stderr so that stdout can be redirected straight into a profile file.
@@ -187,7 +198,20 @@ private fun search(args: Args) {
 private fun printStub(stub: VideoStub) =
     println("  ${stub.id}  ${stub.title} — ${stub.channelName ?: "?"}${if (stub.isShort) " [Short]" else ""}")
 
-private fun readHistory(args: Args): ImportResult = file(args).inputStream().buffered().use(TakeoutWatchHistory::parse)
+/** Reads any Takeout video list: watch history as JSON or HTML, or a playlist's `-videos.csv`. */
+private fun readHistory(args: Args): ImportResult {
+    val file = file(args)
+    return when (file.extension.lowercase()) {
+        "json" -> file.inputStream().buffered().use(TakeoutWatchHistory::parse)
+        "html", "htm" -> file.inputStream().buffered().use(TakeoutWatchHistoryHtml::parse)
+        // A playlist only lists ids; "watched at" stands in for "added at" so the date filters work on it.
+        "csv" -> ImportResult(
+            TakeoutCsv.playlist(file.readText()).map { WatchEvent(it.video, null, null, null, it.addedAt) },
+            emptyMap(),
+        )
+        else -> throw UsageError("Don't know how to read ${file.name}: expected watch-history.json, watch-history.html or a playlist .csv")
+    }
+}
 
 private fun file(args: Args): File {
     val path = args.positional.singleOrNull() ?: throw UsageError(USAGE)

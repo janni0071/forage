@@ -18,6 +18,7 @@ sqldelight {
 
 dependencies {
     implementation(libs.serialization.json)
+    implementation(libs.jsoup)
     testImplementation(libs.kotlin.test)
     // Core only sees the driver interface; each app supplies its platform's driver.
     testImplementation(libs.sqldelight.sqlite.driver)
