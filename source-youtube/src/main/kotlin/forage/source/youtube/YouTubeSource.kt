@@ -101,6 +101,6 @@ class YouTubeSource : ExtractorSource {
         if (e.message?.contains("Got HTML document") == true) {
             throw SourceException.Blocked("YouTube answered $what with a web page instead of data, which usually means this network is being bot-checked", e)
         }
-        throw SourceException("Failed to load $what: ${e.message}", e)
+        throw SourceException("Failed to load $what: ${e.message ?: e.toString()}", e)
     }
 }

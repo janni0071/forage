@@ -6,6 +6,7 @@ import forage.core.source.Capability
 import forage.core.source.ExtractorSource
 import forage.core.source.SourceException
 import forage.core.source.VideoStub
+import java.time.Duration
 import kotlin.random.Random
 
 /** Where a candidate came from; shown as part of the reason for a pick. */
@@ -26,6 +27,10 @@ class CandidateGenerator(
     /** Used for searches. Null, or a source without [Capability.SEARCH], means related videos only. */
     private val source: ExtractorSource? = null,
     private val random: Random = Random(1),
+    /** A search is tried this often before it is skipped. */
+    private val searchAttempts: Int = 3,
+    private val pause: Duration = Duration.ofSeconds(5),
+    private val sleep: (Duration) -> Unit = { Thread.sleep(it.toMillis()) },
 ) {
     /** What went wrong with searches, for the caller to report. Candidate generation itself never fails on them. */
     val searchFailures = ArrayList<String>()
@@ -50,15 +55,25 @@ class CandidateGenerator(
             }
         }
 
+        var searched = false
         if (source != null && Capability.SEARCH in source.capabilities) {
             for (cluster in clusters) {
                 val query = cluster.keywords.take(keywordsPerSearch).joinToString(" ")
                 if (query.isBlank()) continue
-                try {
-                    source.search(query).forEach { add(it, CandidateSource.Search(query, cluster.index)) }
-                } catch (e: SourceException) {
-                    searchFailures += "'$query': ${e.message}"
+                var failure: SourceException? = null
+                for (attempt in 1..searchAttempts) {
+                    // Pause before every search but the very first, and longer after each failure.
+                    if (searched) sleep(pause.multipliedBy(attempt.toLong()))
+                    searched = true
+                    try {
+                        source.search(query).forEach { add(it, CandidateSource.Search(query, cluster.index)) }
+                        failure = null
+                        break
+                    } catch (e: SourceException) {
+                        failure = e
+                    }
                 }
+                failure?.let { searchFailures += "'$query': ${it.message}" }
             }
         }
         return found.values.toList()
