@@ -1,9 +1,14 @@
 package forage.cli
 
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import forage.core.db.ForageDatabase
 import forage.core.importer.ImportResult
 import forage.core.importer.TakeoutWatchHistory
 import forage.core.library.HistoryFilter
 import forage.core.library.WatchHistory
+import forage.core.metadata.FetchOutcome
+import forage.core.metadata.MetadataCache
+import forage.core.metadata.MetadataFetcher
 import forage.core.profile.ProfileFile
 import forage.core.source.SourceException
 import forage.core.source.VideoStub
@@ -16,6 +21,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeParseException
+import java.util.Properties
 import kotlin.system.exitProcess
 
 private const val USAGE = """Usage:
@@ -35,8 +41,10 @@ private const val USAGE = """Usage:
   forage profile <profile.txt>
       Check a profile file: count videos, report duplicates and unreadable lines.
 
-  forage fetch <url-or-id>
-      Fetch one video's metadata and related videos from YouTube (needs network).
+  forage fetch <profile.txt | url-or-id> [--db FILE]
+      Fetch metadata and related videos from YouTube into the local cache (needs network).
+      With a profile file, fetches every video in it; cached videos are skipped, so an
+      interrupted or blocked run can simply be started again. Default cache: data/forage.db
 
   forage search <query>
       Search YouTube for videos (needs network)."""
@@ -50,7 +58,7 @@ fun main(args: Array<String>) {
             "takeout" -> takeout(Args(rest, setOf("--top")))
             "pick" -> pick(Args(rest, setOf("--channel", "--title", "--min-watches", "--since", "--until", "--limit")))
             "profile" -> profile(Args(rest, emptySet()))
-            "fetch" -> fetch(Args(rest, emptySet()))
+            "fetch" -> fetch(Args(rest, setOf("--db")))
             "search" -> search(Args(rest, emptySet()))
             else -> throw UsageError(USAGE)
         }
@@ -113,10 +121,21 @@ private fun profile(args: Args) {
 
 private fun fetch(args: Args) {
     val arg = args.positional.singleOrNull() ?: throw UsageError(USAGE)
+    val cache = MetadataCache(openDatabase(File(args.one("--db") ?: "data/forage.db")))
+    val fetcher = MetadataFetcher(YouTubeSource(), cache)
+    if (File(arg).isFile) fetchProfile(File(arg), fetcher) else fetchOne(arg, fetcher)
+}
+
+private fun fetchOne(arg: String, fetcher: MetadataFetcher) {
     // Accept a bare YouTube id too, the form people copy most often.
     val entry = if (Regex("[A-Za-z0-9_-]{11}").matches(arg)) "youtube:$arg" else arg
-    val id = ProfileFile.parse(entry).videos.singleOrNull() ?: throw UsageError("Not a video URL or id: $arg")
-    val (video, related) = YouTubeSource().video(id)
+    val id = ProfileFile.parse(entry).videos.singleOrNull() ?: throw UsageError("Not a file, video URL or id: $arg")
+    val (video, related) = when (val outcome = fetcher.fetch(id)) {
+        is FetchOutcome.Cached -> outcome.details.also { println("(from cache)") }
+        is FetchOutcome.Fetched -> outcome.details
+        is FetchOutcome.Unavailable -> throw SourceException.NotAvailable("$id is not available: ${outcome.reason}")
+        is FetchOutcome.Failed -> throw outcome.error
+    }
 
     println("${video.id}  ${video.title}")
     println("Channel:      ${video.channelName ?: "?"} (${video.channel ?: "no id"})")
@@ -126,6 +145,38 @@ private fun fetch(args: Args) {
     println("Description:  ${video.description.length} chars: ${video.description.replace(Regex("\\s+"), " ").take(160)}")
     println("\nRelated videos: ${related.size}")
     related.take(10).forEach(::printStub)
+}
+
+private fun fetchProfile(file: File, fetcher: MetadataFetcher) {
+    val parsed = ProfileFile.parse(file.readText())
+    if (parsed.invalid.isNotEmpty()) throw UsageError("${file.path} has unreadable lines; run 'forage profile ${file.path}'")
+    val total = parsed.videos.size
+    var done = 0
+    val summary = fetcher.fetchAll(parsed.videos) { id, outcome ->
+        done++
+        val text = when (outcome) {
+            is FetchOutcome.Cached -> return@fetchAll
+            is FetchOutcome.Fetched -> "ok       ${outcome.details.metadata.title}"
+            is FetchOutcome.Unavailable -> "gone     ${outcome.reason}"
+            is FetchOutcome.Failed -> "FAILED   ${outcome.error.message}"
+        }
+        println("[%d/%d] %s  %s".format(done, total, id, text))
+    }
+    println(
+        "\nFetched ${summary.fetched}, already cached ${summary.cached}, " +
+            "gone ${summary.unavailable}, failed ${summary.failed}, not attempted ${summary.notAttempted}"
+    )
+    if (summary.stoppedEarly) {
+        System.err.println("Stopped early: YouTube kept refusing requests. Run the same command again later to continue.")
+        exitProcess(3)
+    }
+    if (summary.failed > 0) exitProcess(1)
+}
+
+private fun openDatabase(file: File): ForageDatabase {
+    file.absoluteFile.parentFile.mkdirs()
+    // The driver creates the schema on first use and migrates it on later versions.
+    return ForageDatabase(JdbcSqliteDriver("jdbc:sqlite:${file.path}", Properties(), ForageDatabase.Schema))
 }
 
 private fun search(args: Args) {

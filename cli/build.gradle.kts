@@ -10,6 +10,7 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(project(":source-youtube"))
+    implementation(libs.sqldelight.sqlite.driver)
 }
 
 application {
