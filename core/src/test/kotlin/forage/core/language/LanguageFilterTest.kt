@@ -28,6 +28,9 @@ class LanguageFilterTest {
         assertEquals("hr", filter.foreignLanguage("hr: podvodni dron istraživao je Titanic"))
         assertNull(filter.foreignLanguage("hr?: podvodni dron istraživao je Titanic"))
         assertNull(filter.foreignLanguage("hr: Sparxie Trailer"))
+        // No spaces, but plenty of text to judge.
+        assertEquals("zh", filter.foreignLanguage("zh:習近平秒變媽寶男找百歲老娘防政變"))
+        assertNull(filter.foreignLanguage("zh:東京"))
         assertNull(filter.foreignLanguage("names and numbers only 2026"))
     }
 

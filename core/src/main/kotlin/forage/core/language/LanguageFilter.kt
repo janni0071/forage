@@ -43,10 +43,26 @@ class LanguageFilter(
     /** The language [title] was rejected for, or null if the candidate may stay. */
     fun foreignLanguage(title: String): String? {
         // With no known profile language there is nothing to compare against.
-        if (allowed.isEmpty() || title.split(Regex("\\s+")).count { w -> w.any(Char::isLetter) } < minWords) return null
+        if (allowed.isEmpty() || wordCount(title) < minWords) return null
         val scores = detector.scores(title)
         val best = scores.keys.firstOrNull() ?: return null
         val own = allowed.maxOf { scores[it] ?: 0f }
         return best.takeIf { it !in allowed && own <= maxOwnScore }
+    }
+
+    /** Words separated by spaces; Chinese, Japanese and Thai write without them, so there two characters count as a word. */
+    private fun wordCount(text: String): Int {
+        val unspaced = text.count { Character.UnicodeScript.of(it.code) in UNSPACED_SCRIPTS }
+        val spaced = text.split(Regex("\\s+")).count { word ->
+            word.any { it.isLetter() && Character.UnicodeScript.of(it.code) !in UNSPACED_SCRIPTS }
+        }
+        return spaced + unspaced / 2
+    }
+
+    private companion object {
+        val UNSPACED_SCRIPTS = setOf(
+            Character.UnicodeScript.HAN, Character.UnicodeScript.HIRAGANA,
+            Character.UnicodeScript.KATAKANA, Character.UnicodeScript.THAI,
+        )
     }
 }
