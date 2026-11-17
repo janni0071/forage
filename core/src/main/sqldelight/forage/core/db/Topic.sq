@@ -21,3 +21,6 @@ UPDATE topic_preference SET label = ?, members = ?, updated_at = ? WHERE id = ?;
 
 deleteTopicPreference:
 DELETE FROM topic_preference WHERE id = ?;
+
+deleteTopicPreferencesOfProfile:
+DELETE FROM topic_preference WHERE profile_id = ?;

@@ -167,3 +167,10 @@ INSERT INTO pick VALUES ?;
 
 selectPicks:
 SELECT * FROM pick WHERE profile_id = ? ORDER BY position;
+
+-- Deleting a profile removes only its own decisions and picks; the library stays.
+deleteProfileVideos:
+DELETE FROM profile_video WHERE profile_id = ?;
+
+deleteProfile:
+DELETE FROM profile WHERE id = ?;

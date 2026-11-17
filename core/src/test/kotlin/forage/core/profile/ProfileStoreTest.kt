@@ -65,3 +65,28 @@ class ProfileStoreTest {
         assertEquals(listOf(pick(1, "c")), store.picks(main))
     }
 }
+
+class ProfileDeleteTest {
+    private fun id(s: String) = PlatformId.youtube(s)
+
+    @Test
+    fun `deleting a profile removes only its own data`() {
+        val db = memoryDatabase()
+        val store = ProfileStore(db)
+        val main = store.profile()
+        val evening = store.profile("Evening")
+        store.mark(main, listOf(id("a")), VideoState.INCLUDED)
+        store.mark(evening, listOf(id("b")), VideoState.INCLUDED)
+        store.savePicks(evening, listOf(StoredPick(1, id("p"), "P", null, null, 0.5f, "r", "f", false)))
+        LibraryStore(db).saveForLater(id("q"))
+
+        store.delete(evening)
+        assertEquals(listOf(main), store.profiles())
+        assertEquals(null, store.find("Evening"))
+        assertEquals(listOf(id("a")), store.entries(main).map { it.video })
+        assertEquals(emptyList(), store.picks(evening))
+        assertEquals(listOf(id("q")), LibraryStore(db).watchLater())
+        // The name can be used again, for a fresh profile.
+        assertEquals(emptyList(), store.entries(store.profile("Evening")))
+    }
+}

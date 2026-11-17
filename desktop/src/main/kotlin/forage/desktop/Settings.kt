@@ -29,6 +29,11 @@ class Settings(private val file: File) {
         get() = properties.getProperty("library.grid", "false").toBoolean()
         set(value) = set("library.grid", value.toString())
 
+    /** The profile open when the app last closed. */
+    var lastProfile: String?
+        get() = properties.getProperty("profile")
+        set(value) = if (value == null) Unit.also { properties.remove("profile") } else set("profile", value)
+
     var theme: Theme
         get() = properties.getProperty("theme")?.let { runCatching { Theme.valueOf(it) }.getOrNull() } ?: Theme.SYSTEM
         set(value) = set("theme", value.name)

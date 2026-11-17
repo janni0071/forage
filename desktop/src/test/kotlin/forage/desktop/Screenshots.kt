@@ -37,9 +37,9 @@ fun main(args: Array<String>) {
         val scene = ImageComposeScene(width = 2560, height = 1640, density = Density(2f)) {
             ForageTheme(dark = dark) { App(model, onImport = {}) }
         }
-        // A few frames so layout and lazy lists settle.
-        repeat(3) { scene.render(it * 16_000_000L) }
-        val png = scene.render(64_000_000L).encodeToData(EncodedImageFormat.PNG)!!.bytes
+        // Frames over about a second, so layout settles and menus and dialogs finish fading in.
+        repeat(12) { scene.render(it * 100_000_000L) }
+        val png = scene.render(1_200_000_000L).encodeToData(EncodedImageFormat.PNG)!!.bytes
         File(outDir, "$name.png").writeBytes(png)
         scene.close()
         println("wrote $name.png")
@@ -89,7 +89,20 @@ fun main(args: Array<String>) {
         visibleRows.drop(2).take(2).forEach { toggle(it.id) }
         runBlocking { visibleRows.take(24).forEach { thumbnails.load(it.id) } }
     }
+    shot("9-profile-menu") {
+        message = null
+        screen = Screen.DISCOVER
+        if (profileList.none { it.first.name == "Learning" }) profiles.profile("Learning")
+        runBlocking { reload() }
+        profileMenuOpen = true
+    }
+    shot("10-new-profile") {
+        message = null
+        profileMenuOpen = false
+        profileDialog = ProfileDialog.NEW
+    }
     shot("3-library-history") {
+        profileDialog = null
         showLibraryAsGrid(false)
         clearSelection()
         screen = Screen.LIBRARY

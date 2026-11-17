@@ -37,7 +37,7 @@ data class StoredPick(
 )
 
 /** The taste profiles of a vault. Profiles share the vault's library but never each other's decisions. */
-class ProfileStore(db: ForageDatabase, private val clock: () -> Instant = Instant::now) {
+class ProfileStore(private val db: ForageDatabase, private val clock: () -> Instant = Instant::now) {
     private val queries = db.libraryQueries
 
     /** The profile called [name], created on first use. */
@@ -48,6 +48,22 @@ class ProfileStore(db: ForageDatabase, private val clock: () -> Instant = Instan
     }
 
     fun profiles(): List<ProfileRef> = queries.selectProfiles().executeAsList().map { ProfileRef(it.id, it.name) }
+
+    /** The profile called [name] if it exists; never creates one. */
+    fun find(name: String): ProfileRef? = queries.selectProfileByName(name).executeAsOneOrNull()?.let { ProfileRef(it.id, it.name) }
+
+    /**
+     * Deletes a profile with its decisions, picks and topic preferences. The vault's library,
+     * watch history and watch-later queue are shared and stay.
+     */
+    fun delete(profile: ProfileRef) {
+        queries.transaction {
+            queries.deleteProfileVideos(profile.id)
+            queries.deletePicks(profile.id)
+            db.topicQueries.deleteTopicPreferencesOfProfile(profile.id)
+            queries.deleteProfile(profile.id)
+        }
+    }
 
     /** Sets the state of [videos] in [profile]; null clears the decision. */
     fun mark(profile: ProfileRef, videos: Collection<PlatformId>, state: VideoState?, weight: Float = 1f, source: String = MANUAL) {

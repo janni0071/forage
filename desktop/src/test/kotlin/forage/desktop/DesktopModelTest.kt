@@ -149,6 +149,37 @@ class DesktopModelTest {
     }
 
     @Test
+    fun `switching profiles shows each profile's own decisions and remembers the choice`() {
+        model.selectVisible()
+        model.markSelected(VideoState.INCLUDED)
+        assertEquals("Default", model.profile.name)
+        assertTrue("already" in model.createProfile("Default")!!)
+        assertTrue(model.createProfile("  ")!!.isNotEmpty())
+
+        assertEquals(null, model.createProfile("Evening"))
+        assertEquals("Evening", model.profile.name)
+        assertEquals(0, model.profileSize)
+        assertTrue(model.rows.all { it.state == null })
+        assertEquals(listOf("Default" to 2, "Evening" to 0), model.profileList.map { it.first.name to it.second })
+        assertEquals("Evening", model.settings.lastProfile)
+
+        model.switchProfile(model.profileList.first().first)
+        assertEquals(2, model.profileSize)
+    }
+
+    @Test
+    fun `deleting a profile switches to another and keeps the library`() {
+        model.createProfile("Evening")
+        model.deleteProfile()
+        assertEquals("Default", model.profile.name)
+        assertEquals(listOf("Default"), model.profileList.map { it.first.name })
+        assertEquals(2, model.rows.size)
+        // The last profile can't be deleted.
+        model.deleteProfile()
+        assertEquals(listOf("Default"), model.profileList.map { it.first.name })
+    }
+
+    @Test
     fun `discover on an empty profile explains what to do`() {
         model.discover()
         assertTrue("no videos yet" in model.message!!, model.message)

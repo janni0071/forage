@@ -105,17 +105,8 @@ private fun Sidebar(model: DesktopModel, onImport: () -> Unit) {
         Spacer(Modifier.weight(1f))
         NavItem(Icons.Outlined.FileUpload, "Import Takeout", selected = false, enabled = model.job == null, onClick = onImport)
         SettingsItem(model)
-        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = c.outlineVariant)
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp)) {
-            Box(Modifier.size(36.dp).clip(CircleShape).background(c.primaryContainer), contentAlignment = Alignment.Center) {
-                Text(model.profile.name.take(1).uppercase(), style = MaterialTheme.typography.titleMedium, color = c.onPrimaryContainer)
-            }
-            Spacer(Modifier.width(12.dp))
-            Column {
-                Text(model.profile.name, style = MaterialTheme.typography.titleSmall)
-                Text("${model.profileSize} videos in profile", style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant)
-            }
-        }
+        HorizontalDivider(Modifier.padding(top = 14.dp, bottom = 8.dp), color = c.outlineVariant)
+        ProfileSwitcher(model)
     }
 }
 

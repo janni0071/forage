@@ -16,6 +16,7 @@ import forage.core.metadata.FetchOutcome
 import forage.core.metadata.MetadataCache
 import forage.core.metadata.MetadataFetcher
 import forage.core.metadata.SearchCache
+import forage.core.profile.ProfileRef
 import forage.core.profile.ProfileStore
 import forage.core.profile.StoredPick
 import forage.core.profile.VideoState
@@ -41,6 +42,8 @@ import java.time.Instant
 import java.util.Properties
 
 enum class Screen { LIBRARY, TOPICS, DISCOVER, LATER }
+
+enum class ProfileDialog { NEW, DELETE, PRIVATE }
 
 sealed interface LibrarySource {
     val label: String
@@ -108,8 +111,20 @@ class DesktopModel(
     val cache = MetadataCache(db)
     val library = LibraryStore(db)
     val profiles = ProfileStore(db)
-    val profile = profiles.profile()
     val settings = Settings(File(dataDir, "settings.properties"))
+
+    /** The profile everything on screen belongs to. Profiles share the vault's library but nothing else. */
+    var profile by mutableStateOf(
+        settings.lastProfile?.let(profiles::find) ?: profiles.profiles().firstOrNull() ?: profiles.profile()
+    )
+        private set
+
+    /** Every profile in this vault with the number of videos in it, for the switcher. */
+    var profileList by mutableStateOf<List<Pair<ProfileRef, Int>>>(emptyList())
+        private set
+
+    var profileMenuOpen by mutableStateOf(false)
+    var profileDialog by mutableStateOf<ProfileDialog?>(null)
 
     private val source by lazy(sourceFactory)
     val thumbnails = Thumbnails(File(dataDir, "thumbnails")) { id, large -> source.thumbnailUrl(id, large) }
@@ -237,6 +252,7 @@ class DesktopModel(
             .sortedByDescending { it.size }
         sources = listOf(LibrarySource.History) + playlists + LibrarySource.InProfile
         if (currentSource !in sources) currentSource = sources.first()
+        loadProfiles()
         loadRows()
         loadPicks()
         loadLater()
@@ -318,6 +334,57 @@ class DesktopModel(
         reload()
         "Imported ${summary.watchEvents} watch events, ${summary.playlists.size} playlists and " +
             "${summary.subscriptions} subscriptions. Nothing was added to the profile."
+    }
+
+    // Profiles
+
+    fun switchProfile(to: ProfileRef) {
+        profileMenuOpen = false
+        if (to == profile) return
+        profile = to
+        settings.lastProfile = to.name
+        // Everything shown belongs to the old profile until reloaded.
+        topics = emptyList()
+        topicsCurrent = false
+        discoverNote = null
+        picks = emptyList()
+        selection = emptySet()
+        launchQuiet {
+            loadRows()
+            loadPicks()
+            loadProfiles()
+        }
+        message = "Switched to \"${to.name}\""
+    }
+
+    /** Creates a profile and switches to it. Returns why it couldn't, or null. */
+    fun createProfile(name: String): String? {
+        val clean = name.trim()
+        if (clean.isEmpty()) return "Give the profile a name"
+        if (clean.length > 40) return "Keep it under 40 characters"
+        if (profiles.find(clean) != null) return "There's already a profile called \"$clean\""
+        val created = profiles.profile(clean)
+        profileDialog = null
+        switchProfile(created)
+        message = "Created \"$clean\". Add videos to it in the library."
+        return null
+    }
+
+    /** Deletes the open profile and switches to another. The last profile can't be deleted. */
+    fun deleteProfile() {
+        val doomed = profile
+        val next = profiles.profiles().firstOrNull { it != doomed } ?: return
+        profileDialog = null
+        switchProfile(next)
+        launchQuiet {
+            profiles.delete(doomed)
+            loadProfiles()
+        }
+        message = "Deleted \"${doomed.name}\". The library and watch later queue are unchanged."
+    }
+
+    private fun loadProfiles() {
+        profileList = profiles.profiles().map { it to profiles.entries(it, VideoState.INCLUDED).size }
     }
 
     // Topics
