@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import forage.desktop.DesktopModel
 import forage.desktop.Player
 import forage.desktop.Screen
+import forage.desktop.Theme
 
 @Composable
 fun App(model: DesktopModel, onImport: () -> Unit) {
@@ -111,13 +112,28 @@ private fun SettingsMenu(model: DesktopModel) {
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
             )
             for (p in Player.entries) {
+                val problem = p.problem
                 DropdownMenuItem(
-                    text = { Text((if (p == player) "● " else "○ ") + if (p.available) p.label else "${p.label} (not installed)") },
-                    enabled = p.available,
+                    text = { Text((if (p == player) "● " else "○ ") + if (problem == null) p.label else "${p.label} ($problem)") },
+                    // A player that needs yt-dlp stays selectable: opening it explains what to install.
+                    enabled = problem != "not installed",
                     onClick = {
                         model.settings.player = p
                         player = p
                     },
+                )
+            }
+            HorizontalDivider()
+            Text(
+                "Appearance",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+            for (t in Theme.entries) {
+                DropdownMenuItem(
+                    text = { Text((if (t == model.theme) "● " else "○ ") + t.label) },
+                    onClick = { model.changeTheme(t) },
                 )
             }
             HorizontalDivider()

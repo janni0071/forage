@@ -15,6 +15,7 @@ import forage.core.library.WatchHistory
 import forage.core.metadata.FetchOutcome
 import forage.core.metadata.MetadataCache
 import forage.core.metadata.MetadataFetcher
+import forage.core.metadata.SearchCache
 import forage.core.profile.ProfileStore
 import forage.core.profile.StoredPick
 import forage.core.profile.VideoState
@@ -98,13 +99,51 @@ class DesktopModel(
 
     private val source by lazy(sourceFactory)
     val thumbnails = Thumbnails(File(dataDir, "thumbnails")) { source.thumbnailUrl(it) }
+    private val searchCache = SearchCache(db)
+    private val modelLock = Any()
     private var embedder: OnnxEmbedder? = null
     private var detector: LanguageDetector? = null
+
+    /** The embedding model, loaded (and downloaded on first use) when first needed. */
+    private fun embedder(update: (String) -> Unit = {}): OnnxEmbedder = synchronized(modelLock) {
+        embedder ?: run {
+            val spec = ModelSpec.MULTILINGUAL_MINILM
+            val files = ModelFiles.ensure(spec, File(dataDir, "models/minilm").toPath()) { update("Downloading $it (about 470 MB)") }
+            OnnxEmbedder(spec, files).also { embedder = it }
+        }
+    }
+
+    private fun detector(): LanguageDetector = synchronized(modelLock) {
+        detector ?: LinguaDetector().also { detector = it }
+    }
+
+    /**
+     * Loads the models in the background so the first Discover doesn't wait for them. Only when
+     * the model is already downloaded: a first-time download stays tied to an explicit Discover.
+     */
+    fun warmUp() {
+        if (!File(dataDir, "models/minilm/model.onnx").isFile) return
+        launchQuiet {
+            inBackground("Loading the recommendation models") {
+                embedder()
+                // One detection loads the language models, which is the slow part.
+                detector().scores("warming up the language models")
+            }
+        }
+    }
 
     var screen by mutableStateOf(Screen.LIBRARY)
 
     var showThumbnails by mutableStateOf(settings.showThumbnails)
         private set
+
+    var theme by mutableStateOf(settings.theme)
+        private set
+
+    fun changeTheme(value: Theme) {
+        settings.theme = value
+        theme = value
+    }
 
     fun setThumbnails(on: Boolean) {
         settings.showThumbnails = on
@@ -257,23 +296,20 @@ class DesktopModel(
     }
 
     private fun runDiscover() = runJob("Finding recommendations") { update ->
-        update("Loading the language model")
-        val embedder = embedder ?: run {
-            val spec = ModelSpec.MULTILINGUAL_MINILM
-            val files = ModelFiles.ensure(spec, File(dataDir, "models/minilm").toPath()) { update("Downloading $it (about 470 MB)") }
-            OnnxEmbedder(spec, files).also { embedder = it }
-        }
-        val detector = detector ?: LinguaDetector().also { detector = it }
-        update("Collecting and ranking candidates")
+        update("Loading the models")
+        val embedder = embedder(update)
+        val detector = detector()
+        update(if (settings.searchYouTube) "Collecting candidates and searching YouTube" else "Collecting and ranking candidates")
         val config = RankingConfig(showShorts = settings.showShorts)
         try {
             val result = Discover(
                 cache, library, profiles, EmbeddingStore(db, embedder), detector,
-                source.takeIf { settings.searchYouTube }, config,
+                source.takeIf { settings.searchYouTube }, config, searchCache,
             ).run(profile)
+            val seconds = result.timings.values.sum() / 1000.0
             topics = result.clusters
             discoverNote = buildList {
-                add("${result.picks.size} picks from ${result.candidates} candidates")
+                add("${result.picks.size} picks from ${result.candidates} candidates in %.0f s".format(seconds))
                 if (result.foreignLanguage > 0) add("${result.foreignLanguage} dropped for their language")
                 if (result.withoutMetadata > 0) add("${result.withoutMetadata} profile videos still need details")
                 if (result.searchFailures.isNotEmpty()) add("${result.searchFailures.size} searches failed")
@@ -316,10 +352,20 @@ class DesktopModel(
     }
 
     fun open(id: PlatformId) {
-        try {
-            Player.open(settings.player, id)
+        val player = settings.player
+        val log = File(dataDir, "logs/player.log")
+        val process = try {
+            Player.open(player, id, log)
         } catch (e: Exception) {
             message = e.message
+            return
+        } ?: return
+        // A player that can't play the link usually quits within seconds; say why instead of doing nothing.
+        scope.launch(io) {
+            if (process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS) && process.exitValue() != 0) {
+                val last = runCatching { log.readLines().map { it.trim() }.lastOrNull { it.isNotEmpty() } }.getOrNull()
+                message = "${player.label} couldn't play the video" + (last?.let { ": $it" } ?: "") + " (full output: ${log.path})"
+            }
         }
     }
 
@@ -429,7 +475,7 @@ class DesktopModel(
     }
 
     fun close() {
-        embedder?.close()
+        synchronized(modelLock) { embedder?.close() }
     }
 
     companion object {

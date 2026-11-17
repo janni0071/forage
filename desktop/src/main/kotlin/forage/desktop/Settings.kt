@@ -9,7 +9,7 @@ class Settings(private val file: File) {
 
     var player: Player
         get() = properties.getProperty("player")?.let { runCatching { Player.valueOf(it) }.getOrNull() }
-            ?: Player.entries.firstOrNull { it != Player.BROWSER && it.available } ?: Player.BROWSER
+            ?: Player.entries.firstOrNull { it != Player.BROWSER && it.problem == null } ?: Player.BROWSER
         set(value) = set("player", value.name)
 
     var searchYouTube: Boolean
@@ -24,6 +24,10 @@ class Settings(private val file: File) {
     var showThumbnails: Boolean
         get() = properties.getProperty("thumbnails", "true").toBoolean()
         set(value) = set("thumbnails", value.toString())
+
+    var theme: Theme
+        get() = properties.getProperty("theme")?.let { runCatching { Theme.valueOf(it) }.getOrNull() } ?: Theme.SYSTEM
+        set(value) = set("theme", value.name)
 
     private fun set(key: String, value: String) {
         properties.setProperty(key, value)

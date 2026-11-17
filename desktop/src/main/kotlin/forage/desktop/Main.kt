@@ -31,13 +31,23 @@ fun main(args: Array<String>) {
     application {
         val scope = rememberCoroutineScope()
         val model = remember { DesktopModel(dir, scope) }
-        LaunchedEffect(model) { model.reload() }
+        LaunchedEffect(model) {
+            model.reload()
+            model.warmUp()
+        }
         Window(
             onCloseRequest = { model.close(); exitApplication() },
             title = "Forage",
             state = rememberWindowState(width = 1280.dp, height = 860.dp),
         ) {
-            ForageTheme(dark = isSystemInDarkTheme()) {
+            val systemDark = isSystemInDarkTheme()
+            val linuxDark = remember { if ("linux" in System.getProperty("os.name").lowercase()) Theme.linuxPrefersDark() else null }
+            val dark = when (model.theme) {
+                Theme.LIGHT -> false
+                Theme.DARK -> true
+                Theme.SYSTEM -> linuxDark ?: systemDark
+            }
+            ForageTheme(dark = dark) {
                 App(model, onImport = {
                     val chooser = JFileChooser().apply {
                         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY

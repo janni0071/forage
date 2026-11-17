@@ -13,6 +13,8 @@ import java.time.Duration
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
+import forage.core.metadata.SearchCache
 
 class CandidateGeneratorTest {
     private fun id(s: String) = PlatformId.youtube(s)
@@ -59,8 +61,34 @@ class CandidateGeneratorTest {
         val hit = generator.generate(clusters, emptySet()).single { it.stub.id.id == "hit" }
         assertIs<CandidateSource.Search>(hit.sources.single())
         assertEquals(listOf("sourdough bread", "sourdough bread"), source.queries)
-        assertEquals(1, sleeps.size)
+        assertEquals(listOf(Duration.ofSeconds(5)), sleeps)
         assertEquals(emptyList(), generator.searchFailures)
+    }
+
+    @Test
+    fun `searches run once a day and later batches reuse the cached results`() {
+        val searchCache = SearchCache(memoryDatabase())
+        val source = SearchOnly(failures = 0)
+        repeat(2) { CandidateGenerator(cache, source, searchCache = searchCache, sleep = {}).generate(clusters, emptySet()) }
+        assertEquals(listOf("sourdough bread"), source.queries)
+        val hit = CandidateGenerator(cache, source, searchCache = searchCache, sleep = {}).generate(clusters, emptySet())
+            .single { it.stub.id.id == "hit" }
+        assertEquals("Hit", hit.stub.title)
+    }
+
+    @Test
+    fun `many searches run in parallel and merge in topic order`() {
+        val topics = (0 until 6).map { i -> clusters[0].copy(index = i, keywords = listOf("topic$i")) }
+        val source = object : ExtractorSource by SearchOnly(0) {
+            override fun search(query: String): List<VideoStub> {
+                Thread.sleep(if (query == "topic0") 300 else 10)
+                return listOf(VideoStub(PlatformId.youtube("v-$query"), query, null, null, null, false))
+            }
+        }
+        val started = System.nanoTime()
+        val found = CandidateGenerator(cache, source, sleep = {}).generate(topics, setOf(id("rel1"), id("rel2"), id("seen")))
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 600, "searches should overlap")
+        assertEquals((0 until 6).map { "topic$it" }, found.map { it.stub.title })
     }
 
     @Test

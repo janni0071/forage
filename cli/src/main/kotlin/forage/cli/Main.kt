@@ -14,6 +14,7 @@ import forage.core.metadata.FetchOutcome
 import forage.core.metadata.FetchPolicy
 import forage.core.metadata.MetadataCache
 import forage.core.metadata.MetadataFetcher
+import forage.core.metadata.SearchCache
 import forage.core.profile.ProfileFile
 import forage.core.profile.ProfileRef
 import forage.core.profile.ProfileStore
@@ -321,9 +322,11 @@ private fun discover(args: Args) {
             detector = LinguaDetector(),
             source = YouTubeSource().takeUnless { args.flag("--no-search") },
             config = config,
+            searchCache = SearchCache(vault.db),
         ).run(vault.profile)
     }
 
+    System.err.println("Timings (ms): " + result.timings.entries.joinToString { "${it.key} ${it.value}" })
     if (result.withoutMetadata > 0) System.err.println("${result.withoutMetadata} profile videos have no metadata yet and were left out; run 'forage fetch'")
     result.searchFailures.forEach { System.err.println("Search skipped: $it") }
 

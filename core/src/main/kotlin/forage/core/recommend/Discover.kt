@@ -6,6 +6,7 @@ import forage.core.language.LanguageDetector
 import forage.core.language.LanguageFilter
 import forage.core.library.LibraryStore
 import forage.core.metadata.MetadataCache
+import forage.core.metadata.SearchCache
 import forage.core.profile.ProfileRef
 import forage.core.profile.ProfileStore
 import forage.core.profile.StoredPick
@@ -27,6 +28,8 @@ data class DiscoverResult(
     /** Profile and not-for-me videos left out because their metadata hasn't been fetched yet. */
     val withoutMetadata: Int,
     val searchFailures: List<String>,
+    /** Milliseconds spent in each stage, in order, to see what makes a visit slow. */
+    val timings: Map<String, Long> = emptyMap(),
 )
 
 class EmptyProfileException(message: String) : Exception(message)
@@ -46,10 +49,18 @@ class Discover(
     /** Used for the per-topic searches; null means related videos only. */
     private val source: ExtractorSource? = null,
     private val config: RankingConfig = RankingConfig(),
+    private val searchCache: SearchCache? = null,
     private val seed: Long = 1,
     private val now: () -> Instant = Instant::now,
 ) {
     fun run(profile: ProfileRef): DiscoverResult {
+        val timings = LinkedHashMap<String, Long>()
+        var mark = System.nanoTime()
+        fun lap(stage: String) {
+            val now = System.nanoTime()
+            timings[stage] = (now - mark) / 1_000_000
+            mark = now
+        }
         val entries = profiles.entries(profile)
         val included = entries.filter { it.state == VideoState.INCLUDED }
         val rejected = entries.filter { it.state == VideoState.NEGATIVE }
@@ -78,18 +89,23 @@ class Discover(
             channelNames = known.mapNotNull { it.second.channelName },
         )
 
+        lap("profile")
+
         // Never suggest what is watched, saved, or already decided on in this profile.
         val exclude = library.knownVideoIds() + entries.map { it.video }
-        val generator = CandidateGenerator(cache, source, Random(seed))
+        val generator = CandidateGenerator(cache, source, Random(seed), searchCache)
         val stubs = generator.generate(clusters, exclude)
+        lap("candidates")
 
         val languages = detector?.let { d -> LanguageFilter(d, known.map { (_, v) -> "${v.title}\n${v.description.take(300)}" }) }
         val kept = if (languages == null) stubs else stubs.filter { languages.foreignLanguage(it.stub.title) == null }
+        lap("language")
 
         // Candidates are mostly known from list results only; use the full text for those that happen to be cached.
         val candidateVectors = embeddings.embed(
             kept.associate { c -> c.stub.id to (cache.video(c.stub.id)?.metadata?.let(EmbeddingText::of) ?: EmbeddingText.of(c.stub)) }
         )
+        lap("embedding")
         val candidates = kept.map { c ->
             val full = cache.video(c.stub.id)?.metadata
             Candidate(
@@ -122,6 +138,7 @@ class Discover(
             profileLanguages = languages?.profileLanguages.orEmpty(),
             withoutMetadata = (included.size - known.size) + (rejected.size - knownRejected.size),
             searchFailures = generator.searchFailures,
+            timings = timings.also { lap("ranking") },
         )
     }
 

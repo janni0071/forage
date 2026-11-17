@@ -20,7 +20,7 @@ fun main(args: Array<String>) {
     val model = DesktopModel(dataDir, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined)
     runBlocking { model.reload() }
 
-    fun shot(name: String, setup: DesktopModel.() -> Unit) {
+    fun shot(name: String, dark: Boolean = false, setup: DesktopModel.() -> Unit) {
         model.setup()
         // Load the images up front; the headless renderer doesn't wait for them.
         val onScreen = when (model.screen) {
@@ -30,7 +30,7 @@ fun main(args: Array<String>) {
         }
         runBlocking { onScreen.forEach { model.thumbnails.load(it) } }
         val scene = ImageComposeScene(width = 2560, height = 1640, density = Density(2f)) {
-            ForageTheme { App(model, onImport = {}) }
+            ForageTheme(dark = dark) { App(model, onImport = {}) }
         }
         // A few frames so layout and lazy lists settle.
         repeat(3) { scene.render(it * 16_000_000L) }
@@ -56,6 +56,13 @@ fun main(args: Array<String>) {
         }
     }
     shot("4-later") { screen = Screen.LATER }
+    shot("5-discover-dark", dark = true) { screen = Screen.DISCOVER }
+    shot("6-library-dark", dark = true) {
+        screen = Screen.LIBRARY
+        selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })
+        stateFilter = StateFilter.INCLUDED
+        listOf(1, 3).mapNotNull { visibleRows.getOrNull(it)?.id }.forEach(::toggle)
+    }
     shot("3-library-history") {
         screen = Screen.LIBRARY
         stateFilter = StateFilter.ALL

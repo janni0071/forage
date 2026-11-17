@@ -70,3 +70,18 @@ SELECT * FROM video;
 
 selectVideoIds:
 SELECT id FROM video ORDER BY id;
+
+-- Search results per query (SPEC: candidates are cached for a day).
+CREATE TABLE search_cache (
+    platform TEXT NOT NULL,
+    query TEXT NOT NULL,
+    results TEXT NOT NULL,           -- JSON list of video stubs
+    fetched_at INTEGER NOT NULL,
+    PRIMARY KEY (platform, query)
+);
+
+selectSearch:
+SELECT results, fetched_at FROM search_cache WHERE platform = ? AND query = ?;
+
+upsertSearch:
+INSERT OR REPLACE INTO search_cache VALUES (?, ?, ?, ?);
