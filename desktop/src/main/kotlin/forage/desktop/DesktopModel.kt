@@ -32,6 +32,7 @@ import forage.embedding.onnx.ModelSpec
 import forage.embedding.onnx.OnnxEmbedder
 import forage.language.lingua.LinguaDetector
 import forage.source.youtube.YouTubeSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -605,7 +606,10 @@ class DesktopModel(
         scope.launch {
             try {
                 withContext(io) { block() }
-            } catch (e: Exception) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // Libraries with native code fail with Errors too; one failed task must not take the app down.
                 message = "Something went wrong: ${e.message ?: e}"
             }
         }
@@ -641,7 +645,9 @@ class DesktopModel(
         scope.launch {
             message = try {
                 withContext(io) { block(update) }
-            } catch (e: Exception) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
                 "$label failed: ${e.message ?: e}"
             } finally {
                 job = null

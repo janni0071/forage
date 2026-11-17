@@ -180,6 +180,19 @@ class DesktopModelTest {
     }
 
     @Test
+    fun `a background task failing with an Error shows a message instead of crashing`() {
+        val broken = object : ExtractorSource by offline {
+            override fun video(id: PlatformId): VideoDetails = throw AssertionError("native library missing")
+        }
+        val other = DesktopModel(dir.resolve("other"), CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined) { broken }
+        other.profiles.savePicks(other.profile, listOf(StoredPick(1, id("p"), "A pick", null, null, 0.5f, "r", "f", false)))
+        runBlocking { other.reload() }
+        other.feedback(other.picks.single(), Feedback.MORE)
+        assertTrue("native library missing" in other.message.orEmpty(), other.message)
+        assertEquals(setOf(Feedback.MORE), other.picks.single().feedback)
+    }
+
+    @Test
     fun `discover on an empty profile explains what to do`() {
         model.discover()
         assertTrue("no videos yet" in model.message!!, model.message)

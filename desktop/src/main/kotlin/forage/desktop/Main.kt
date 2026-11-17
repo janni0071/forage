@@ -4,6 +4,9 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.res.loadImageBitmap
+import androidx.compose.ui.res.useResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -38,6 +41,7 @@ fun main(args: Array<String>) {
         Window(
             onCloseRequest = { model.close(); exitApplication() },
             title = "Forage",
+            icon = remember { BitmapPainter(useResource("forage.png", ::loadImageBitmap)) },
             state = rememberWindowState(width = 1280.dp, height = 860.dp),
         ) {
             val systemDark = isSystemInDarkTheme()
