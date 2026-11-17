@@ -76,6 +76,18 @@ data class LibraryRow(
 
 enum class Feedback { MORE, NOT_FOR_ME, SAVED }
 
+/** A video in the watch-later queue, with what the queue shows about it. */
+data class LaterItem(
+    val id: PlatformId,
+    val title: String?,
+    val channelName: String?,
+    val durationSeconds: Long?,
+    val uploadedAt: Instant?,
+    val savedAt: Instant,
+)
+
+enum class LaterSort(val label: String) { RECENT("Recently saved"), OLDEST("Oldest first"), SHORTEST("Shortest first") }
+
 data class PickView(val pick: StoredPick, val feedback: Set<Feedback>)
 
 /** A long-running task. [total] is null when progress can't be counted. */
@@ -179,8 +191,17 @@ class DesktopModel(
         private set
 
     // Watch later
-    var later by mutableStateOf<List<LibraryRow>>(emptyList())
+    var later by mutableStateOf<List<LaterItem>>(emptyList())
         private set
+    var laterSort by mutableStateOf(LaterSort.RECENT)
+
+    /** The queue in the chosen order; videos of unknown length go last when sorting by length. */
+    val sortedLater: List<LaterItem>
+        get() = when (laterSort) {
+            LaterSort.RECENT -> later.sortedByDescending { it.savedAt }
+            LaterSort.OLDEST -> later.sortedBy { it.savedAt }
+            LaterSort.SHORTEST -> later.sortedBy { it.durationSeconds ?: Long.MAX_VALUE }
+        }
 
     // Status
     var job by mutableStateOf<Job?>(null)
@@ -361,7 +382,10 @@ class DesktopModel(
 
     fun feedback(view: PickView, kind: Feedback) = launchQuiet {
         val id = view.pick.video
-        library.remember(id, view.pick.title, view.pick.channel, view.pick.channelName)
+        library.remember(
+            id, view.pick.title, view.pick.channel, view.pick.channelName,
+            durationSeconds = view.pick.durationSeconds, uploadedAt = view.pick.uploadedAt,
+        )
         val active = kind in view.feedback
         when (kind) {
             Feedback.MORE -> if (active) profiles.mark(profile, listOf(id), null) else profiles.moreLikeThis(profile, id)
@@ -387,6 +411,14 @@ class DesktopModel(
         library.removeFromWatchLater(id)
         loadLater()
         loadPicks()
+    }
+
+    /** Off the queue and into the watch history, so it isn't recommended again. */
+    fun markWatched(item: LaterItem) = launchQuiet {
+        library.markWatched(item.id)
+        loadLater()
+        loadPicks()
+        message = "Marked \"${item.title ?: item.id}\" as watched"
     }
 
     fun open(id: PlatformId) {
@@ -457,10 +489,17 @@ class DesktopModel(
 
     private fun loadLater() {
         val meta = cache.allMetadata()
-        later = library.watchLater().map { id ->
-            val m = meta[id]
-            val known = library.video(id)
-            LibraryRow(id, m?.title ?: known?.title, m?.channelName ?: known?.channelName, 0, null, m?.durationSeconds, m?.isShort ?: false, null, m != null)
+        later = library.savedForLater().map { saved ->
+            val m = meta[saved.id]
+            val known = library.video(saved.id)
+            LaterItem(
+                saved.id,
+                m?.title ?: known?.title,
+                m?.channelName ?: known?.channelName,
+                m?.durationSeconds ?: known?.durationSeconds,
+                m?.uploadedAt ?: known?.uploadedAt,
+                saved.savedAt,
+            )
         }
     }
 

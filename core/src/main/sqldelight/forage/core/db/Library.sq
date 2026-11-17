@@ -13,7 +13,9 @@ CREATE TABLE library_video (
     channel_id TEXT,
     channel_name TEXT,
     is_short INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0,
-    added_at INTEGER NOT NULL
+    added_at INTEGER NOT NULL,
+    duration_seconds INTEGER,
+    uploaded_at INTEGER
 );
 
 CREATE TABLE watch_event (
@@ -83,7 +85,9 @@ UPDATE library_video SET
     title = coalesce(:title, title),
     channel_id = coalesce(:channel_id, channel_id),
     channel_name = coalesce(:channel_name, channel_name),
-    is_short = max(is_short, :is_short)
+    is_short = max(is_short, :is_short),
+    duration_seconds = coalesce(:duration_seconds, duration_seconds),
+    uploaded_at = coalesce(:uploaded_at, uploaded_at)
 WHERE id = :id;
 
 selectLibraryVideos:
@@ -129,7 +133,7 @@ deleteWatchLater:
 DELETE FROM watch_later WHERE video_id = ?;
 
 selectWatchLater:
-SELECT video_id FROM watch_later ORDER BY added_at DESC;
+SELECT video_id, added_at FROM watch_later ORDER BY added_at DESC;
 
 -- Every video that must never be suggested again, whatever the profile.
 selectKnownVideoIds:

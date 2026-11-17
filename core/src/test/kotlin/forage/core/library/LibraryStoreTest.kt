@@ -77,3 +77,29 @@ class LibraryStoreTest {
         assertEquals(emptyList(), store.watchLater())
     }
 }
+
+class WatchLaterTest {
+    private val id = PlatformId.youtube("x")
+    private var now = Instant.parse("2026-11-17T10:00:00Z")
+    private val store = LibraryStore(memoryDatabase()) { now }
+
+    @Test
+    fun `watched videos leave the queue but stay known`() {
+        store.saveForLater(id)
+        store.markWatched(id)
+        assertEquals(emptyList(), store.watchLater())
+        assertEquals(setOf(id), store.knownVideoIds())
+        assertEquals(1, store.events().size)
+    }
+
+    @Test
+    fun `the queue knows when each video was saved and keeps details for it`() {
+        store.remember(id, "Title", durationSeconds = 754, uploadedAt = Instant.parse("2026-10-01T00:00:00Z"))
+        store.saveForLater(id)
+        assertEquals(listOf(SavedVideo(id, now)), store.savedForLater())
+        assertEquals(754L, store.video(id)!!.durationSeconds)
+        // Later calls without the details keep them.
+        store.remember(id, "Title")
+        assertEquals(754L, store.video(id)!!.durationSeconds)
+    }
+}

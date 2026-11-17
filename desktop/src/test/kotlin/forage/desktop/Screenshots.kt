@@ -26,12 +26,13 @@ fun main(args: Array<String>) {
         val onScreen = when (model.screen) {
             Screen.LIBRARY -> model.visibleRows.take(14).map { it.id }
             Screen.DISCOVER -> emptyList()
-            Screen.LATER -> model.later.map { it.id }
+            Screen.LATER -> emptyList()
             Screen.TOPICS -> model.topics.take(4).flatMap { t -> t.videos.take(6).map { it.id } }
         }
         runBlocking {
             onScreen.forEach { model.thumbnails.load(it) }
             if (model.screen == Screen.DISCOVER) model.picks.take(9).forEach { model.thumbnails.load(it.pick.video, large = true) }
+            if (model.screen == Screen.LATER) model.later.forEach { model.thumbnails.load(it.id, large = true) }
         }
         val scene = ImageComposeScene(width = 2560, height = 1640, density = Density(2f)) {
             ForageTheme(dark = dark) { App(model, onImport = {}) }
@@ -62,7 +63,11 @@ fun main(args: Array<String>) {
             feedback(picks[2], Feedback.MORE)
         }
     }
-    shot("4-later") { screen = Screen.LATER }
+    shot("4-later") {
+        // A fuller queue than the two saved so far, to show the layout.
+        picks.drop(3).take(5).forEach { feedback(it, Feedback.SAVED) }
+        screen = Screen.LATER
+    }
     shot("7-topics") {
         screen = Screen.TOPICS
         loadTopics()

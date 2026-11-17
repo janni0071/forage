@@ -1,0 +1,3 @@
+-- Version 8 keeps a video's length and upload date in the library, for the watch-later queue.
+ALTER TABLE library_video ADD COLUMN duration_seconds INTEGER;
+ALTER TABLE library_video ADD COLUMN uploaded_at INTEGER;

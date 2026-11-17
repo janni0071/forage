@@ -133,6 +133,22 @@ class DesktopModelTest {
     }
 
     @Test
+    fun `the queue sorts, keeps the pick's details and marks videos watched`() {
+        fun pick(n: Int, v: String, seconds: Long?) =
+            StoredPick(n, id(v), "Video $v", null, "Channel", 0.5f, "similar to X", "related to X", false, durationSeconds = seconds)
+        model.profiles.savePicks(model.profile, listOf(pick(1, "long", 3600), pick(2, "short", 60), pick(3, "unknown", null)))
+        runBlocking { model.reload() }
+        model.picks.forEach { model.feedback(it, Feedback.SAVED) }
+        model.laterSort = LaterSort.SHORTEST
+        assertEquals(listOf("short", "long", "unknown"), model.sortedLater.map { it.id.id })
+        assertEquals(3600L, model.later.single { it.id == id("long") }.durationSeconds)
+
+        model.markWatched(model.later.single { it.id == id("short") })
+        assertEquals(setOf(id("long"), id("unknown")), model.later.map { it.id }.toSet())
+        assertTrue(id("short") in model.library.knownVideoIds())
+    }
+
+    @Test
     fun `discover on an empty profile explains what to do`() {
         model.discover()
         assertTrue("no videos yet" in model.message!!, model.message)
