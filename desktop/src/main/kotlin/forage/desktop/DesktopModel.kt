@@ -226,7 +226,7 @@ class DesktopModel(
     var picks by mutableStateOf<List<PickView>>(emptyList())
         private set
     var topics by mutableStateOf<List<Cluster>>(emptyList())
-        private set
+        internal set
     var discoverNote by mutableStateOf<String?>(null)
         private set
     /** True once [topics] reflects the profile as it is now. */
@@ -428,6 +428,21 @@ class DesktopModel(
             topics = discoverer(embedder).topics(profile)
             topicsCurrent = true
             "Your profile has ${topics.count { !it.isVaried }} topics"
+        }
+    }
+
+    /** The topic whose name is being edited, by index. */
+    var renamingTopic by mutableStateOf<Int?>(null)
+
+    /** Names a topic, or with null or a blank name gives it back its automatic label. */
+    fun renameTopic(topic: Cluster, name: String?) {
+        renamingTopic = null
+        val clean = name?.trim()?.takeIf { it.isNotEmpty() }?.take(TopicStore.MAX_NAME)
+        if (clean == topic.customName) return
+        launchQuiet {
+            topicStore.rename(profile, topic, clean)
+            topics = topics.map { if (it.index == topic.index) it.copy(customName = clean) else it }
+            message = if (clean == null) "Back to the automatic name: \"${topic.autoLabel}\"" else "Renamed to \"$clean\""
         }
     }
 

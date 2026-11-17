@@ -96,3 +96,45 @@ class TopicPreferenceTest {
         assertEquals(listOf("rel2"), found.map { it.stub.id.id })
     }
 }
+
+class TopicRenameTest {
+    private fun id(s: String) = PlatformId.youtube(s)
+    private fun v(x: Float, y: Float, z: Float) = Vectors.normalize(floatArrayOf(x, y, z))
+    private fun cluster(index: Int, vararg names: String) =
+        Cluster(index, names.map { ProfileVideo(id(it), it, null, v(1f, 0f, 0f)) }, v(1f, 0f, 0f), listOf("cube", "cubing", "jperm"))
+
+    private val db = memoryDatabase()
+    private val store = TopicStore(db)
+    private val profile = ProfileStore(db).profile()
+
+    @Test
+    fun `a name replaces the keywords and follows the topic`() {
+        store.rename(profile, cluster(0, "a", "b", "c"), "  Speedcubing ")
+        val later = store.apply(profile, listOf(cluster(2, "a", "b", "c", "d")))
+        assertEquals("Speedcubing", later.single().label)
+        assertEquals("cube, cubing, jperm", later.single().autoLabel)
+    }
+
+    @Test
+    fun `names and pins are independent`() {
+        val topic = cluster(0, "a", "b", "c")
+        store.set(profile, topic, TopicPreference.PINNED)
+        store.rename(profile, topic, "Speedcubing")
+        store.set(profile, topic, null)
+        assertEquals("Speedcubing", store.apply(profile, listOf(topic)).single().label)
+        store.set(profile, topic, TopicPreference.MUTED)
+        store.rename(profile, topic, "")
+        val reset = store.apply(profile, listOf(topic)).single()
+        assertEquals("cube, cubing, jperm", reset.label)
+        assertEquals(TopicPreference.MUTED, reset.preference)
+    }
+
+    @Test
+    fun `reasons use the name`() {
+        val topic = cluster(0, "a", "b", "c").copy(customName = "Speedcubing")
+        val taste = Profile(topic.videos)
+        val candidate = Candidate(id("x"), "x", id("UCx"), "x", false, null, v(1f, 0.01f, 0f), emptyList())
+        val pick = Ranker(RankingConfig(slots = 1, explorationSlots = 0)).rank(taste, listOf(topic), listOf(candidate)).single()
+        assertTrue("near your Speedcubing topic" in pick.reason, pick.reason)
+    }
+}

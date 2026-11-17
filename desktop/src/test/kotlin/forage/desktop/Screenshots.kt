@@ -71,10 +71,16 @@ fun main(args: Array<String>) {
     shot("7-topics") {
         screen = Screen.TOPICS
         loadTopics()
+        topics.getOrNull(0)?.let { renameTopic(it, "Speedcubing") }
+        renamingTopic = topics.getOrNull(1)?.index
         topics.getOrNull(0)?.let { setTopicPreference(it, forage.core.recommend.TopicPreference.PINNED) }
         topics.getOrNull(4)?.let { setTopicPreference(it, forage.core.recommend.TopicPreference.MUTED) }
     }
-    shot("5-discover-dark", dark = true) { screen = Screen.DISCOVER }
+    shot("5-discover-dark", dark = true) {
+        renamingTopic = null
+        message = null
+        screen = Screen.DISCOVER
+    }
     shot("6-library-dark", dark = true) {
         screen = Screen.LIBRARY
         selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })

@@ -22,14 +22,19 @@ enum class TopicPreference {
 class TopicStore(db: ForageDatabase, private val clock: () -> Instant = Instant::now) {
     private val queries = db.topicQueries
 
-    private data class Stored(val id: Long, val preference: TopicPreference, val members: Set<PlatformId>)
+    private data class Stored(val id: Long, val preference: TopicPreference?, val name: String?, val members: Set<PlatformId>)
 
     private fun stored(profile: ProfileRef) = queries.selectTopicPreferences(profile.id).executeAsList().map {
-        Stored(it.id, TopicPreference.valueOf(it.preference.uppercase()), Json.decodeFromString<List<String>>(it.members).map(PlatformId::parse).toSet())
+        Stored(
+            it.id,
+            TopicPreference.entries.firstOrNull { p -> p.name.equals(it.preference, ignoreCase = true) },
+            it.custom_name,
+            Json.decodeFromString<List<String>>(it.members).map(PlatformId::parse).toSet(),
+        )
     }
 
     /**
-     * Returns [clusters] with their remembered preferences. A matched preference follows its topic:
+     * Returns [clusters] with their remembered preferences and names. A matched preference follows its topic:
      * its stored videos are updated to the topic's current ones, so it keeps up as the profile changes.
      */
     fun apply(profile: ProfileRef, clusters: List<Cluster>): List<Cluster> {
@@ -37,20 +42,33 @@ class TopicStore(db: ForageDatabase, private val clock: () -> Instant = Instant:
         val now = clock().epochSecond
         queries.transaction {
             for ((cluster, s) in matches) {
-                queries.updateTopicPreference(cluster.label, encode(cluster), now, s.id)
+                queries.updateTopicPreference(cluster.autoLabel, encode(cluster), now, s.id)
             }
         }
-        val byIndex = matches.associate { (c, s) -> c.index to s.preference }
-        return clusters.map { c -> byIndex[c.index]?.let { c.copy(preference = it) } ?: c }
+        val byIndex = matches.associate { (c, s) -> c.index to s }
+        return clusters.map { c -> byIndex[c.index]?.let { s -> c.copy(preference = s.preference, customName = s.name) } ?: c }
     }
 
-    /** Sets or (with null) clears the preference for [cluster]. The varied cluster can't have one. */
-    fun set(profile: ProfileRef, cluster: Cluster, preference: TopicPreference?) {
+    /** Sets or (with null) clears the preference for [cluster], keeping any name it has. The varied cluster can't have one. */
+    fun set(profile: ProfileRef, cluster: Cluster, preference: TopicPreference?) = change(profile, cluster) { it.copy(preference = preference) }
+
+    /** Names [cluster], or with null (or a blank name) gives it back its automatic label. Keeps any pin or mute. */
+    fun rename(profile: ProfileRef, cluster: Cluster, name: String?) =
+        change(profile, cluster) { it.copy(name = name?.trim()?.takeIf(String::isNotEmpty)?.take(MAX_NAME)) }
+
+    private data class Choice(val preference: TopicPreference?, val name: String?)
+
+    private fun change(profile: ProfileRef, cluster: Cluster, edit: (Choice) -> Choice) {
         require(!cluster.isVaried) { "The varied interests group isn't a topic" }
         queries.transaction {
-            match(stored(profile), listOf(cluster)).forEach { (_, s) -> queries.deleteTopicPreference(s.id) }
-            if (preference != null) {
-                queries.insertTopicPreference(profile.id, preference.name.lowercase(), cluster.label, encode(cluster), clock().epochSecond)
+            val existing = match(stored(profile), listOf(cluster)).firstOrNull()?.second
+            val next = edit(Choice(existing?.preference, existing?.name))
+            existing?.let { queries.deleteTopicPreference(it.id) }
+            // A topic with neither a preference nor a name needs no row.
+            if (next.preference != null || next.name != null) {
+                queries.insertTopicPreference(
+                    profile.id, next.preference?.name?.lowercase() ?: "none", cluster.autoLabel, encode(cluster), clock().epochSecond, next.name,
+                )
             }
         }
     }
@@ -77,5 +95,7 @@ class TopicStore(db: ForageDatabase, private val clock: () -> Instant = Instant:
     companion object {
         /** Share of videos (of both together) a topic must still have in common to count as the same. */
         const val MIN_OVERLAP = 0.4
+
+        const val MAX_NAME = 40
     }
 }

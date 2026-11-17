@@ -16,10 +16,29 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import forage.core.recommend.TopicStore
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -81,15 +100,30 @@ private fun TopicCard(model: DesktopModel, topic: Cluster) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
+                    if (model.renamingTopic == topic.index) {
+                        RenameField(model, topic)
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                topic.label,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                            )
+                            if (!topic.isVaried) {
+                                IconButton(onClick = { model.renamingTopic = topic.index }, modifier = Modifier.size(32.dp).padding(start = 4.dp)) {
+                                    Icon(Icons.Outlined.Edit, contentDescription = "Rename", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
                     Text(
-                        topic.label,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        if (topic.isVaried) "${topic.videos.size} videos that share no topic with others. Each still finds its own picks."
-                        else "${topic.videos.size} videos" + topic.keywords.drop(3).takeIf { it.isNotEmpty() }?.let { " · also: ${it.joinToString(", ")}" }.orEmpty(),
+                        when {
+                            topic.isVaried -> "${topic.videos.size} videos that share no topic with others. Each still finds its own picks."
+                            // A named topic still shows what it's about, in the automatic keywords.
+                            topic.customName != null -> "${topic.videos.size} videos · ${topic.keywords.joinToString(", ")}"
+                            else -> "${topic.videos.size} videos" + topic.keywords.drop(3).takeIf { it.isNotEmpty() }?.let { " · also: ${it.joinToString(", ")}" }.orEmpty()
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -126,6 +160,36 @@ private fun TopicCard(model: DesktopModel, topic: Cluster) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** Edits a topic's name in place. Enter saves, Escape cancels, an empty name restores the automatic one. */
+@Composable
+private fun RenameField(model: DesktopModel, topic: Cluster) {
+    var name by remember(topic.index) { mutableStateOf(TextFieldValue(topic.customName ?: "", TextRange(0, (topic.customName ?: "").length))) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 6.dp)) {
+        OutlinedTextField(
+            value = name,
+            onValueChange = { if (it.text.length <= TopicStore.MAX_NAME) name = it },
+            placeholder = { Text(topic.autoLabel) },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.width(360.dp).focusRequester(focus).onPreviewKeyEvent { event ->
+                when {
+                    event.type != KeyEventType.KeyDown -> false
+                    event.key == Key.Enter -> { model.renameTopic(topic, name.text); true }
+                    event.key == Key.Escape -> { model.renamingTopic = null; true }
+                    else -> false
+                }
+            },
+        )
+        AccentButton("Save", null) { model.renameTopic(topic, name.text) }
+        TextButton(onClick = { model.renamingTopic = null }) { Text("Cancel") }
+        if (topic.customName != null) {
+            TextButton(onClick = { model.renameTopic(topic, null) }) { Text("Use automatic name") }
         }
     }
 }

@@ -38,6 +38,11 @@ data class Cluster(
     /** True for the catch-all of one-off interests, which share no topic and have no keywords. */
     val isVaried: Boolean = false,
     val preference: TopicPreference? = null,
+    /** A name the user gave this topic; shown instead of the keywords. */
+    val customName: String? = null,
 ) {
-    val label get() = if (isVaried) "varied interests" else keywords.take(3).joinToString(", ").ifEmpty { "topic ${index + 1}" }
+    /** The keywords that describe the topic, whatever it is called. */
+    val autoLabel get() = if (isVaried) "varied interests" else keywords.take(3).joinToString(", ").ifEmpty { "topic ${index + 1}" }
+
+    val label get() = customName ?: autoLabel
 }

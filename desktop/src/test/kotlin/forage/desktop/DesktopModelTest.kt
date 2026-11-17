@@ -193,6 +193,21 @@ class DesktopModelTest {
     }
 
     @Test
+    fun `renaming a topic changes its label and can be undone`() {
+        val topic = forage.core.recommend.Cluster(
+            0, listOf(forage.core.recommend.ProfileVideo(id("a"), "A", null, floatArrayOf(1f))), floatArrayOf(1f), listOf("cube", "cubing"),
+        )
+        model.topics = listOf(topic)
+
+        model.renamingTopic = 0
+        model.renameTopic(topic, "  Speedcubing  ")
+        assertEquals(null, model.renamingTopic)
+        assertEquals("Speedcubing", model.topics.single().label)
+        model.renameTopic(model.topics.single(), "")
+        assertEquals("cube, cubing", model.topics.single().label)
+    }
+
+    @Test
     fun `discover on an empty profile explains what to do`() {
         model.discover()
         assertTrue("no videos yet" in model.message!!, model.message)
