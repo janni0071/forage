@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalFoundationApi::class)
+@file:OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 
 package forage.desktop.ui
 
@@ -14,6 +14,8 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,7 +27,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.ThumbUp
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -33,8 +43,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -63,7 +72,7 @@ import forage.desktop.PickView
 
 @Composable
 fun DiscoverScreen(model: DesktopModel) {
-    Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 12.dp, top = 16.dp)) {
+    Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 16.dp, top = 24.dp)) {
         Header(model)
         if (model.topics.isNotEmpty()) TopicStrip(model)
         if (model.picks.isEmpty()) {
@@ -75,14 +84,14 @@ fun DiscoverScreen(model: DesktopModel) {
             )
             return
         }
-        Box(Modifier.weight(1f).padding(top = 12.dp)) {
+        Box(Modifier.weight(1f).padding(top = 16.dp)) {
             val gridState = rememberLazyGridState()
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 340.dp),
+                columns = GridCells.Adaptive(minSize = 290.dp),
                 state = gridState,
                 horizontalArrangement = Arrangement.spacedBy(20.dp),
                 verticalArrangement = Arrangement.spacedBy(28.dp),
-                contentPadding = PaddingValues(end = 16.dp, bottom = 24.dp),
+                contentPadding = PaddingValues(end = 16.dp, top = 8.dp, bottom = 96.dp),
             ) {
                 items(model.picks, key = { it.pick.position }) { PickCard(model, it) }
             }
@@ -95,27 +104,15 @@ fun DiscoverScreen(model: DesktopModel) {
 private fun Header(model: DesktopModel) {
     var search by remember { mutableStateOf(model.settings.searchYouTube) }
     var shorts by remember { mutableStateOf(model.settings.showShorts) }
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 12.dp)) {
-        Column(Modifier.weight(1f)) {
-            Text("Discover", style = MaterialTheme.typography.headlineSmall)
-            Text(
-                model.discoverNote ?: if (model.picks.isEmpty()) "Recommendations from your profile, on request"
-                else "Last batch: ${model.picks.size} picks",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = search, onCheckedChange = { search = it; model.settings.searchYouTube = it })
-            Text("Search YouTube too")
-            Spacer(Modifier.width(12.dp))
-            Checkbox(checked = shorts, onCheckedChange = { shorts = it; model.settings.showShorts = it })
-            Text("Show Shorts")
-            Spacer(Modifier.width(20.dp))
-            Button(onClick = model::discover, enabled = model.job == null) {
-                Text(if (model.picks.isEmpty()) "Find recommendations" else "Find a new batch")
-            }
-        }
+    ScreenHeader(
+        "Discover",
+        model.discoverNote ?: if (model.picks.isEmpty()) "Recommendations from your profile, only when you ask"
+        else "${model.picks.size} picks in the last batch",
+    ) {
+        ToggleChip("Search YouTube", search) { search = it; model.settings.searchYouTube = it }
+        ToggleChip("Shorts", shorts) { shorts = it; model.settings.showShorts = it }
+        Spacer(Modifier.width(6.dp))
+        AccentButton(if (model.picks.isEmpty()) "Find recommendations" else "New batch", Icons.Filled.AutoAwesome, enabled = model.job == null, onClick = model::discover)
     }
 }
 
@@ -123,14 +120,14 @@ private fun Header(model: DesktopModel) {
 @Composable
 private fun TopicStrip(model: DesktopModel) {
     Row(
-        Modifier.fillMaxWidth().padding(top = 12.dp).horizontalScroll(rememberScrollState()),
+        Modifier.fillMaxWidth().padding(end = 16.dp).horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         for (topic in model.topics.filter { !it.isVaried }) {
             val c = MaterialTheme.colorScheme
             val (container, content, prefix) = when (topic.preference) {
-                TopicPreference.PINNED -> Triple(c.primaryContainer, c.onPrimaryContainer, "📌 ")
+                TopicPreference.PINNED -> Triple(c.primaryContainer, c.onPrimaryContainer, "Pinned: ")
                 TopicPreference.MUTED -> Triple(c.surfaceContainer, c.onSurfaceVariant.copy(alpha = 0.6f), "Muted: ")
                 null -> Triple(c.surfaceContainerHigh, c.onSurface, "")
             }
@@ -185,8 +182,8 @@ private fun PickCard(model: DesktopModel, view: PickView) {
             }
             Row(Modifier.align(Alignment.TopStart).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (pick.exploration) Badge("Exploration", background = MaterialTheme.colorScheme.tertiary, content = MaterialTheme.colorScheme.onTertiary)
-                if (Feedback.SAVED in view.feedback) Badge("✓ Saved", background = MaterialTheme.colorScheme.primary, content = MaterialTheme.colorScheme.onPrimary)
-                if (Feedback.MORE in view.feedback) Badge("✓ More like this", background = MaterialTheme.colorScheme.primary, content = MaterialTheme.colorScheme.onPrimary)
+                if (Feedback.SAVED in view.feedback) Badge("Saved", background = Accent.pastelPink, content = MaterialTheme.colorScheme.onPrimaryContainer)
+                if (Feedback.MORE in view.feedback) Badge("More like this", background = Accent.pastelPink, content = MaterialTheme.colorScheme.onPrimaryContainer)
             }
         }
 
@@ -232,10 +229,15 @@ private fun PickCard(model: DesktopModel, view: PickView) {
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
-        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Action("More like this", Feedback.MORE in view.feedback) { model.feedback(view, Feedback.MORE) }
-            Action("Not for me", rejected) { model.feedback(view, Feedback.NOT_FOR_ME) }
-            Action(if (Feedback.SAVED in view.feedback) "Saved" else "Save", Feedback.SAVED in view.feedback) { model.feedback(view, Feedback.SAVED) }
+        // Wraps to a second line on narrow cards rather than squeezing a button.
+        FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Action(Icons.Outlined.ThumbUp, "More like this", Feedback.MORE in view.feedback) { model.feedback(view, Feedback.MORE) }
+            Action(Icons.Outlined.Block, "Not for me", rejected) { model.feedback(view, Feedback.NOT_FOR_ME) }
+            val saved = Feedback.SAVED in view.feedback
+            // A bookmark alone reads as "save" and keeps the three on one line.
+            TooltipArea(tooltip = { Hint(if (saved) "Saved for later; click to remove" else "Save for later") }, delayMillis = 300) {
+                Action(if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, null, saved) { model.feedback(view, Feedback.SAVED) }
+            }
         }
     }
 }
@@ -268,18 +270,31 @@ private fun Badge(
 
 /** A compact pill button that stays filled while its feedback is active. */
 @Composable
-private fun Action(label: String, active: Boolean, onClick: () -> Unit) {
+private fun Action(icon: ImageVector, label: String?, active: Boolean, onClick: () -> Unit) {
     val c = MaterialTheme.colorScheme
-    Text(
-        if (active) "✓ $label" else label,
-        style = MaterialTheme.typography.labelLarge,
-        color = if (active) c.onSecondaryContainer else c.onSurfaceVariant,
-        modifier = Modifier
+    val content = if (active) c.onPrimaryContainer else c.onSurfaceVariant
+    Row(
+        Modifier
             .clip(RoundedCornerShape(50))
-            .background(if (active) c.secondaryContainer else c.surfaceContainerHigh)
+            .background(if (active) c.primaryContainer else c.surfaceContainerHigh)
             .clickable(onClick = onClick)
             .pointerHoverIcon(PointerIcon.Hand)
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .height(18.dp),
-    )
+            .padding(start = 9.dp, end = if (label == null) 9.dp else 11.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(15.dp))
+        if (label != null) {
+            Spacer(Modifier.width(5.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium, color = content, maxLines = 1, softWrap = false)
+        }
+    }
+}
+
+@Composable
+private fun Hint(text: String) = Surface(
+    color = MaterialTheme.colorScheme.inverseSurface,
+    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+    shape = RoundedCornerShape(8.dp),
+) {
+    Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
 }

@@ -18,6 +18,8 @@ dependencies {
     implementation(libs.sqldelight.sqlite.driver)
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
+    // Large, but packaging strips the icons that aren't used.
+    implementation(libs.compose.icons)
     runtimeOnly(libs.slf4j.nop)
     testImplementation(libs.kotlin.test)
 }

@@ -10,11 +10,20 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollbarAdapter
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -33,19 +42,12 @@ import forage.desktop.DesktopModel
 
 @Composable
 fun TopicsScreen(model: DesktopModel) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Topics", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "How your profile groups itself. Pin a topic to get picks from it in every batch; mute one to get none.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Button(onClick = model::loadTopics, enabled = model.job == null) {
-                Text(if (model.topics.isEmpty()) "Show topics" else if (model.topicsCurrent) "Refresh" else "Refresh (profile changed)")
-            }
+    Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 16.dp, top = 24.dp)) {
+        ScreenHeader("Topics", "How your profile groups itself. Pin a topic to get picks from it in every batch; mute one to get none.") {
+            AccentButton(
+                if (model.topics.isEmpty()) "Show topics" else if (model.topicsCurrent) "Refresh" else "Refresh (profile changed)",
+                Icons.Outlined.Refresh, enabled = model.job == null, onClick = model::loadTopics,
+            )
         }
         if (model.topics.isEmpty()) {
             Text(
@@ -55,9 +57,9 @@ fun TopicsScreen(model: DesktopModel) {
             )
             return
         }
-        Box(Modifier.weight(1f).padding(top = 12.dp)) {
+        Box(Modifier.weight(1f)) {
             val listState = rememberLazyListState()
-            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(end = 14.dp, bottom = 16.dp)) {
+            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(end = 14.dp, bottom = 96.dp)) {
                 items(model.topics, key = { it.index }) { TopicCard(model, it) }
             }
             VerticalScrollbar(rememberScrollbarAdapter(listState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
@@ -70,12 +72,13 @@ private fun TopicCard(model: DesktopModel, topic: Cluster) {
     val muted = topic.preference == TopicPreference.MUTED
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = if (topic.preference == TopicPreference.PINNED) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-            else MaterialTheme.colorScheme.surfaceContainer,
+            containerColor = if (topic.preference == TopicPreference.PINNED) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            else MaterialTheme.colorScheme.surfaceContainerLow,
         ),
+        shape = RoundedCornerShape(18.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -115,10 +118,10 @@ private fun TopicCard(model: DesktopModel, topic: Cluster) {
             }
             if (!topic.isVaried) {
                 Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PreferenceButton("Pin", "✓ Pinned", topic.preference == TopicPreference.PINNED) {
+                    PreferenceButton(Icons.Outlined.PushPin, "Pin", "Pinned", topic.preference == TopicPreference.PINNED) {
                         model.setTopicPreference(topic, if (topic.preference == TopicPreference.PINNED) null else TopicPreference.PINNED)
                     }
-                    PreferenceButton("Mute", "✓ Muted", muted) {
+                    PreferenceButton(Icons.Outlined.VisibilityOff, "Mute", "Muted", muted) {
                         model.setTopicPreference(topic, if (muted) null else TopicPreference.MUTED)
                     }
                 }
@@ -128,6 +131,12 @@ private fun TopicCard(model: DesktopModel, topic: Cluster) {
 }
 
 @Composable
-private fun PreferenceButton(label: String, activeLabel: String, active: Boolean, onClick: () -> Unit) {
-    if (active) FilledTonalButton(onClick = onClick) { Text(activeLabel) } else OutlinedButton(onClick = onClick) { Text(label) }
+private fun PreferenceButton(icon: ImageVector, label: String, activeLabel: String, active: Boolean, onClick: () -> Unit) {
+    val content: @Composable () -> Unit = {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(if (active) activeLabel else label)
+    }
+    if (active) FilledTonalButton(onClick = onClick, shape = RoundedCornerShape(12.dp)) { content() }
+    else OutlinedButton(onClick = onClick, shape = RoundedCornerShape(12.dp)) { content() }
 }

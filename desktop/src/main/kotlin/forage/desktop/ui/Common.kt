@@ -2,7 +2,25 @@ package forage.desktop.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -46,6 +64,55 @@ fun formatDuration(seconds: Long?): String? = seconds?.let {
     val m = (it % 3600) / 60
     val s = it % 60
     if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
+
+/** The title area every screen starts with: a big title, a quiet subtitle, and the screen's main actions. */
+@Composable
+fun ScreenHeader(title: String, subtitle: String?, actions: @Composable RowScope.() -> Unit = {}) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+            subtitle?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), content = actions)
+    }
+}
+
+/** A chip that switches an option on and off, with a check while on. */
+@Composable
+fun ToggleChip(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    FilterChip(
+        selected = on,
+        onClick = { onChange(!on) },
+        label = { Text(label) },
+        leadingIcon = if (on) ({ Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }) else null,
+        shape = RoundedCornerShape(10.dp),
+    )
+}
+
+/** The screen's main call to action, filled with the pastel accent. */
+@Composable
+fun AccentButton(label: String, icon: ImageVector?, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    val dark = c.background.luminance() < 0.5f
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (dark) c.primary else Accent.pastelPink,
+            contentColor = if (dark) c.onPrimary else c.onPrimaryContainer,
+        ),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+    ) {
+        icon?.let {
+            Icon(it, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(label, fontWeight = FontWeight.SemiBold)
+    }
 }
 
 /** A small rounded label, e.g. a video's state. */

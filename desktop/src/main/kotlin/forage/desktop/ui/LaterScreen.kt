@@ -21,14 +21,8 @@ import forage.desktop.DesktopModel
 
 @Composable
 fun LaterScreen(model: DesktopModel) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
-        Text("Watch later", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "Videos you saved from Discover. Imported YouTube playlists stay in the library.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
+    Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 24.dp, top = 24.dp)) {
+        ScreenHeader("Watch later", "Videos you saved from Discover. Imported YouTube playlists stay in the library.")
         if (model.later.isEmpty()) {
             Text("Nothing saved yet. Use \"Save for later\" on a recommendation.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             return

@@ -1,31 +1,41 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
-
 package forage.desktop.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.BubbleChart
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.FileUpload
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.VideoLibrary
+import androidx.compose.material.icons.outlined.WatchLater
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,8 +43,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import forage.desktop.DesktopModel
 import forage.desktop.Player
 import forage.desktop.Screen
@@ -43,76 +59,108 @@ import forage.desktop.Theme
 @Composable
 fun App(model: DesktopModel, onImport: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
-        Column {
-            TopBar(model, onImport)
-            Row(Modifier.weight(1f)) {
-                NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    Spacer(Modifier.height(8.dp))
-                    RailItem(model, Screen.LIBRARY, "▤", "Library")
-                    RailItem(model, Screen.TOPICS, "◉", "Topics")
-                    RailItem(model, Screen.DISCOVER, "✦", "Discover")
-                    RailItem(model, Screen.LATER, "◷", "Later", badge = model.later.size.takeIf { it > 0 })
+        Row {
+            Sidebar(model, onImport)
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                when (model.screen) {
+                    Screen.LIBRARY -> LibraryScreen(model, onImport)
+                    Screen.TOPICS -> TopicsScreen(model)
+                    Screen.DISCOVER -> DiscoverScreen(model)
+                    Screen.LATER -> LaterScreen(model)
                 }
-                Box(Modifier.weight(1f).fillMaxSize()) {
-                    when (model.screen) {
-                        Screen.LIBRARY -> LibraryScreen(model, onImport)
-                        Screen.TOPICS -> TopicsScreen(model)
-                        Screen.DISCOVER -> DiscoverScreen(model)
-                        Screen.LATER -> LaterScreen(model)
-                    }
-                }
+                StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp))
             }
-            StatusBar(model)
         }
     }
 }
 
 @Composable
-private fun RailItem(model: DesktopModel, screen: Screen, icon: String, label: String, badge: Int? = null) {
-    NavigationRailItem(
-        selected = model.screen == screen,
-        onClick = { model.screen = screen },
-        icon = { Text(icon, fontSize = 20.sp) },
-        label = { Text(if (badge != null) "$label ($badge)" else label) },
-    )
-}
-
-@Composable
-private fun TopBar(model: DesktopModel, onImport: () -> Unit) {
-    TopAppBar(
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Forage", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.width(16.dp))
-                Text(
-                    "Profile \"${model.profile.name}\" · ${model.profileSize} videos",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+private fun Sidebar(model: DesktopModel, onImport: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Column(
+        Modifier.width(236.dp).fillMaxHeight().background(c.surfaceContainerLow).padding(horizontal = 14.dp, vertical = 22.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, bottom = 30.dp)) {
+            Box(
+                Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).background(Brush.linearGradient(listOf(Accent.pastelPink, Accent.lavender))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Color(0xFF3E0423), modifier = Modifier.size(20.dp))
             }
-        },
-        actions = {
-            SettingsMenu(model)
-            TextButton(onClick = onImport, enabled = model.job == null) { Text("Import Takeout…") }
-            Spacer(Modifier.width(8.dp))
-        },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    )
+            Spacer(Modifier.width(12.dp))
+            Text("Forage", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        }
+
+        NavItem(Icons.Outlined.VideoLibrary, "Library", model.screen == Screen.LIBRARY) { model.screen = Screen.LIBRARY }
+        NavItem(Icons.Outlined.BubbleChart, "Topics", model.screen == Screen.TOPICS) { model.screen = Screen.TOPICS }
+        NavItem(Icons.Outlined.AutoAwesome, "Discover", model.screen == Screen.DISCOVER, count = model.picks.size.takeIf { it > 0 }) {
+            model.screen = Screen.DISCOVER
+        }
+        NavItem(Icons.Outlined.WatchLater, "Watch later", model.screen == Screen.LATER, count = model.later.size.takeIf { it > 0 }) {
+            model.screen = Screen.LATER
+        }
+
+        Spacer(Modifier.weight(1f))
+        NavItem(Icons.Outlined.FileUpload, "Import Takeout", selected = false, enabled = model.job == null, onClick = onImport)
+        SettingsItem(model)
+        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = c.outlineVariant)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp)) {
+            Box(Modifier.size(36.dp).clip(CircleShape).background(c.primaryContainer), contentAlignment = Alignment.Center) {
+                Text(model.profile.name.take(1).uppercase(), style = MaterialTheme.typography.titleMedium, color = c.onPrimaryContainer)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text(model.profile.name, style = MaterialTheme.typography.titleSmall)
+                Text("${model.profileSize} videos in profile", style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant)
+            }
+        }
+    }
 }
 
 @Composable
-private fun SettingsMenu(model: DesktopModel) {
+private fun NavItem(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    count: Int? = null,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    val content = if (selected) c.onPrimaryContainer else c.onSurfaceVariant
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) c.primaryContainer else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(14.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (selected) c.onPrimaryContainer else c.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        count?.let { Text("$it", style = MaterialTheme.typography.labelMedium, color = content) }
+    }
+}
+
+@Composable
+private fun SettingsItem(model: DesktopModel) {
     var open by remember { mutableStateOf(false) }
     var player by remember { mutableStateOf(model.settings.player) }
     Box {
-        TextButton(onClick = { open = true }) { Text("Settings ▾") }
+        NavItem(Icons.Outlined.Settings, "Settings", selected = open) { open = true }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            Text(
-                "Open videos in",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            )
+            MenuHeading("Open videos in")
             for (p in Player.entries) {
                 val problem = p.problem
                 DropdownMenuItem(
@@ -126,17 +174,9 @@ private fun SettingsMenu(model: DesktopModel) {
                 )
             }
             HorizontalDivider()
-            Text(
-                "Appearance",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            )
+            MenuHeading("Appearance")
             for (t in Theme.entries) {
-                DropdownMenuItem(
-                    text = { Text((if (t == model.theme) "● " else "○ ") + t.label) },
-                    onClick = { model.changeTheme(t) },
-                )
+                DropdownMenuItem(text = { Text((if (t == model.theme) "● " else "○ ") + t.label) }, onClick = { model.changeTheme(t) })
             }
             HorizontalDivider()
             DropdownMenuItem(
@@ -148,31 +188,60 @@ private fun SettingsMenu(model: DesktopModel) {
 }
 
 @Composable
-private fun StatusBar(model: DesktopModel) {
+private fun MenuHeading(text: String) = Text(
+    text,
+    style = MaterialTheme.typography.labelMedium,
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+)
+
+/** Progress and messages float above the content, like a snackbar. */
+@Composable
+private fun StatusToast(model: DesktopModel, modifier: Modifier) {
     val job = model.job
     val text = job?.let { j ->
         listOfNotNull(j.label, j.total?.let { "${j.done} of $it" }, j.detail.takeIf { it.isNotBlank() }).joinToString(" · ")
     } ?: model.message
     val background = model.background
     if (text == null && background == null) return
-    Column(Modifier.fillMaxWidth()) {
-        HorizontalDivider()
-        if (job != null) {
-            val total = job.total
-            if (total != null && total > 0) {
-                LinearProgressIndicator(progress = { job.done.toFloat() / total }, modifier = Modifier.fillMaxWidth())
-            } else {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    val c = MaterialTheme.colorScheme
+    Surface(
+        color = c.inverseSurface,
+        contentColor = c.inverseOnSurface,
+        shape = RoundedCornerShape(16.dp),
+        shadowElevation = 8.dp,
+        modifier = modifier.widthIn(max = 760.dp).padding(horizontal = 24.dp),
+    ) {
+        Column {
+            if (job != null) {
+                val total = job.total
+                val bar = Modifier.fillMaxWidth().height(3.dp)
+                if (total != null && total > 0) {
+                    LinearProgressIndicator(progress = { job.done.toFloat() / total }, modifier = bar, color = c.inversePrimary, trackColor = Color.Transparent)
+                } else {
+                    LinearProgressIndicator(modifier = bar, color = c.inversePrimary, trackColor = Color.Transparent)
+                }
             }
-        }
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(text.orEmpty(), style = MaterialTheme.typography.bodySmall, maxLines = 1, modifier = Modifier.weight(1f))
-            if (background != null) {
-                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp))
-                Text(background, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Row(
+                Modifier.padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp).height(40.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (background != null && text == null) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = c.inversePrimary)
+                }
+                Text(text ?: background.orEmpty(), style = MaterialTheme.typography.bodyMedium, maxLines = 2, modifier = Modifier.weight(1f, fill = false))
+                if (background != null && text != null) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = c.inversePrimary)
+                }
+                if (job == null && text != null) {
+                    IconButton(onClick = { model.message = null }) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Dismiss", tint = c.inverseOnSurface, modifier = Modifier.size(18.dp))
+                    }
+                } else {
+                    Spacer(Modifier.width(12.dp))
+                }
             }
-            if (job == null && text != null) TextButton(onClick = { model.message = null }) { Text("Dismiss") }
         }
     }
 }
