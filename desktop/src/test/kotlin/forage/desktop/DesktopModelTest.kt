@@ -20,6 +20,7 @@ import java.time.Instant
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DesktopModelTest {
@@ -46,7 +47,7 @@ class DesktopModelTest {
     }
 
     // Unconfined dispatchers run every action to completion before it returns.
-    private val model = DesktopModel(
+    private val model: DesktopModel = DesktopModel(
         dir, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined,
     ) { offline }.apply {
         library.importTakeout(
@@ -124,8 +125,8 @@ class DesktopModelTest {
         model.profiles.savePicks(model.profile, listOf(pick))
         runBlocking { model.reload() }
         model.feedback(model.picks.single(), Feedback.NOT_FOR_ME)
-        assertEquals(listOf("Fetching details of \"A pick\" so your feedback counts"), backgroundDuringFetch)
-        assertEquals(null, model.background)
+        assertEquals(listOf<String?>("Fetching details of \"A pick\" so your feedback counts"), backgroundDuringFetch)
+        assertNull(model.background)
         // Saving needs no details, so nothing is fetched.
         model.feedback(model.picks.single(), Feedback.SAVED)
         assertEquals(1, backgroundDuringFetch.size)
