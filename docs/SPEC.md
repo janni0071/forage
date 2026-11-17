@@ -32,13 +32,17 @@ v1 is the smallest version that answers the key question: are the recommendation
 
 ## How recommendations work
 
-The profile is a set of video embeddings, not one average, so separate interests stay separate. Each Discover visit runs the pipeline below, using cached metadata where it can.
+The profile is a set of video embeddings, not one average, so separate interests stay separate. Each Discover visit runs the pipeline below, using cached metadata where it can. The details below reflect what the M0 spike found to work on a real profile.
 
 &#91;embedded content: recommendation pipeline · 6 stages, 1 feedback loop\]
 
-- **Profile.** Each included video becomes a vector built from its title, description, tags, channel name and your notes. Clustering (k-means or HDBSCAN) groups the vectors into topics you can see, pin or mute. Videos you mark "not for me" become negative examples.
-- **Candidates.** For a sample of profile videos from each cluster: related videos via the extractor, channels those creators feature or collaborate with, and searches built from each cluster's top keywords. Aim for 200 to 500 candidates per visit, cached for a day.
-- **Ranking.** Score = similarity to the nearest profile videos, minus similarity to negative examples, plus a bonus for channels you don't follow and a small freshness bonus. Drop watched and excluded videos, then re-rank for diversity (MMR) so one cluster can't fill every slot. Keep 2 or 3 of 20 slots for exploration.
+- **Profile.** Each included video becomes a vector built from its title, channel name, tags, your notes and the start of its description, in that order (the model reads only the first 128 tokens). Videos you mark "not for me" become negative examples.
+- **Topics.** Average-linkage clustering merges videos until no two groups are similar enough (threshold 0.35). Groups of three or more are topics you can see, pin or mute; everything else goes into one "varied interests" group. A real profile is a few strong topics plus many one-off interests, and k-means forced those into mixed clusters. Topic labels come from the words that set a topic apart, never from channel names.
+- **Candidates.** For a sample of profile videos from each topic (more from the varied group): related videos via the extractor, and one search per topic built from its top keywords. Channels that creators feature or collaborate with are planned but not built. A 150-video profile yields about 1,800 candidates. Candidates whose title is clearly in a language the profile doesn't contain are dropped, because the embedding model matches across languages.
+- **Candidate text.** Candidates are scored on title and channel name only, since that is all a list result carries and fetching full metadata for every candidate is too slow. Profile videos use the full text.
+- **Ranking.** Score = mean similarity to the three nearest profile videos, plus a bonus for channels you don't follow, plus a freshness bonus, minus a small penalty for candidates found only by search. Drop watched, saved and excluded videos, then re-rank for diversity (MMR) with at most two picks per channel. Keep 3 of 20 slots for exploration: looser matches from channels you don't know.
+- **Negative examples.** The "not for me" penalty applies only as far as a candidate is closer to a rejected video than to the profile. Subtracting the plain similarity sank whole subjects: rejecting three beginner cube tutorials removed every cube video.
+- **Freshness.** Every recent upload gets a small bonus. It is larger where you save videos soon after release, measured per candidate from its nearest profile videos, so trailers and news favour new uploads while documentaries are left alone.
 - **Feedback.** "More like this" adds the video to the profile at reduced weight, "not for me" adds a negative example, and "save" puts it in watch later.
 
 ## Tech stack
@@ -48,10 +52,11 @@ Kotlin with Compose Multiplatform lets one codebase target Android and desktop. 
 | Layer | Choice | Why |
 | --- | --- | --- |
 | UI | Compose Multiplatform (Android + desktop JVM) | One UI codebase; native feel on Android |
-| Shared core | Kotlin Multiplatform module | Import, profile, ranking and sync logic written once |
+| Shared core | Kotlin/JVM library (`core`) | Import, profile, ranking and sync logic written once. Android and desktop are both JVM and NewPipeExtractor is Java, so a Multiplatform module adds nothing yet |
 | YouTube data | NewPipeExtractor behind an `ExtractorSource` interface | Metadata, related videos, search, channel tabs; no API key |
 | Fallback sources | Channel RSS feeds; optional Invidious/Piped instance; yt-dlp on desktop | Keeps working when one source breaks |
-| Embeddings | Small multilingual sentence model (e.g. paraphrase-multilingual-MiniLM-L12-v2) via ONNX Runtime | Runs offline on phone and desktop; handles German, English, French titles |
+| Embeddings | paraphrase-multilingual-MiniLM-L12-v2 via ONNX Runtime | Runs offline; handles German, English, French titles. Rare compound words match poorly across languages. The tokenizer library (DJL) is desktop-only, so Android needs another |
+| Language detection | Lingua, accurate mode, over about 20 common languages | Built for short texts. Two lighter options failed on real titles. Heavy (80 MB library, several hundred MB of memory), so Android needs another |
 | Storage | SQLite via SQLDelight | Shared schema on both platforms, easy to export |
 | Vector search | Brute-force cosine similarity in memory | Fast enough for tens of thousands of videos; no extra dependency |
 | Sync | Encrypted per-device change logs (age or libsodium) in a user-chosen folder | Works with Syncthing, Nextcloud or a USB stick; no server to run |
@@ -65,8 +70,8 @@ Every import lands videos as *watched, not in profile*. The user then curates. N
 
 | Source | File | What we take | Notes |
 | --- | --- | --- | --- |
-| Google Takeout | `YouTube and YouTube Music/history/watch-history.json` | Video ID, title, channel, timestamp | User must switch history format from HTML to JSON in Takeout; skip ad entries and removed videos with no URL |
-| Google Takeout | `subscriptions/subscriptions.csv`, `playlists/*.csv` | Channel IDs; playlist video IDs | Playlists can seed the profile directly ("my liked videos") |
+| Google Takeout | `history/watch-history.html` or `.json` | Video ID, title, channel, timestamp | HTML is Takeout's default and JSON an option; both are parsed. Skip ad entries, posts and removed videos with no URL. Dates in the HTML are in the account's language |
+| Google Takeout | `subscriptions/subscriptions.csv`, `playlists/*-videos.csv` | Channel IDs; playlist video IDs with the date added | Playlists list IDs only, so titles need a metadata fetch. Watch later is the best profile seed: every entry was saved on purpose |
 | NewPipe | Exported `.zip` containing `newpipe.db` (SQLite) | Watch history, subscriptions, local playlists | Schema changes between versions; read defensively |
 | FreeTube | `history.db`, `profiles.db`, `playlists.db` (one JSON object per line) | History, subscriptions, playlists | Also accepts its own export files |
 | LibreTube | JSON backup | History, subscriptions, playlists | Later milestone |
@@ -80,6 +85,7 @@ Test recommendation quality first, with no UI. Everything after that is packagin
 
 1. **M0: Recommendation spike (desktop CLI).** Parse your own Takeout file, hand-pick 50 to 100 profile videos, fetch metadata, embed, generate candidates, print 20 ranked picks with reasons.
    - Exit: at least 5 of 20 picks are ones you'd actually watch. If not, tune candidates and scoring before building anything else.
+   - **Done, Nov 17, 2026.** Profile: the 149 most recent Watch later videos. Round 1: 5 of 20 would be watched, 2 maybe. Round 3, after tuning from feedback: 14 of 20, 3 maybe, 3 no. The misses were word-level matches that missed the tone (a real job interview next to comedy interviews), a generic compilation and a tabloid take on a topic.
 2. **M1: Desktop app, core loop.** Library with watched / in profile / excluded states, bulk curation, Discover page, feedback buttons, open in FreeTube or mpv.
    - Exit: you use it instead of the CLI for two weeks.
 3. **M2: Account-free extras.** RSS subscriptions inbox, watch later queue, notes and tags, NewPipe and FreeTube import.
@@ -122,6 +128,10 @@ Adult sites are technically feasible: Pornhub has an official affiliate API via 
 
 v1 implication: the profile model must support multiple isolated profiles from the start, even if the UI shows only one.
 
+How this is built: the database file is the isolation boundary. A "vault" is one database file holding its own profiles, history, metadata cache and vectors, and no code path reads across files. The main vault is unencrypted; a sensitive platform gets its own encrypted file, which can be wiped by deleting it. Within a vault, several profiles ("learning", "evening") can share history and cache.
+
+Plan: design for it from M1 (the vault boundary), build the first sensitive plugin after M1's core loop works, as a separate module outside the default build. Before writing it, check that the HubTraffic API still exists and what its terms allow. There is no known history export to import from, so such a profile starts from pasted URLs.
+
 ## Risks and decisions
 
 The biggest risk is dependence on unofficial YouTube access. Everything else can be fixed in code.
@@ -129,6 +139,7 @@ The biggest risk is dependence on unofficial YouTube access. Everything else can
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
 | YouTube changes break the extractor | Discover and metadata fetch stop working | Source interface with fallbacks (RSS, Invidious/Piped, yt-dlp); cache all metadata locally; track NewPipeExtractor releases |
+| YouTube bot-checks the network | Requests fail at random; seen on a cloud server, where a fetch took 10 to 35 seconds per video | Pause between requests, retry with growing waits, stop a run that keeps failing and resume from the cache later. Home connections should fare better; not yet measured |
 | Scraping is against YouTube's terms of service | Rate limits, IP blocks; no Play Store listing | Conservative request rates, local caching; distribute through F-Droid, GitHub and Flathub |
 | GPL-3.0 licence of NewPipeExtractor | The app must be GPL-compatible | Release under GPL-3.0 from day one |
 | Cold start: small profile, weak picks | Users give up after the first Discover visit | Seed from Takeout playlists and top channels; ask for 10 picks during onboarding |
@@ -141,7 +152,9 @@ The biggest risk is dependence on unofficial YouTube access. Everything else can
 | --- | --- | --- |
 | Project name | Decided: **Forage** (other candidates were Palate, Glean, Sift) | Forage = you go looking when you want something new, nothing is pushed; not tied to YouTube. Check GitHub, F-Droid and app stores for clashes |
 | Transcripts | Not in v1. Test them in M0 on videos with weak picks; add later only if they clearly help | Titles, descriptions, tags and notes are cheap and usually enough; transcripts are slow, often missing and noisy when auto-generated |
-| Shorts | Hidden by default in Discover and the subscriptions inbox, with a setting to show them. Shorts you add to the profile on purpose still count | Little text for the profile; endless swiping goes against the app's purpose. Detect by `/shorts/` URL or extractor flag, not duration (Shorts can be up to 3 minutes) |
+| Shorts | Hidden by default in Discover and the subscriptions inbox, with a setting to show them. Shorts you add to the profile on purpose still count | Little text for the profile; endless swiping goes against the app's purpose. Detect by `/shorts/` URL or extractor flag, not duration (Shorts can be up to 3 minutes). **Open problem:** Takeout lists Shorts with normal watch URLs and the extractor did not flag them either, so Shorts in the history go undetected |
+| Clustering | Average-linkage clustering with a similarity threshold, plus a "varied interests" group | k-means needs the number of clusters up front and produced mixed clusters on a real profile |
+| Profile storage in M0 | A hand-edited text file of video IDs | Enough for the spike; M1 moves library, profile and feedback into the database |
 | Sync conflicts | Each device writes only its own encrypted change log (`phone.log`, `laptop.log`) in the synced folder. Merge = replay all logs in time order: latest change wins per field; sets (profile, tags, watch later) use separate add/remove events; deletions leave a tombstone | No Syncthing conflict copies, no device silently overwriting another, deleted items don't come back |
 
 - [ ] Check GitHub, F-Droid and Flathub for other projects called Forage before the first public release
