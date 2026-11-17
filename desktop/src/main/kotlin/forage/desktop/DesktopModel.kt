@@ -363,7 +363,9 @@ class DesktopModel(
         // A player that can't play the link usually quits within seconds; say why instead of doing nothing.
         scope.launch(io) {
             if (process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS) && process.exitValue() != 0) {
-                val last = runCatching { log.readLines().map { it.trim() }.lastOrNull { it.isNotEmpty() } }.getOrNull()
+                // The last line is usually a generic "Exiting"; the line naming the error says more.
+                val lines = runCatching { log.readLines().map { it.trim() }.filter { it.isNotEmpty() } }.getOrDefault(emptyList())
+                val last = lines.lastOrNull { "ERROR" in it } ?: lines.lastOrNull()
                 message = "${player.label} couldn't play the video" + (last?.let { ": $it" } ?: "") + " (full output: ${log.path})"
             }
         }
