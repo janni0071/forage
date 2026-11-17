@@ -101,8 +101,13 @@ fun main(args: Array<String>) {
         profileMenuOpen = false
         profileDialog = ProfileDialog.NEW
     }
-    shot("3-library-history") {
+    shot("11-settings") {
         profileDialog = null
+        settingsOpen = true
+    }
+    shot("12-settings-dark", dark = true) { settingsOpen = true }
+    shot("3-library-history") {
+        settingsOpen = false
         showLibraryAsGrid(false)
         clearSelection()
         screen = Screen.LIBRARY

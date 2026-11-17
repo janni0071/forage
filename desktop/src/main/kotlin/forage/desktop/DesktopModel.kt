@@ -123,6 +123,25 @@ class DesktopModel(
     var profileList by mutableStateOf<List<Pair<ProfileRef, Int>>>(emptyList())
         private set
 
+    var settingsOpen by mutableStateOf(false)
+
+    var player by mutableStateOf(settings.player)
+        private set
+
+    fun choosePlayer(value: Player) {
+        settings.player = value
+        player = value
+    }
+
+    /** Opens the folder the vault lives in, in the system's file manager. */
+    fun openDataFolder() {
+        try {
+            java.awt.Desktop.getDesktop().open(dataDir.absoluteFile)
+        } catch (e: Exception) {
+            message = "Couldn't open the folder: ${dataDir.absolutePath}"
+        }
+    }
+
     var profileMenuOpen by mutableStateOf(false)
     var profileDialog by mutableStateOf<ProfileDialog?>(null)
 
@@ -499,7 +518,7 @@ class DesktopModel(
     }
 
     fun open(id: PlatformId) {
-        val player = settings.player
+        val player = player
         val log = File(dataDir, "logs/player.log")
         val process = try {
             Player.open(player, id, log)

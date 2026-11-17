@@ -27,8 +27,6 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material.icons.outlined.WatchLater
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,9 +52,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import forage.desktop.DesktopModel
-import forage.desktop.Player
 import forage.desktop.Screen
-import forage.desktop.Theme
 
 @Composable
 fun App(model: DesktopModel, onImport: () -> Unit) {
@@ -148,45 +144,9 @@ private fun NavItem(
 
 @Composable
 private fun SettingsItem(model: DesktopModel) {
-    var open by remember { mutableStateOf(false) }
-    var player by remember { mutableStateOf(model.settings.player) }
-    Box {
-        NavItem(Icons.Outlined.Settings, "Settings", selected = open) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            MenuHeading("Open videos in")
-            for (p in Player.entries) {
-                val problem = p.problem
-                DropdownMenuItem(
-                    text = { Text((if (p == player) "● " else "○ ") + if (problem == null) p.label else "${p.label} ($problem)") },
-                    // A player that needs yt-dlp stays selectable: opening it explains what to install.
-                    enabled = problem != "not installed",
-                    onClick = {
-                        model.settings.player = p
-                        player = p
-                    },
-                )
-            }
-            HorizontalDivider()
-            MenuHeading("Appearance")
-            for (t in Theme.entries) {
-                DropdownMenuItem(text = { Text((if (t == model.theme) "● " else "○ ") + t.label) }, onClick = { model.changeTheme(t) })
-            }
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text((if (model.showThumbnails) "☑ " else "☐ ") + "Show thumbnails") },
-                onClick = { model.setThumbnails(!model.showThumbnails) },
-            )
-        }
-    }
+    NavItem(Icons.Outlined.Settings, "Settings", selected = model.settingsOpen) { model.settingsOpen = true }
+    if (model.settingsOpen) SettingsDialog(model)
 }
-
-@Composable
-private fun MenuHeading(text: String) = Text(
-    text,
-    style = MaterialTheme.typography.labelMedium,
-    color = MaterialTheme.colorScheme.onSurfaceVariant,
-    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-)
 
 /** Progress and messages float above the content, like a snackbar. */
 @Composable
