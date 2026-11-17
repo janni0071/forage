@@ -97,10 +97,19 @@ class DesktopModel(
     val settings = Settings(File(dataDir, "settings.properties"))
 
     private val source by lazy(sourceFactory)
+    val thumbnails = Thumbnails(File(dataDir, "thumbnails")) { source.thumbnailUrl(it) }
     private var embedder: OnnxEmbedder? = null
     private var detector: LanguageDetector? = null
 
     var screen by mutableStateOf(Screen.LIBRARY)
+
+    var showThumbnails by mutableStateOf(settings.showThumbnails)
+        private set
+
+    fun setThumbnails(on: Boolean) {
+        settings.showThumbnails = on
+        showThumbnails = on
+    }
 
     // Library
     var sources by mutableStateOf<List<LibrarySource>>(listOf(LibrarySource.History))
@@ -132,6 +141,11 @@ class DesktopModel(
     var job by mutableStateOf<Job?>(null)
         private set
     var message by mutableStateOf<String?>(null)
+
+    /** Small tasks running without a progress bar, e.g. fetching details after feedback. */
+    var background by mutableStateOf<String?>(null)
+        private set
+    private var backgroundCount = 0
 
     val visibleRows: List<LibraryRow>
         get() {
@@ -282,9 +296,14 @@ class DesktopModel(
         }
         loadPicks()
         loadLater()
-        // Profile feedback only counts once the video has metadata; fetch it quietly.
+        // Profile feedback only counts once the video has metadata; fetch it in the background.
         if (!active && kind != Feedback.SAVED && cache.video(id) == null) {
-            runCatching { MetadataFetcher(source, cache).fetch(id) }
+            inBackground("Fetching details of \"${view.pick.title}\" so your feedback counts") {
+                val outcome = MetadataFetcher(source, cache).fetch(id)
+                if (outcome is FetchOutcome.Failed) {
+                    message = "Couldn't fetch details of \"${view.pick.title}\"; it will count after the next \"Fetch profile details\""
+                }
+            }
         }
     }
 
@@ -367,6 +386,21 @@ class DesktopModel(
                 withContext(io) { block() }
             } catch (e: Exception) {
                 message = "Something went wrong: ${e.message ?: e}"
+            }
+        }
+    }
+
+    private suspend fun inBackground(label: String, block: suspend () -> Unit) {
+        synchronized(this) { backgroundCount++ }
+        background = if (backgroundCount == 1) label else "$backgroundCount tasks running in the background"
+        try {
+            block()
+        } finally {
+            val left = synchronized(this) { --backgroundCount }
+            background = when (left) {
+                0 -> null
+                1 -> "1 task running in the background"
+                else -> "$left tasks running in the background"
             }
         }
     }

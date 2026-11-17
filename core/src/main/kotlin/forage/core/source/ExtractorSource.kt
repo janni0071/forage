@@ -25,6 +25,9 @@ interface ExtractorSource {
 
     /** Link that opens the video in a browser or external player. */
     fun watchUrl(id: PlatformId): String
+
+    /** A small preview image for the video, if the platform has a stable address for one. */
+    fun thumbnailUrl(id: PlatformId): String? = null
 }
 
 enum class Capability { RELATED_VIDEOS, SEARCH }

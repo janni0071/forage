@@ -22,6 +22,13 @@ fun main(args: Array<String>) {
 
     fun shot(name: String, setup: DesktopModel.() -> Unit) {
         model.setup()
+        // Load the images up front; the headless renderer doesn't wait for them.
+        val onScreen = when (model.screen) {
+            Screen.LIBRARY -> model.visibleRows.take(14).map { it.id }
+            Screen.DISCOVER -> model.picks.take(6).map { it.pick.video }
+            Screen.LATER -> model.later.map { it.id }
+        }
+        runBlocking { onScreen.forEach { model.thumbnails.load(it) } }
         val scene = ImageComposeScene(width = 2560, height = 1640, density = Density(2f)) {
             ForageTheme { App(model, onImport = {}) }
         }
@@ -42,7 +49,13 @@ fun main(args: Array<String>) {
     shot("2-discover") {
         clearSelection()
         screen = Screen.DISCOVER
+        // Show the feedback states: pick 2 saved, pick 3 marked "more like this".
+        if (picks.size >= 3 && picks[1].feedback.isEmpty()) {
+            feedback(picks[1], Feedback.SAVED)
+            feedback(picks[2], Feedback.MORE)
+        }
     }
+    shot("4-later") { screen = Screen.LATER }
     shot("3-library-history") {
         screen = Screen.LIBRARY
         stateFilter = StateFilter.ALL

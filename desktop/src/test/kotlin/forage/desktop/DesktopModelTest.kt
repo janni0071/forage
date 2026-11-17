@@ -25,11 +25,15 @@ import kotlin.test.assertTrue
 class DesktopModelTest {
     private fun id(s: String) = PlatformId.youtube(s)
 
-    /** Never reached in these tests: everything here works offline. */
+    /** Answers every video as gone, noting what the status bar said while it was asked. */
+    private val backgroundDuringFetch = ArrayList<String?>()
     private val offline = object : ExtractorSource {
         override val platform = "youtube"
         override val capabilities = emptySet<Capability>()
-        override fun video(id: PlatformId): VideoDetails = throw SourceException.NotAvailable("offline")
+        override fun video(id: PlatformId): VideoDetails {
+            backgroundDuringFetch += model.background
+            throw SourceException.NotAvailable("offline")
+        }
         override fun search(query: String): List<VideoStub> = emptyList()
         override fun watchUrl(id: PlatformId) = ""
     }
@@ -112,6 +116,19 @@ class DesktopModelTest {
         model.feedback(model.picks.single(), Feedback.MORE)
         model.removeFromLater(id("p"))
         assertEquals(emptySet(), model.picks.single().feedback)
+    }
+
+    @Test
+    fun `feedback fetches the video's details in the background and says so`() {
+        val pick = StoredPick(1, id("p"), "A pick", null, "Channel", 0.5f, "similar to X", "related to X", false)
+        model.profiles.savePicks(model.profile, listOf(pick))
+        runBlocking { model.reload() }
+        model.feedback(model.picks.single(), Feedback.NOT_FOR_ME)
+        assertEquals(listOf("Fetching details of \"A pick\" so your feedback counts"), backgroundDuringFetch)
+        assertEquals(null, model.background)
+        // Saving needs no details, so nothing is fetched.
+        model.feedback(model.picks.single(), Feedback.SAVED)
+        assertEquals(1, backgroundDuringFetch.size)
     }
 
     @Test

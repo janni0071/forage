@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import forage.desktop.DesktopModel
+import forage.desktop.ui.Thumbnail
 import forage.desktop.Feedback
 import forage.desktop.PickView
 
@@ -111,14 +113,16 @@ private fun PickCard(model: DesktopModel, view: PickView) {
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "${pick.position}.",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.width(32.dp),
-                )
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                "${pick.position}.",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(32.dp),
+            )
+            Thumbnail(model, pick.video, 208.dp)
+            Column(Modifier.weight(1f).padding(start = 16.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         pick.title,
@@ -137,7 +141,7 @@ private fun PickCard(model: DesktopModel, view: PickView) {
             Text(
                 "Why: ${pick.reason.removePrefix("exploration: ")}",
                 style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(start = 32.dp, top = 8.dp),
+                modifier = Modifier.padding(top = 8.dp),
             )
             Text(
                 "Found via ${pick.foundVia}",
@@ -145,13 +149,15 @@ private fun PickCard(model: DesktopModel, view: PickView) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 32.dp, top = 2.dp),
+                modifier = Modifier.padding(top = 2.dp),
             )
-            Row(Modifier.padding(start = 24.dp, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Text buttons carry their own inner padding; shift them so the label lines up with the text above.
+            Row(Modifier.padding(top = 8.dp).offset(x = (-12).dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = { model.open(pick.video) }) { Text("Open") }
                 FeedbackButton("More like this", "✓ More like this", Feedback.MORE in view.feedback) { model.feedback(view, Feedback.MORE) }
                 FeedbackButton("Not for me", "✓ Not for me", Feedback.NOT_FOR_ME in view.feedback) { model.feedback(view, Feedback.NOT_FOR_ME) }
                 FeedbackButton("Save for later", "✓ Saved", Feedback.SAVED in view.feedback) { model.feedback(view, Feedback.SAVED) }
+            }
             }
         }
     }

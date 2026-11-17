@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -87,7 +89,7 @@ private fun TopBar(model: DesktopModel, onImport: () -> Unit) {
             }
         },
         actions = {
-            PlayerMenu(model)
+            SettingsMenu(model)
             TextButton(onClick = onImport, enabled = model.job == null) { Text("Import Takeout…") }
             Spacer(Modifier.width(8.dp))
         },
@@ -96,23 +98,33 @@ private fun TopBar(model: DesktopModel, onImport: () -> Unit) {
 }
 
 @Composable
-private fun PlayerMenu(model: DesktopModel) {
+private fun SettingsMenu(model: DesktopModel) {
     var open by remember { mutableStateOf(false) }
     var player by remember { mutableStateOf(model.settings.player) }
     Box {
-        TextButton(onClick = { open = true }) { Text("Open in: ${player.label} ▾") }
+        TextButton(onClick = { open = true }) { Text("Settings ▾") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Text(
+                "Open videos in",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
             for (p in Player.entries) {
                 DropdownMenuItem(
-                    text = { Text(if (p.available) p.label else "${p.label} (not installed)") },
+                    text = { Text((if (p == player) "● " else "○ ") + if (p.available) p.label else "${p.label} (not installed)") },
                     enabled = p.available,
                     onClick = {
                         model.settings.player = p
                         player = p
-                        open = false
                     },
                 )
             }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text((if (model.showThumbnails) "☑ " else "☐ ") + "Show thumbnails") },
+                onClick = { model.setThumbnails(!model.showThumbnails) },
+            )
         }
     }
 }
@@ -123,7 +135,8 @@ private fun StatusBar(model: DesktopModel) {
     val text = job?.let { j ->
         listOfNotNull(j.label, j.total?.let { "${j.done} of $it" }, j.detail.takeIf { it.isNotBlank() }).joinToString(" · ")
     } ?: model.message
-    if (text == null) return
+    val background = model.background
+    if (text == null && background == null) return
     Column(Modifier.fillMaxWidth()) {
         HorizontalDivider()
         if (job != null) {
@@ -135,8 +148,13 @@ private fun StatusBar(model: DesktopModel) {
             }
         }
         Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(text, style = MaterialTheme.typography.bodySmall, maxLines = 1, modifier = Modifier.weight(1f))
-            if (job == null) TextButton(onClick = { model.message = null }) { Text("Dismiss") }
+            Text(text.orEmpty(), style = MaterialTheme.typography.bodySmall, maxLines = 1, modifier = Modifier.weight(1f))
+            if (background != null) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(background, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
+            if (job == null && text != null) TextButton(onClick = { model.message = null }) { Text("Dismiss") }
         }
     }
 }

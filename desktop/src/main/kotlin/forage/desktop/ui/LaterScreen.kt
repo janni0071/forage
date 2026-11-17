@@ -36,7 +36,8 @@ fun LaterScreen(model: DesktopModel) {
         LazyColumn {
             items(model.later, key = { it.id.toString() }) { row ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
+                    Thumbnail(model, row.id, 128.dp)
+                    Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
                         Text(row.title ?: row.id.toString(), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             listOfNotNull(row.channelName, formatDuration(row.durationSeconds)).joinToString("  ·  "),

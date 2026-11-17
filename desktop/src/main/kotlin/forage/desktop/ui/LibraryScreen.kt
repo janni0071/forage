@@ -74,7 +74,7 @@ fun LibraryScreen(model: DesktopModel, onImport: () -> Unit) {
             val listState = rememberLazyListState()
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(end = 12.dp)) {
                 items(visible, key = { it.id.toString() }) { row ->
-                    VideoRow(row, selected = row.id in model.selection, onToggle = { model.toggle(row.id) }, onOpen = { model.open(row.id) })
+                    VideoRow(model, row, selected = row.id in model.selection, onToggle = { model.toggle(row.id) }, onOpen = { model.open(row.id) })
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 }
             }
@@ -144,13 +144,14 @@ private fun ActionBar(model: DesktopModel, visibleCount: Int) {
 }
 
 @Composable
-private fun VideoRow(row: LibraryRow, selected: Boolean, onToggle: () -> Unit, onOpen: () -> Unit) {
+private fun VideoRow(model: DesktopModel, row: LibraryRow, selected: Boolean, onToggle: () -> Unit, onOpen: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(checked = selected, onCheckedChange = { onToggle() })
-        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+        Thumbnail(model, row.id, 96.dp, Modifier.padding(start = 4.dp))
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
             Text(
                 row.title ?: "Untitled — fetch details to see it",
                 style = MaterialTheme.typography.bodyLarge,

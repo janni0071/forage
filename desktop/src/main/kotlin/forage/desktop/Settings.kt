@@ -20,6 +20,11 @@ class Settings(private val file: File) {
         get() = properties.getProperty("discover.shorts", "false").toBoolean()
         set(value) = set("discover.shorts", value.toString())
 
+    /** Thumbnails are fetched from the platform, one request per video, so they can be switched off. */
+    var showThumbnails: Boolean
+        get() = properties.getProperty("thumbnails", "true").toBoolean()
+        set(value) = set("thumbnails", value.toString())
+
     private fun set(key: String, value: String) {
         properties.setProperty(key, value)
         file.parentFile?.mkdirs()
