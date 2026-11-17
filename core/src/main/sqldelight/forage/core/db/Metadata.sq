@@ -65,5 +65,8 @@ INSERT OR REPLACE INTO unavailable_video VALUES (?, ?, ?);
 deleteUnavailable:
 DELETE FROM unavailable_video WHERE id = ?;
 
+selectAllVideos:
+SELECT * FROM video;
+
 selectVideoIds:
 SELECT id FROM video ORDER BY id;

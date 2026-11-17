@@ -46,3 +46,14 @@ class MetadataCacheTest {
         assertNull(cache.unavailableReason(id))
     }
 }
+
+class MetadataCacheListTest {
+    @Test
+    fun `lists all metadata at once`() {
+        val cache = MetadataCache(memoryDatabase())
+        cache.put(details("a"))
+        cache.put(details("b"))
+        assertEquals(setOf("a", "b"), cache.allMetadata().keys.map { it.id }.toSet())
+        assertEquals(details("a").metadata, cache.allMetadata().getValue(PlatformId.youtube("a")))
+    }
+}

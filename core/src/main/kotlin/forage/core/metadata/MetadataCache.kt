@@ -82,6 +82,10 @@ class MetadataCache(db: ForageDatabase, private val clock: () -> Instant = Insta
         queries.upsertUnavailable(id.toString(), reason, clock().epochSecond)
     }
 
+    /** Metadata of every cached video, without related videos: one query, for list views. */
+    fun allMetadata(): Map<PlatformId, VideoMetadata> =
+        queries.selectAllVideos().executeAsList().associate { PlatformId.parse(it.id) to it.toMetadata() }
+
     /** Every cached video id. */
     fun ids(): List<PlatformId> = queries.selectVideoIds().executeAsList().map(PlatformId::parse)
 
