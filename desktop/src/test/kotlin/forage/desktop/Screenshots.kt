@@ -25,11 +25,14 @@ fun main(args: Array<String>) {
         // Load the images up front; the headless renderer doesn't wait for them.
         val onScreen = when (model.screen) {
             Screen.LIBRARY -> model.visibleRows.take(14).map { it.id }
-            Screen.DISCOVER -> model.picks.take(6).map { it.pick.video }
+            Screen.DISCOVER -> emptyList()
             Screen.LATER -> model.later.map { it.id }
             Screen.TOPICS -> model.topics.take(4).flatMap { t -> t.videos.take(6).map { it.id } }
         }
-        runBlocking { onScreen.forEach { model.thumbnails.load(it) } }
+        runBlocking {
+            onScreen.forEach { model.thumbnails.load(it) }
+            if (model.screen == Screen.DISCOVER) model.picks.take(9).forEach { model.thumbnails.load(it.pick.video, large = true) }
+        }
         val scene = ImageComposeScene(width = 2560, height = 1640, density = Density(2f)) {
             ForageTheme(dark = dark) { App(model, onImport = {}) }
         }
@@ -49,6 +52,9 @@ fun main(args: Array<String>) {
     }
     shot("2-discover") {
         clearSelection()
+        message = null
+        loadTopics()
+        message = null
         screen = Screen.DISCOVER
         // Show the feedback states: pick 2 saved, pick 3 marked "more like this".
         if (picks.size >= 3 && picks[1].feedback.isEmpty()) {

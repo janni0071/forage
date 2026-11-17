@@ -145,6 +145,7 @@ class Discover(
                 uploadedAt = full?.uploadedAt ?: c.stub.uploadedAt,
                 vector = candidateVectors.getValue(c.stub.id),
                 sources = c.sources,
+                durationSeconds = full?.durationSeconds ?: c.stub.durationSeconds,
             )
         }
         val picks = Ranker(config).rank(taste, clusters, candidates, library.subscriptions().map { it.channel }.toSet(), now())
@@ -155,6 +156,7 @@ class Discover(
                 StoredPick(
                     i + 1, p.candidate.id, p.candidate.title, p.candidate.channel, p.candidate.channelName,
                     p.score, p.reason, p.candidate.sources.distinct().take(2).joinToString("; ", transform = ::describe), p.exploration,
+                    p.candidate.durationSeconds, p.candidate.uploadedAt,
                 )
             },
         )

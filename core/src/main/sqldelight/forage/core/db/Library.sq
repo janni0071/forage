@@ -68,6 +68,8 @@ CREATE TABLE pick (
     found_via TEXT NOT NULL,
     exploration INTEGER AS kotlin.Boolean NOT NULL,
     created_at INTEGER NOT NULL,
+    duration_seconds INTEGER,
+    uploaded_at INTEGER,
     PRIMARY KEY (profile_id, position)
 );
 

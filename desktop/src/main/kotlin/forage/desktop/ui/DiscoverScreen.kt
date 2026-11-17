@@ -1,76 +1,92 @@
+@file:OptIn(ExperimentalFoundationApi::class)
+
 package forage.desktop.ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import forage.core.recommend.TopicPreference
 import forage.desktop.DesktopModel
-import forage.desktop.ui.Thumbnail
 import forage.desktop.Feedback
 import forage.desktop.PickView
 
 @Composable
 fun DiscoverScreen(model: DesktopModel) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
+    Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 12.dp, top = 16.dp)) {
         Header(model)
-        Row(Modifier.weight(1f).padding(top = 12.dp)) {
-            Box(Modifier.weight(1f)) {
-                if (model.picks.isEmpty()) {
-                    Text(
-                        "No recommendations yet. Add videos to your profile in the library, fetch their details,\n" +
-                            "then press \"Find recommendations\". Nothing is ever recommended unless you ask.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 24.dp),
-                    )
-                } else {
-                    val listState = rememberLazyListState()
-                    LazyColumn(
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(end = 14.dp, bottom = 16.dp),
-                    ) {
-                        items(model.picks, key = { it.pick.position }) { PickCard(model, it) }
-                    }
-                    VerticalScrollbar(rememberScrollbarAdapter(listState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
-                }
+        if (model.topics.isNotEmpty()) TopicStrip(model)
+        if (model.picks.isEmpty()) {
+            Text(
+                "No recommendations yet. Add videos to your profile in the library, fetch their details,\n" +
+                    "then press \"Find recommendations\". Nothing is ever recommended unless you ask.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 24.dp),
+            )
+            return
+        }
+        Box(Modifier.weight(1f).padding(top = 12.dp)) {
+            val gridState = rememberLazyGridState()
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 340.dp),
+                state = gridState,
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                verticalArrangement = Arrangement.spacedBy(28.dp),
+                contentPadding = PaddingValues(end = 16.dp, bottom = 24.dp),
+            ) {
+                items(model.picks, key = { it.pick.position }) { PickCard(model, it) }
             }
-            if (model.topics.isNotEmpty()) {
-                Spacer(Modifier.width(20.dp))
-                TopicsPanel(model)
-            }
+            VerticalScrollbar(rememberScrollbarAdapter(gridState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
         }
     }
 }
@@ -79,7 +95,7 @@ fun DiscoverScreen(model: DesktopModel) {
 private fun Header(model: DesktopModel) {
     var search by remember { mutableStateOf(model.settings.searchYouTube) }
     var shorts by remember { mutableStateOf(model.settings.showShorts) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 12.dp)) {
         Column(Modifier.weight(1f)) {
             Text("Discover", style = MaterialTheme.typography.headlineSmall)
             Text(
@@ -103,107 +119,167 @@ private fun Header(model: DesktopModel) {
     }
 }
 
+/** The profile's topics as a row of chips; the full view with pin and mute is on the Topics screen. */
+@Composable
+private fun TopicStrip(model: DesktopModel) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 12.dp).horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (topic in model.topics.filter { !it.isVaried }) {
+            val c = MaterialTheme.colorScheme
+            val (container, content, prefix) = when (topic.preference) {
+                TopicPreference.PINNED -> Triple(c.primaryContainer, c.onPrimaryContainer, "📌 ")
+                TopicPreference.MUTED -> Triple(c.surfaceContainer, c.onSurfaceVariant.copy(alpha = 0.6f), "Muted: ")
+                null -> Triple(c.surfaceContainerHigh, c.onSurface, "")
+            }
+            Text(
+                "$prefix${topic.label}  ${topic.videos.size}",
+                style = MaterialTheme.typography.labelLarge,
+                color = content,
+                maxLines = 1,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(container)
+                    .clickable { model.screen = forage.desktop.Screen.TOPICS }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun PickCard(model: DesktopModel, view: PickView) {
     val pick = view.pick
-    val dimmed = Feedback.NOT_FOR_ME in view.feedback
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (pick.exploration) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
-            else MaterialTheme.colorScheme.surfaceContainer,
-        ),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                "${pick.position}.",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(32.dp),
-            )
-            Thumbnail(model, pick.video, 208.dp)
-            Column(Modifier.weight(1f).padding(start = 16.dp)) {
-            Row(verticalAlignment = Alignment.Top) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        pick.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (dimmed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+    val rejected = Feedback.NOT_FOR_ME in view.feedback
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    val zoom by animateFloatAsState(if (hovered && !rejected) 1.05f else 1f)
+
+    Column(Modifier.alpha(if (rejected) 0.45f else 1f)) {
+        // The thumbnail: click to watch; zooms gently under the mouse.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .hoverable(hover)
+                .pointerHoverIcon(PointerIcon.Hand)
+                .clickable { model.open(pick.video) },
+        ) {
+            if (model.showThumbnails) {
+                val image by produceState(model.thumbnails.cached(pick.video, large = true), pick.video) {
+                    if (value == null) value = model.thumbnails.load(pick.video, large = true)
+                }
+                image?.let {
+                    Image(
+                        it, contentDescription = null, contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize().graphicsLayer { scaleX = zoom; scaleY = zoom },
                     )
-                    Text(pick.channelName ?: "Unknown channel", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (pick.exploration) {
-                    Tag("Exploration", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
                 }
             }
+            formatDuration(pick.durationSeconds)?.let {
+                Badge(it, Modifier.align(Alignment.BottomEnd).padding(8.dp))
+            }
+            Row(Modifier.align(Alignment.TopStart).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (pick.exploration) Badge("Exploration", background = MaterialTheme.colorScheme.tertiary, content = MaterialTheme.colorScheme.onTertiary)
+                if (Feedback.SAVED in view.feedback) Badge("✓ Saved", background = MaterialTheme.colorScheme.primary, content = MaterialTheme.colorScheme.onPrimary)
+                if (Feedback.MORE in view.feedback) Badge("✓ More like this", background = MaterialTheme.colorScheme.primary, content = MaterialTheme.colorScheme.onPrimary)
+            }
+        }
+
+        Text(
+            pick.title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            // Two lines reserved even for short titles, so the cards in a row line up.
+            minLines = 2,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 10.dp).clickable { model.open(pick.video) },
+        )
+        Text(
+            listOfNotNull(pick.channelName ?: "Unknown channel", formatAge(pick.uploadedAt)).joinToString("  ·  "),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        // The reason, kept short on the card; the whole of it, and where the pick came from, on hover.
+        TooltipArea(
+            tooltip = {
+                Surface(
+                    color = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.width(420.dp),
+                ) {
+                    Text("Why: ${pick.reason}\nFound via ${pick.foundVia}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(10.dp))
+                }
+            },
+            delayMillis = 400,
+        ) {
             Text(
-                "Why: ${pick.reason.removePrefix("exploration: ")}",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            Text(
-                "Found via ${pick.foundVia}",
+                shortReason(pick.reason),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                color = MaterialTheme.colorScheme.primary,
+                minLines = 2,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp),
+                modifier = Modifier.padding(top = 4.dp),
             )
-            // Text buttons carry their own inner padding; shift them so the label lines up with the text above.
-            Row(Modifier.padding(top = 8.dp).offset(x = (-12).dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { model.open(pick.video) }) { Text("Open") }
-                FeedbackButton("More like this", "✓ More like this", Feedback.MORE in view.feedback) { model.feedback(view, Feedback.MORE) }
-                FeedbackButton("Not for me", "✓ Not for me", Feedback.NOT_FOR_ME in view.feedback) { model.feedback(view, Feedback.NOT_FOR_ME) }
-                FeedbackButton("Save for later", "✓ Saved", Feedback.SAVED in view.feedback) { model.feedback(view, Feedback.SAVED) }
-            }
-            }
+        }
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Action("More like this", Feedback.MORE in view.feedback) { model.feedback(view, Feedback.MORE) }
+            Action("Not for me", rejected) { model.feedback(view, Feedback.NOT_FOR_ME) }
+            Action(if (Feedback.SAVED in view.feedback) "Saved" else "Save", Feedback.SAVED in view.feedback) { model.feedback(view, Feedback.SAVED) }
         }
     }
 }
 
-@Composable
-private fun FeedbackButton(label: String, activeLabel: String, active: Boolean, onClick: () -> Unit) {
-    if (active) FilledTonalButton(onClick = onClick) { Text(activeLabel) }
-    else OutlinedButton(onClick = onClick) { Text(label) }
+/** The reason with its most telling part first: "similar to …" reads better on a small card than the topic. */
+private fun shortReason(reason: String): String {
+    val parts = reason.removePrefix("exploration: ").split("; ")
+    val similar = parts.firstOrNull { it.startsWith("similar to") }
+    val rest = parts.filter { it != similar && it != "recent upload" }
+    return listOfNotNull(similar, rest.firstOrNull(), "recent upload".takeIf { "recent upload" in parts })
+        .joinToString(" · ")
+        .replaceFirstChar { it.uppercase() }
 }
 
 @Composable
-private fun TopicsPanel(model: DesktopModel) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        modifier = Modifier.width(280.dp).fillMaxHeight(),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text("Your topics", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "How the profile grouped itself for this batch",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(model.topics, key = { it.index }) { topic ->
-                    Row {
-                        Text(
-                            topic.label + when (topic.preference) {
-                                TopicPreference.PINNED -> "  · pinned"
-                                TopicPreference.MUTED -> "  · muted"
-                                null -> ""
-                            },
-                            color = if (topic.preference == TopicPreference.MUTED) MaterialTheme.colorScheme.onSurfaceVariant
-                            else MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text("${topic.videos.size}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        }
-    }
+private fun Badge(
+    text: String,
+    modifier: Modifier = Modifier,
+    background: Color = Color.Black.copy(alpha = 0.75f),
+    content: Color = Color.White,
+) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = content,
+        modifier = modifier.clip(RoundedCornerShape(5.dp)).background(background).padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+/** A compact pill button that stays filled while its feedback is active. */
+@Composable
+private fun Action(label: String, active: Boolean, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Text(
+        if (active) "✓ $label" else label,
+        style = MaterialTheme.typography.labelLarge,
+        color = if (active) c.onSecondaryContainer else c.onSurfaceVariant,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (active) c.secondaryContainer else c.surfaceContainerHigh)
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .height(18.dp),
+    )
 }

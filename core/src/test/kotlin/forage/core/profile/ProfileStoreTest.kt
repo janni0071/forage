@@ -56,7 +56,10 @@ class ProfileStoreTest {
 
     @Test
     fun `a new batch of picks replaces the previous one`() {
-        fun pick(n: Int, v: String) = StoredPick(n, id(v), "Title $v", null, "Channel", 0.5f, "similar to X", "related to X", n == 2)
+        fun pick(n: Int, v: String) = StoredPick(
+            n, id(v), "Title $v", null, "Channel", 0.5f, "similar to X", "related to X", n == 2,
+            durationSeconds = 754, uploadedAt = java.time.Instant.parse("2026-10-01T00:00:00Z"),
+        )
         store.savePicks(main, listOf(pick(1, "a"), pick(2, "b")))
         store.savePicks(main, listOf(pick(1, "c")))
         assertEquals(listOf(pick(1, "c")), store.picks(main))

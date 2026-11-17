@@ -32,6 +32,8 @@ data class StoredPick(
     val reason: String,
     val foundVia: String,
     val exploration: Boolean,
+    val durationSeconds: Long? = null,
+    val uploadedAt: Instant? = null,
 )
 
 /** The taste profiles of a vault. Profiles share the vault's library but never each other's decisions. */
@@ -83,6 +85,7 @@ class ProfileStore(db: ForageDatabase, private val clock: () -> Instant = Instan
                     PickRow(
                         profile.id, p.position.toLong(), p.video.toString(), p.title, p.channel?.toString(), p.channelName,
                         p.score.toDouble(), p.reason, p.foundVia, p.exploration, now,
+                        p.durationSeconds, p.uploadedAt?.epochSecond,
                     )
                 )
             }
@@ -93,6 +96,7 @@ class ProfileStore(db: ForageDatabase, private val clock: () -> Instant = Instan
         StoredPick(
             it.position.toInt(), PlatformId.parse(it.video_id), it.title, it.channel_id?.let(PlatformId::parse), it.channel_name,
             it.score.toFloat(), it.reason, it.found_via, it.exploration,
+            it.duration_seconds, it.uploaded_at?.let(Instant::ofEpochSecond),
         )
     }
 

@@ -16,6 +16,7 @@ data class Candidate(
     val uploadedAt: Instant?,
     val vector: FloatArray,
     val sources: List<CandidateSource>,
+    val durationSeconds: Long? = null,
 )
 
 data class RankingConfig(

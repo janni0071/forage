@@ -75,9 +75,10 @@ class YouTubeSource : ExtractorSource {
         return doc.wholeText().trim()
     }
 
-    /** Every YouTube video has this 320×180 image, so it needs no metadata fetch. */
-    override fun thumbnailUrl(id: PlatformId): String? =
-        if (id.platform == platform) "https://i.ytimg.com/vi/${id.id}/mqdefault.jpg" else null
+    /** Every YouTube video has the 320×180 image; most also have a 1280×720 one. No metadata fetch needed. */
+    override fun thumbnailUrl(id: PlatformId, large: Boolean): String? =
+        if (id.platform != platform) null
+        else "https://i.ytimg.com/vi/${id.id}/${if (large) "hq720" else "mqdefault"}.jpg"
 
     private fun stubs(items: List<InfoItem>?): List<VideoStub> =
         items.orEmpty().filterIsInstance<StreamInfoItem>().mapNotNull { item ->

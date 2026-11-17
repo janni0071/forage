@@ -28,6 +28,19 @@ private val DATE = DateTimeFormatter.ofPattern("d MMM yyyy").withZone(ZoneId.sys
 
 fun formatDate(instant: Instant?): String? = instant?.let(DATE::format)
 
+/** "3 weeks ago", as video sites put it. Upload dates from list results are approximate anyway. */
+fun formatAge(instant: Instant?, now: Instant = Instant.now()): String? {
+    val days = instant?.let { java.time.Duration.between(it, now).toDays() } ?: return null
+    fun ago(n: Long, unit: String) = "$n $unit${if (n == 1L) "" else "s"} ago"
+    return when {
+        days < 1 -> "today"
+        days < 7 -> ago(days, "day")
+        days < 31 -> ago(days / 7, "week")
+        days < 365 -> ago(days / 30, "month")
+        else -> ago(days / 365, "year")
+    }
+}
+
 fun formatDuration(seconds: Long?): String? = seconds?.let {
     val h = it / 3600
     val m = (it % 3600) / 60

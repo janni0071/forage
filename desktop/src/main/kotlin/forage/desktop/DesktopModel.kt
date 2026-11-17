@@ -100,7 +100,7 @@ class DesktopModel(
     val settings = Settings(File(dataDir, "settings.properties"))
 
     private val source by lazy(sourceFactory)
-    val thumbnails = Thumbnails(File(dataDir, "thumbnails")) { source.thumbnailUrl(it) }
+    val thumbnails = Thumbnails(File(dataDir, "thumbnails")) { id, large -> source.thumbnailUrl(id, large) }
     private val searchCache = SearchCache(db)
     private val topicStore = TopicStore(db)
     private val modelLock = Any()
