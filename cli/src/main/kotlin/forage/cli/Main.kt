@@ -6,34 +6,27 @@ import forage.core.db.ForageDatabase
 import forage.core.embedding.EmbeddingStore
 import forage.core.embedding.EmbeddingText
 import forage.core.embedding.Vectors
-import forage.core.importer.ImportResult
-import forage.core.language.LanguageFilter
-import forage.language.lingua.LinguaDetector
-import forage.core.importer.TakeoutCsv
 import forage.core.importer.TakeoutFolder
-import forage.core.importer.TakeoutWatchHistory
-import forage.core.importer.TakeoutWatchHistoryHtml
-import forage.core.importer.WatchEvent
 import forage.core.library.HistoryFilter
+import forage.core.library.LibraryStore
 import forage.core.library.WatchHistory
 import forage.core.metadata.FetchOutcome
 import forage.core.metadata.FetchPolicy
 import forage.core.metadata.MetadataCache
 import forage.core.metadata.MetadataFetcher
 import forage.core.profile.ProfileFile
-import forage.core.recommend.Candidate
-import forage.core.recommend.CandidateGenerator
-import forage.core.recommend.CandidateSource
-import forage.core.recommend.Clusters
-import forage.core.recommend.Profile
-import forage.core.recommend.ProfileVideo
-import forage.core.recommend.Ranker
+import forage.core.profile.ProfileRef
+import forage.core.profile.ProfileStore
+import forage.core.profile.VideoState
+import forage.core.recommend.Discover
+import forage.core.recommend.EmptyProfileException
 import forage.core.recommend.RankingConfig
 import forage.core.source.SourceException
 import forage.core.source.VideoStub
 import forage.embedding.onnx.ModelFiles
 import forage.embedding.onnx.ModelSpec
 import forage.embedding.onnx.OnnxEmbedder
+import forage.language.lingua.LinguaDetector
 import forage.source.youtube.YouTubeSource
 import java.io.File
 import java.io.FileDescriptor
@@ -41,111 +34,165 @@ import java.io.FileOutputStream
 import java.io.PrintStream
 import java.nio.file.Path
 import java.time.Duration
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeParseException
 import java.util.Properties
-import kotlin.random.Random
 import kotlin.system.exitProcess
 
-private const val USAGE = """Usage:
-  forage takeout <file> [--top N]
-      Summarise a Google Takeout video list. <file> is watch-history.json, watch-history.html
-      or a playlist such as "playlists/Watch later-videos.csv".
+private const val USAGE = """Usage: forage <command> [options]
 
-  forage pick <file> [filters] [--limit N] [--db FILE]
-      Print matching videos as profile lines, most watched first. Append them to your profile:
-        forage pick watch-history.html --channel "Workshop Wren" >> profile.txt
-      Playlists list ids only; titles are filled in from the metadata cache once fetched.
-      Filters (combined with AND; --channel may be repeated and matches any):
-        --channel TEXT       channel name contains TEXT, or a full channel id (youtube:UC...)
-        --title TEXT         title contains TEXT
-        --min-watches N      watched at least N times
-        --since YYYY-MM-DD   watched on or after this day
-        --until YYYY-MM-DD   watched on or before this day
+Library
+  import <takeout-folder>      Import an extracted Google Takeout: watch history, playlists and
+                               subscriptions. Nothing imported enters a profile by itself.
+  library [selection]          List videos from the library with their state in the profile.
+  status                       Show what the vault and the profile contain.
 
-  forage profile <profile.txt>
-      Check a profile file: count videos, report duplicates and unreadable lines.
+Profile
+  include [videos] [selection] Put videos into the profile.
+  exclude [videos] [selection] Keep videos out of the profile and out of recommendations.
+  reject  [videos] [selection] Mark videos "not for me": steers recommendations away from them.
+  clear   [videos] [selection] Undo any of the three above.
 
-  forage fetch <profile.txt | url-or-id> [--max-age HOURS] [--db FILE]
-      Fetch metadata and related videos from YouTube into the local cache (needs network).
-      With a profile file, fetches every video in it; cached videos are skipped, so an
-      interrupted or blocked run can simply be started again. --max-age fetches videos again
-      whose cached copy is older than that, to renew their related videos.
-      Default cache: data/forage.db
+  [videos] are URLs or ids, and/or --file FILE with one per line.
+  [selection] picks videos from the library; filters combine with AND:
+    --playlist NAME      videos of an imported playlist, not the watch history
+    --channel TEXT       channel name contains TEXT, or a channel id (repeatable, any matches)
+    --title TEXT         title contains TEXT
+    --min-watches N      watched at least N times
+    --since / --until YYYY-MM-DD   watched or saved in this period
+    --limit N            the N most watched, then most recent
 
-  forage embed [--db FILE] [--models DIR]
-      Compute an embedding for every cached video that lacks one. Downloads the model
-      (about 470 MB) into data/models on first use.
+Recommendations
+  fetch [video] [--max-age HOURS]
+                               Fetch metadata and related videos from YouTube (needs network).
+                               Without a video: everything in the profile that isn't cached, or
+                               whose cached copy is older than --max-age. Safe to re-run.
+  discover [--count N] [--no-search] [--shorts]
+                               Recommend videos for the profile, each with its reason.
+  more <n> | no <n> | save <n> Feedback on pick number n of the last discover: more like this,
+                               not for me, or save to watch later.
+  later [--remove VIDEO]       Show the watch-later queue, or take a video off it.
 
-  forage similar <url-or-id> [--top N] [--db FILE] [--models DIR]
-      List the cached videos most similar to one of them: a sanity check for the embeddings.
+Tools
+  similar <video> [--top N]    List cached videos most similar to one.
+  search <query>               Search YouTube.
 
-  forage discover <profile.txt> [--takeout DIR] [--not-for-me FILE] [--count N] [--no-search]
-                  [--shorts] [--seed N] [--db FILE] [--models DIR]
-      Print recommendations for a profile, each with the reason it was picked. Candidates are
-      the related videos of your profile videos (from the cache, so run 'forage fetch' on the
-      profile first) plus one YouTube search per topic cluster.
-        --takeout DIR      extracted Takeout folder: its history and playlists are never
-                           suggested, and its subscriptions decide what counts as a new channel
-        --not-for-me FILE  profile-style file of videos to steer away from; fetch it first,
-                           since only videos with cached metadata can count
-        --no-search        skip the searches (no network needed)
-        --shorts           include Shorts
+Common options
+  --profile NAME               Profile to use (default "Default"; created on first use)
+  --db FILE                    The vault's database (default data/forage.db)
+  --models DIR                 Where the embedding model is kept (default data/models)"""
 
-  forage search <query>
-      Search YouTube for videos (needs network)."""
+private val COMMON = setOf("--db", "--profile", "--models")
+private val SELECTION = setOf("--playlist", "--channel", "--title", "--min-watches", "--since", "--until", "--limit", "--file")
 
 fun main(args: Array<String>) {
     // Titles are multilingual; don't let a non-UTF-8 default console charset mangle them.
     System.setOut(PrintStream(FileOutputStream(FileDescriptor.out), true, Charsets.UTF_8))
     try {
         val rest = args.drop(1)
-        when (args.firstOrNull()) {
-            "takeout" -> takeout(Args(rest, setOf("--top")))
-            "pick" -> pick(Args(rest, setOf("--channel", "--title", "--min-watches", "--since", "--until", "--limit", "--db")))
-            "profile" -> profile(Args(rest, emptySet()))
-            "fetch" -> fetch(Args(rest, setOf("--db", "--max-age")))
-            "embed" -> embed(Args(rest, setOf("--db", "--models")))
-            "similar" -> similar(Args(rest, setOf("--db", "--models", "--top")))
-            "discover" -> discover(
-                Args(rest, setOf("--takeout", "--not-for-me", "--count", "--seed", "--db", "--models"), setOf("--no-search", "--shorts"))
-            )
+        when (val command = args.firstOrNull()) {
+            "import" -> import(Args(rest, COMMON))
+            "library" -> library(Args(rest, COMMON + SELECTION))
+            "status" -> status(Args(rest, COMMON))
+            "include" -> mark(Args(rest, COMMON + SELECTION), VideoState.INCLUDED)
+            "exclude" -> mark(Args(rest, COMMON + SELECTION), VideoState.EXCLUDED)
+            "reject" -> mark(Args(rest, COMMON + SELECTION), VideoState.NEGATIVE)
+            "clear" -> mark(Args(rest, COMMON + SELECTION), null)
+            "fetch" -> fetch(Args(rest, COMMON + "--max-age"))
+            "discover" -> discover(Args(rest, COMMON + "--count", setOf("--no-search", "--shorts")))
+            "more", "no", "save" -> feedback(command, Args(rest, COMMON))
+            "later" -> later(Args(rest, COMMON + "--remove"))
+            "similar" -> similar(Args(rest, COMMON + "--top"))
             "search" -> search(Args(rest, emptySet()))
             else -> throw UsageError(USAGE)
         }
     } catch (e: UsageError) {
         System.err.println(e.message)
         exitProcess(2)
+    } catch (e: EmptyProfileException) {
+        System.err.println("${e.message}. Add videos with 'forage include', then run 'forage fetch'.")
+        exitProcess(1)
     } catch (e: SourceException) {
         System.err.println(e.message)
         exitProcess(if (e is SourceException.Blocked) 3 else 1)
     }
 }
 
-private fun takeout(args: Args) {
-    val top = args.int("--top") ?: 15
-    val result = readHistory(args)
-    val videos = WatchHistory.select(result.events)
-    val dates = result.events.mapNotNull { it.watchedAt }
+/** One vault: a database file and the stores on top of it. */
+private class Vault(args: Args) {
+    val db = openDatabase(File(args.one("--db") ?: "data/forage.db"))
+    val cache = MetadataCache(db)
+    val library = LibraryStore(db)
+    val profiles = ProfileStore(db)
+    val profile: ProfileRef = profiles.profile(args.one("--profile") ?: ProfileStore.DEFAULT)
 
-    println("Watch events:   ${result.events.size}")
-    println("Unique videos:  ${videos.size} (${videos.count { it.isShort }} Shorts)")
-    println("Channels:       ${videos.mapNotNull { it.channel?.toString() ?: it.channelName }.distinct().size}")
-    if (dates.isNotEmpty()) println("Date range:     ${dates.min()} to ${dates.max()}")
-    for ((reason, count) in result.skipped) println("Skipped:        $count ${reason.name.lowercase().replace('_', ' ')}")
+    fun states(): Map<PlatformId, VideoState> = profiles.entries(profile).associate { it.video to it.state }
 
-    println("\nTop channels by videos watched:")
-    videos.groupingBy { it.channelName ?: "(unknown)" }.eachCount()
-        .entries.sortedByDescending { it.value }.take(top)
-        .forEach { println("  %5d  %s".format(it.value, it.key)) }
-
-    println("\nMost rewatched:")
-    videos.filter { it.watchCount > 1 }.take(top).forEach { println("  " + ProfileFile.line(it)) }
+    /** The best title known for a video: fetched metadata first, then what an import said. */
+    fun label(id: PlatformId): String {
+        val meta = cache.video(id)?.metadata
+        val title = meta?.title ?: library.video(id)?.title
+        val channel = meta?.channelName ?: library.video(id)?.channelName
+        return listOfNotNull(title, channel).joinToString(" — ").ifEmpty { "(no title yet)" }
+    }
 }
 
-private fun pick(args: Args) {
+private fun openDatabase(file: File): ForageDatabase {
+    file.absoluteFile.parentFile.mkdirs()
+    // The driver creates the schema on first use and migrates it on later versions.
+    return ForageDatabase(JdbcSqliteDriver("jdbc:sqlite:${file.path}", Properties(), ForageDatabase.Schema))
+}
+
+private fun embedder(args: Args): OnnxEmbedder {
+    val spec = ModelSpec.MULTILINGUAL_MINILM
+    val files = ModelFiles.ensure(spec, Path.of(args.one("--models") ?: "data/models", "minilm")) {
+        System.err.println("Downloading $it from ${spec.repo} ...")
+    }
+    return OnnxEmbedder(spec, files)
+}
+
+// Library
+
+private fun import(args: Args) {
+    val dir = File(args.positional.singleOrNull() ?: throw UsageError(USAGE))
+    if (!dir.isDirectory) throw UsageError("No such folder: $dir (extract the Takeout archive first)")
+    val data = TakeoutFolder.read(dir)
+    val vault = Vault(args)
+    val summary = vault.library.importTakeout(data)
+
+    println("Watch history:  ${summary.watchEvents} events")
+    for ((reason, count) in data.history.skipped) println("  skipped $count ${reason.name.lowercase().replace('_', ' ')}")
+    println("Playlists:      ${summary.playlists.size}")
+    summary.playlists.forEach { (name, size) -> println("  %5d  %s".format(size, name)) }
+    println("Subscriptions:  ${summary.subscriptions}")
+    val (videos, events) = vault.library.counts()
+    println("\nThe library now holds $videos videos and $events watch events. Nothing was added to a profile.")
+}
+
+/** Videos named on the command line or in --file, plus those the selection options pick from the library. */
+private fun selected(args: Args, vault: Vault, requireSome: Boolean): List<PlatformId> {
+    val named = args.positional.map(::videoId) +
+        args.one("--file")?.let { path ->
+            val file = File(path).takeIf(File::isFile) ?: throw UsageError("No such file: $path")
+            val parsed = ProfileFile.parse(file.readText())
+            if (parsed.invalid.isNotEmpty()) {
+                throw UsageError("$path has unreadable lines:\n" + parsed.invalid.joinToString("\n") { "  line ${it.first}: ${it.second}" })
+            }
+            parsed.videos
+        }.orEmpty()
+
+    val filters = listOf("--playlist", "--channel", "--title", "--min-watches", "--since", "--until", "--limit")
+    val filtering = filters.any { args.one(it) != null }
+    if (!filtering) {
+        if (named.isEmpty() && requireSome) throw UsageError("Name some videos, or select them with --playlist, --channel, --since ...")
+        if (named.isNotEmpty() || requireSome) return named.distinct()
+    }
+
+    val playlist = args.one("--playlist")
+    if (playlist != null && playlist !in vault.library.playlists()) {
+        throw UsageError("No playlist \"$playlist\". Imported playlists: ${vault.library.playlists().keys.joinToString { "\"$it\"" }}")
+    }
     val zone = ZoneId.systemDefault()
     val filter = HistoryFilter(
         channels = args.all("--channel"),
@@ -155,68 +202,78 @@ private fun pick(args: Args) {
         until = args.one("--until")?.let { day(it).plusDays(1).atStartOfDay(zone).toInstant() },
         minWatches = args.int("--min-watches") ?: 1,
     )
-    // Playlists and old history entries carry no titles; borrow them from the metadata cache where it has them.
-    val cache = args.one("--db").let { File(it ?: "data/forage.db") }.takeIf { it.isFile }?.let { MetadataCache(openDatabase(it)) }
-    val events = readHistory(args).events.map { e ->
-        if (e.title != null || cache == null) e
-        else cache.video(e.video)?.metadata?.let { e.copy(title = it.title, channel = it.channel, channelName = it.channelName) } ?: e
+    // Imports often lack titles and channels; borrow them from fetched metadata so filters can see them.
+    val events = vault.library.events(playlist).map { e ->
+        if (e.title != null && e.channelName != null) e
+        else vault.cache.video(e.video)?.metadata?.let {
+            e.copy(title = e.title ?: it.title, channel = e.channel ?: it.channel, channelName = e.channelName ?: it.channelName)
+        } ?: e
     }
-    val matches = WatchHistory.select(events, filter)
-    val shown = matches.take(args.int("--limit") ?: Int.MAX_VALUE)
-    shown.forEach { println(ProfileFile.line(it)) }
-    // Status goes to stderr so that stdout can be redirected straight into a profile file.
-    System.err.println("${shown.size} of ${matches.size} matching videos")
+    val matches = WatchHistory.select(events, filter).map { it.video }
+    return (named + matches.take(args.int("--limit") ?: Int.MAX_VALUE)).distinct()
 }
 
-private fun profile(args: Args) {
-    val parsed = ProfileFile.parse(file(args).readText())
-    println("Videos:      ${parsed.videos.size}")
-    println("Duplicates:  ${parsed.duplicates.size}")
-    parsed.duplicates.distinct().forEach { println("  $it") }
-    println("Unreadable:  ${parsed.invalid.size}")
-    parsed.invalid.forEach { (line, text) -> println("  line $line: $text") }
-    if (parsed.invalid.isNotEmpty()) exitProcess(1)
+private fun library(args: Args) {
+    val vault = Vault(args)
+    val videos = selected(args, vault, requireSome = false)
+    val states = vault.states()
+    videos.forEach { id ->
+        val state = states[id]?.let { " [${stateName(it)}]" }.orEmpty()
+        println("$id  ${vault.label(id)}$state")
+    }
+    System.err.println("${videos.size} videos")
 }
+
+private fun status(args: Args) {
+    val vault = Vault(args)
+    val (videos, events) = vault.library.counts()
+    println("Library:   $videos videos, $events watch events, ${vault.library.subscriptions().size} subscriptions")
+    vault.library.playlists().forEach { (name, size) -> println("  playlist %-28s %5d videos".format("\"$name\"", size)) }
+    println("Watch later queue: ${vault.library.watchLater().size} videos")
+    println("Metadata cache:    ${vault.cache.size()} videos")
+    for (profile in vault.profiles.profiles()) {
+        val entries = vault.profiles.entries(profile)
+        val marker = if (profile == vault.profile) "*" else " "
+        println(
+            "$marker Profile \"${profile.name}\": ${entries.count { it.state == VideoState.INCLUDED }} included, " +
+                "${entries.count { it.state == VideoState.EXCLUDED }} excluded, ${entries.count { it.state == VideoState.NEGATIVE }} not for me"
+        )
+    }
+}
+
+// Profile
+
+private fun mark(args: Args, state: VideoState?) {
+    val vault = Vault(args)
+    val videos = selected(args, vault, requireSome = true)
+    videos.forEach { vault.library.remember(it) }
+    vault.profiles.mark(vault.profile, videos, state)
+    val what = state?.let { "marked ${stateName(it)}" } ?: "cleared"
+    println("${videos.size} videos $what in profile \"${vault.profile.name}\"")
+}
+
+private fun stateName(state: VideoState) = when (state) {
+    VideoState.INCLUDED -> "in profile"
+    VideoState.EXCLUDED -> "excluded"
+    VideoState.NEGATIVE -> "not for me"
+}
+
+// Recommendations
 
 private fun fetch(args: Args) {
-    val arg = args.positional.singleOrNull() ?: throw UsageError(USAGE)
-    val cache = MetadataCache(openDatabase(File(args.one("--db") ?: "data/forage.db")))
+    val vault = Vault(args)
     val policy = FetchPolicy(maxAge = args.int("--max-age")?.let { Duration.ofHours(it.toLong()) })
-    val fetcher = MetadataFetcher(YouTubeSource(), cache, policy)
-    if (File(arg).isFile) fetchProfile(File(arg), fetcher) else fetchOne(arg, fetcher)
-}
+    val fetcher = MetadataFetcher(YouTubeSource(), vault.cache, policy)
+    val single = args.positional.singleOrNull()
+    if (single != null) return fetchOne(videoId(single), fetcher)
+    if (args.positional.isNotEmpty()) throw UsageError(USAGE)
 
-/** A single video given as URL, `platform:id` or bare YouTube id, the form people copy most often. */
-private fun videoId(arg: String): PlatformId {
-    val entry = if (Regex("[A-Za-z0-9_-]{11}").matches(arg)) "youtube:$arg" else arg
-    return ProfileFile.parse(entry).videos.singleOrNull() ?: throw UsageError("Not a video URL or id: $arg")
-}
-
-private fun fetchOne(arg: String, fetcher: MetadataFetcher) {
-    val id = videoId(arg)
-    val (video, related) = when (val outcome = fetcher.fetch(id)) {
-        is FetchOutcome.Cached -> outcome.details.also { println("(from cache)") }
-        is FetchOutcome.Fetched -> outcome.details
-        is FetchOutcome.Unavailable -> throw SourceException.NotAvailable("$id is not available: ${outcome.reason}")
-        is FetchOutcome.Failed -> throw outcome.error
-    }
-
-    println("${video.id}  ${video.title}")
-    println("Channel:      ${video.channelName ?: "?"} (${video.channel ?: "no id"})")
-    println("Uploaded:     ${video.uploadedAt ?: "?"}   Duration: ${video.durationSeconds ?: "?"}s   Short: ${video.isShort}")
-    println("Language:     ${video.language ?: "?"}   ${video.extra}")
-    println("Tags:         ${video.tags.joinToString(", ").ifEmpty { "(none)" }}")
-    println("Description:  ${video.description.length} chars: ${video.description.replace(Regex("\\s+"), " ").take(160)}")
-    println("\nRelated videos: ${related.size}")
-    related.take(10).forEach(::printStub)
-}
-
-private fun fetchProfile(file: File, fetcher: MetadataFetcher) {
-    val parsed = ProfileFile.parse(file.readText())
-    if (parsed.invalid.isNotEmpty()) throw UsageError("${file.path} has unreadable lines; run 'forage profile ${file.path}'")
-    val total = parsed.videos.size
+    // Rejected videos need metadata too: they only steer recommendations once embedded.
+    val wanted = vault.profiles.entries(vault.profile).filter { it.state != VideoState.EXCLUDED }.map { it.video }
+    if (wanted.isEmpty()) throw EmptyProfileException("The profile \"${vault.profile.name}\" has no videos yet")
+    val total = wanted.size
     var done = 0
-    val summary = fetcher.fetchAll(parsed.videos) { id, outcome ->
+    val summary = fetcher.fetchAll(wanted) { id, outcome ->
         done++
         val text = when (outcome) {
             is FetchOutcome.Cached -> return@fetchAll
@@ -237,153 +294,110 @@ private fun fetchProfile(file: File, fetcher: MetadataFetcher) {
     if (summary.failed > 0) exitProcess(1)
 }
 
-private fun openDatabase(file: File): ForageDatabase {
-    file.absoluteFile.parentFile.mkdirs()
-    // The driver creates the schema on first use and migrates it on later versions.
-    return ForageDatabase(JdbcSqliteDriver("jdbc:sqlite:${file.path}", Properties(), ForageDatabase.Schema))
-}
-
-private class Engine(args: Args) : AutoCloseable {
-    val db = openDatabase(File(args.one("--db") ?: "data/forage.db"))
-    val cache = MetadataCache(db)
-    private val spec = ModelSpec.MULTILINGUAL_MINILM
-    private val embedder = OnnxEmbedder(
-        spec,
-        ModelFiles.ensure(spec, Path.of(args.one("--models") ?: "data/models", "minilm")) {
-            System.err.println("Downloading $it from ${spec.repo} ...")
-        },
-    )
-    val embeddings = EmbeddingStore(db, embedder)
-
-    override fun close() = embedder.close()
-}
-
-/** Embeds every cached video that has no current vector and returns all vectors with their metadata. */
-private fun embedAll(args: Args): Pair<MetadataCache, Map<PlatformId, FloatArray>> = Engine(args).use { engine ->
-    val texts = engine.cache.ids().associateWith { EmbeddingText.of(engine.cache.video(it)!!.metadata) }
-    val vectors = engine.embeddings.embed(texts) { done -> System.err.println("Embedded $done of ${texts.size}") }
-    engine.cache to vectors
+private fun fetchOne(id: PlatformId, fetcher: MetadataFetcher) {
+    val (video, related) = when (val outcome = fetcher.fetch(id)) {
+        is FetchOutcome.Cached -> outcome.details.also { println("(from cache)") }
+        is FetchOutcome.Fetched -> outcome.details
+        is FetchOutcome.Unavailable -> throw SourceException.NotAvailable("$id is not available: ${outcome.reason}")
+        is FetchOutcome.Failed -> throw outcome.error
+    }
+    println("${video.id}  ${video.title}")
+    println("Channel:      ${video.channelName ?: "?"} (${video.channel ?: "no id"})")
+    println("Uploaded:     ${video.uploadedAt ?: "?"}   Duration: ${video.durationSeconds ?: "?"}s   Short: ${video.isShort}")
+    println("Language:     ${video.language ?: "?"}   ${video.extra}")
+    println("Tags:         ${video.tags.joinToString(", ").ifEmpty { "(none)" }}")
+    println("Description:  ${video.description.length} chars: ${video.description.replace(Regex("\\s+"), " ").take(160)}")
+    println("\nRelated videos: ${related.size}")
+    related.take(10).forEach(::printStub)
 }
 
 private fun discover(args: Args) {
-    val profileFile = file(args)
-    val parsed = ProfileFile.parse(profileFile.readText())
-    if (parsed.invalid.isNotEmpty()) throw UsageError("${profileFile.path} has unreadable lines; run 'forage profile ${profileFile.path}'")
-    val takeout = args.one("--takeout")?.let { TakeoutFolder.read(File(it).takeIf(File::isDirectory) ?: throw UsageError("No such folder: $it")) }
-    val notForMe = args.one("--not-for-me")?.let { ProfileFile.parse(File(it).readText()).videos }.orEmpty()
-    val seed = args.int("--seed")?.toLong() ?: 1L
+    if (args.positional.isNotEmpty()) throw UsageError(USAGE)
+    val vault = Vault(args)
+    val config = RankingConfig(showShorts = args.flag("--shorts")).let { c -> args.int("--count")?.let { c.copy(slots = it) } ?: c }
+    val result = embedder(args).use { embedder ->
+        Discover(
+            vault.cache, vault.library, vault.profiles, EmbeddingStore(vault.db, embedder),
+            detector = LinguaDetector(),
+            source = YouTubeSource().takeUnless { args.flag("--no-search") },
+            config = config,
+        ).run(vault.profile)
+    }
 
-    Engine(args).use { engine ->
-        val cache = engine.cache
-        val known = parsed.videos.mapNotNull { cache.video(it)?.metadata }
-        val missing = parsed.videos.size - known.size
-        if (known.isEmpty()) throw UsageError("None of the profile's videos are in the cache; run 'forage fetch ${profileFile.path}' first")
-        if (missing > 0) System.err.println("$missing profile videos have no cached metadata and are left out; run 'forage fetch ${profileFile.path}'")
+    if (result.withoutMetadata > 0) System.err.println("${result.withoutMetadata} profile videos have no metadata yet and were left out; run 'forage fetch'")
+    result.searchFailures.forEach { System.err.println("Search skipped: $it") }
 
-        val profileVectors = engine.embeddings.embed(known.associate { it.id to EmbeddingText.of(it) })
-        val negativeVideos = notForMe.mapNotNull { cache.video(it)?.metadata }
-        if (negativeVideos.size < notForMe.size) {
-            System.err.println("${notForMe.size - negativeVideos.size} not-for-me videos have no cached metadata and don't count yet; run 'forage fetch' on that file")
+    val topics = result.clusters.filter { !it.isVaried }
+    println("Profile \"${vault.profile.name}\": ${result.clusters.sumOf { it.videos.size }} videos, ${topics.size} topics")
+    result.clusters.forEach { c -> println("  %2d. %-42s %3d videos".format(c.index + 1, c.label, c.videos.size)) }
+    println(
+        "\n${result.picks.size} picks from ${result.candidates} candidates" +
+            if (result.foreignLanguage > 0) " (${result.foreignLanguage} more dropped for their language)" else ""
+    )
+    println()
+    printPicks(vault)
+    println("Feedback: 'forage more <n>', 'forage no <n>' or 'forage save <n>'")
+}
+
+private fun printPicks(vault: Vault) {
+    val states = vault.states()
+    val saved = vault.library.watchLater().toSet()
+    for (pick in vault.profiles.picks(vault.profile)) {
+        val done = when {
+            pick.video in saved -> "  [saved]"
+            states[pick.video] == VideoState.INCLUDED -> "  [more like this]"
+            states[pick.video] == VideoState.NEGATIVE -> "  [not for me]"
+            else -> ""
         }
-        val negatives = engine.embeddings.embed(negativeVideos.associate { it.id to EmbeddingText.of(it) }).values.toList()
-
-        // When each video was first saved or watched, to see how soon after its upload that was.
-        val firstSeen = HashMap<PlatformId, Instant>()
-        fun seen(id: PlatformId, at: Instant?) { if (at != null) firstSeen.merge(id, at) { a, b -> minOf(a, b) } }
-        takeout?.history?.events?.forEach { seen(it.video, it.watchedAt) }
-        takeout?.playlists?.values?.forEach { list -> list.forEach { seen(it.video, it.addedAt) } }
-
-        val profile = Profile(
-            known.map { v ->
-                val age = v.uploadedAt?.let { up -> firstSeen[v.id]?.let { Duration.between(up, it).toDays().coerceAtLeast(0) } }
-                ProfileVideo(v.id, v.title, v.channel, profileVectors.getValue(v.id), ageWhenAddedDays = age)
-            },
-            negatives,
-        )
-        val clusters = Clusters.of(
-            profile,
-            known.associate { it.id to EmbeddingText.keywordsSource(it) },
-            channelNames = known.mapNotNull { it.channelName },
-        )
-
-        println("Profile: ${profile.videos.size} videos, ${clusters.count { !it.isVaried }} topics")
-        clusters.forEach { c ->
-            val fresh = c.videos.count { it.addedFresh } * 100 / c.videos.size
-            println("  %2d. %-42s %3d videos, %3d%% saved within a month of upload".format(c.index + 1, c.label, c.videos.size, fresh))
-        }
-
-        val exclude = buildSet {
-            addAll(parsed.videos)
-            addAll(notForMe)
-            takeout?.history?.events?.forEach { add(it.video) }
-            takeout?.playlists?.values?.forEach { list -> list.forEach { add(it.video) } }
-        }
-        val generator = CandidateGenerator(cache, YouTubeSource().takeUnless { args.flag("--no-search") }, Random(seed))
-        val stubs = generator.generate(clusters, exclude)
-        generator.searchFailures.forEach { System.err.println("Search skipped: $it") }
-
-        // Candidates are mostly known from list results only; use the full text for those that happen to be cached.
-        val languages = LanguageFilter(LinguaDetector(), known.map { "${it.title}\n${it.description.take(300)}" })
-        val (kept, foreign) = stubs.partition { languages.foreignLanguage(it.stub.title) == null }
-        System.err.println(
-            "Profile languages: ${languages.profileLanguages.entries.joinToString { "${it.key} ${it.value}" }}; " +
-                "dropped ${foreign.size} candidates in other languages"
-        )
-
-        val texts = kept.associate { c -> c.stub.id to (cache.video(c.stub.id)?.metadata?.let(EmbeddingText::of) ?: EmbeddingText.of(c.stub)) }
-        System.err.println("Scoring ${kept.size} candidates ...")
-        val vectors = engine.embeddings.embed(texts)
-        val candidates = kept.map { c ->
-            val full = cache.video(c.stub.id)?.metadata
-            Candidate(
-                id = c.stub.id,
-                title = c.stub.title,
-                channel = c.stub.channel,
-                channelName = c.stub.channelName,
-                isShort = c.stub.isShort || full?.isShort == true,
-                uploadedAt = full?.uploadedAt ?: c.stub.uploadedAt,
-                vector = vectors.getValue(c.stub.id),
-                sources = c.sources,
-            )
-        }
-        val config = RankingConfig(showShorts = args.flag("--shorts")).let { c -> args.int("--count")?.let { c.copy(slots = it) } ?: c }
-        val picks = Ranker(config).rank(profile, clusters, candidates, takeout?.subscriptions.orEmpty().map { it.channel }.toSet())
-
-        println("\n${picks.size} picks from ${candidates.size} candidates\n")
-        picks.forEachIndexed { i, pick ->
-            val c = pick.candidate
-            println("%2d. %s — %s".format(i + 1, c.title, c.channelName ?: "?"))
-            println("    https://www.youtube.com/watch?v=${c.id.id}   score %.2f".format(pick.score))
-            println("    Why: ${pick.reason}")
-            println("    Found via: ${c.sources.distinct().take(2).joinToString("; ", transform = ::describe)}\n")
-        }
+        println("%2d. %s — %s%s".format(pick.position, pick.title, pick.channelName ?: "?", done))
+        println("    https://www.youtube.com/watch?v=${pick.video.id}   score %.2f".format(pick.score))
+        println("    Why: ${pick.reason}")
+        println("    Found via: ${pick.foundVia}\n")
     }
 }
 
-private fun describe(source: CandidateSource): String = when (source) {
-    is CandidateSource.RelatedTo -> "related to \"${source.video.title}\""
-    is CandidateSource.Search -> "search \"${source.query}\""
+private fun feedback(kind: String, args: Args) {
+    val vault = Vault(args)
+    val picks = vault.profiles.picks(vault.profile)
+    if (picks.isEmpty()) throw UsageError("No picks yet for profile \"${vault.profile.name}\"; run 'forage discover' first")
+    val numbers = args.positional.map { it.toIntOrNull() ?: throw UsageError("'$it' is not a pick number") }
+    if (numbers.isEmpty()) throw UsageError("Which pick? For example: forage $kind 3")
+    for (n in numbers) {
+        val pick = picks.firstOrNull { it.position == n } ?: throw UsageError("There is no pick $n; the last batch has ${picks.size}")
+        // Keep what the list result told us, so the video has a title before any metadata fetch.
+        vault.library.remember(pick.video, pick.title, pick.channel, pick.channelName)
+        val done = when (kind) {
+            "more" -> { vault.profiles.moreLikeThis(vault.profile, pick.video); "added to the profile at reduced weight" }
+            "no" -> { vault.profiles.notForMe(vault.profile, pick.video); "marked not for me" }
+            else -> { vault.library.saveForLater(pick.video); "saved to watch later" }
+        }
+        println("$n. ${pick.title}: $done")
+    }
+    if (kind != "save") println("Run 'forage fetch' so this counts in the next discover.")
 }
 
-private fun embed(args: Args) {
-    if (args.positional.isNotEmpty()) throw UsageError(USAGE)
-    val (_, vectors) = embedAll(args)
-    println("${vectors.size} videos have embeddings")
+private fun later(args: Args) {
+    val vault = Vault(args)
+    args.one("--remove")?.let { vault.library.removeFromWatchLater(videoId(it)) }
+    val queue = vault.library.watchLater()
+    queue.forEach { println("https://www.youtube.com/watch?v=${it.id}  ${vault.label(it)}") }
+    System.err.println("${queue.size} videos saved for later")
 }
+
+// Tools
 
 private fun similar(args: Args) {
     val id = videoId(args.positional.singleOrNull() ?: throw UsageError(USAGE))
-    val (cache, vectors) = embedAll(args)
+    val vault = Vault(args)
+    val texts = vault.cache.ids().associateWith { EmbeddingText.of(vault.cache.video(it)!!.metadata) }
+    val vectors = embedder(args).use { EmbeddingStore(vault.db, it).embed(texts) }
     val target = vectors[id] ?: throw UsageError("$id is not in the cache; run 'forage fetch $id' first")
-    println("Most similar to: ${cache.video(id)!!.metadata.title}\n")
+    println("Most similar to: ${vault.label(id)}\n")
     vectors.filterKeys { it != id }
         .mapValues { Vectors.dot(target, it.value) }
         .entries.sortedByDescending { it.value }
         .take(args.int("--top") ?: 10)
-        .forEach { (other, score) ->
-            val v = cache.video(other)!!.metadata
-            println("  %.3f  %s  %s — %s".format(score, other, v.title, v.channelName ?: "?"))
-        }
+        .forEach { (other, score) -> println("  %.3f  %s  %s".format(score, other, vault.label(other))) }
 }
 
 private fun search(args: Args) {
@@ -394,24 +408,10 @@ private fun search(args: Args) {
 private fun printStub(stub: VideoStub) =
     println("  ${stub.id}  ${stub.title} — ${stub.channelName ?: "?"}${if (stub.isShort) " [Short]" else ""}")
 
-/** Reads any Takeout video list: watch history as JSON or HTML, or a playlist's `-videos.csv`. */
-private fun readHistory(args: Args): ImportResult {
-    val file = file(args)
-    return when (file.extension.lowercase()) {
-        "json" -> file.inputStream().buffered().use(TakeoutWatchHistory::parse)
-        "html", "htm" -> file.inputStream().buffered().use(TakeoutWatchHistoryHtml::parse)
-        // A playlist only lists ids; "watched at" stands in for "added at" so the date filters work on it.
-        "csv" -> ImportResult(
-            TakeoutCsv.playlist(file.readText()).map { WatchEvent(it.video, null, null, null, it.addedAt) },
-            emptyMap(),
-        )
-        else -> throw UsageError("Don't know how to read ${file.name}: expected watch-history.json, watch-history.html or a playlist .csv")
-    }
-}
-
-private fun file(args: Args): File {
-    val path = args.positional.singleOrNull() ?: throw UsageError(USAGE)
-    return File(path).takeIf { it.isFile } ?: throw UsageError("No such file: $path")
+/** A single video given as URL, `platform:id` or bare YouTube id, the form people copy most often. */
+private fun videoId(arg: String): PlatformId {
+    val entry = if (Regex("[A-Za-z0-9_-]{11}").matches(arg)) "youtube:$arg" else arg
+    return ProfileFile.parse(entry).videos.singleOrNull() ?: throw UsageError("Not a video URL or id: $arg")
 }
 
 private fun day(text: String): LocalDate = try {

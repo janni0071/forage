@@ -23,11 +23,16 @@ object TakeoutFolder {
             ?: files.firstOrNull { it.name == "watch-history.html" }?.let { it.inputStream().buffered().use(TakeoutWatchHistoryHtml::parse) }
             ?: ImportResult(emptyList(), emptyMap())
         val playlists = files.filter { it.name.endsWith(PLAYLIST_SUFFIX) }
-            .associate { it.name.removeSuffix(PLAYLIST_SUFFIX) to TakeoutCsv.playlist(it.readText()) }
+            .associate { unescape(it.name.removeSuffix(PLAYLIST_SUFFIX)) to TakeoutCsv.playlist(it.readText()) }
         val subscriptions = files.firstOrNull { it.name == "subscriptions.csv" }
             ?.let { TakeoutCsv.subscriptions(it.readText()) }.orEmpty()
         return TakeoutData(history, playlists, subscriptions)
     }
 
+    /** Some unzip tools write non-ASCII characters in file names as `#U00f2`; turn those back into the characters. */
+    internal fun unescape(name: String): String =
+        ESCAPED.replace(name) { String(Character.toChars(it.groupValues[1].toInt(16))) }
+
+    private val ESCAPED = Regex("#U([0-9a-fA-F]{4,6})")
     private const val PLAYLIST_SUFFIX = "-videos.csv"
 }

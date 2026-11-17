@@ -39,3 +39,11 @@ class TakeoutCsvTest {
         )
     }
 }
+
+class TakeoutFolderTest {
+    @Test
+    fun `restores characters that unzip escaped in playlist file names`() {
+        assertEquals("òwó", TakeoutFolder.unescape("#U00f2w#U00f3"))
+        assertEquals("Watch later #1", TakeoutFolder.unescape("Watch later #1"))
+    }
+}

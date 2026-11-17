@@ -1,0 +1,163 @@
+-- The library: every video Forage knows about in this vault, what was watched and saved,
+-- and each profile's view of it. One database file is one vault; nothing reads across files.
+--
+-- library_video    what an import or the user told us about a video, before any metadata fetch
+-- watch_event      watching alone never changes a profile (SPEC: curated, not tracked)
+-- playlist_item    imported playlists, kept to know what is already saved
+-- profile_video    a profile's decision about a video; no row means undecided
+-- pick             the latest Discover batch per profile, so feedback can refer to it
+
+CREATE TABLE library_video (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT,
+    channel_id TEXT,
+    channel_name TEXT,
+    is_short INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0,
+    added_at INTEGER NOT NULL
+);
+
+CREATE TABLE watch_event (
+    video_id TEXT NOT NULL,
+    watched_at INTEGER NOT NULL,     -- 0 when the import carried no time
+    PRIMARY KEY (video_id, watched_at)
+);
+
+CREATE TABLE playlist_item (
+    playlist TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    added_at INTEGER,
+    PRIMARY KEY (playlist, video_id)
+);
+
+CREATE TABLE subscription (
+    channel_id TEXT NOT NULL PRIMARY KEY,
+    name TEXT,
+    added_at INTEGER NOT NULL
+);
+
+CREATE TABLE watch_later (
+    video_id TEXT NOT NULL PRIMARY KEY,
+    added_at INTEGER NOT NULL
+);
+
+CREATE TABLE profile (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE profile_video (
+    profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
+    video_id TEXT NOT NULL,
+    state TEXT NOT NULL,             -- included, excluded or negative
+    weight REAL NOT NULL DEFAULT 1,
+    source TEXT NOT NULL,            -- manual, more_like_this, not_for_me
+    changed_at INTEGER NOT NULL,
+    PRIMARY KEY (profile_id, video_id)
+);
+
+CREATE TABLE pick (
+    profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    video_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    channel_id TEXT,
+    channel_name TEXT,
+    score REAL NOT NULL,
+    reason TEXT NOT NULL,
+    found_via TEXT NOT NULL,
+    exploration INTEGER AS kotlin.Boolean NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (profile_id, position)
+);
+
+-- Insert-then-update instead of ON CONFLICT, which older Android SQLite versions lack.
+insertLibraryVideo:
+INSERT OR IGNORE INTO library_video (id, added_at) VALUES (?, ?);
+
+-- Fills in details without erasing ones already known.
+updateLibraryVideo:
+UPDATE library_video SET
+    title = coalesce(:title, title),
+    channel_id = coalesce(:channel_id, channel_id),
+    channel_name = coalesce(:channel_name, channel_name),
+    is_short = max(is_short, :is_short)
+WHERE id = :id;
+
+selectLibraryVideos:
+SELECT * FROM library_video;
+
+selectLibraryVideo:
+SELECT * FROM library_video WHERE id = ?;
+
+countLibraryVideos:
+SELECT count(*) FROM library_video;
+
+insertWatchEvent:
+INSERT OR IGNORE INTO watch_event VALUES (?, ?);
+
+selectWatchEvents:
+SELECT * FROM watch_event;
+
+countWatchEvents:
+SELECT count(*) FROM watch_event;
+
+upsertPlaylistItem:
+INSERT OR REPLACE INTO playlist_item VALUES (?, ?, ?);
+
+selectPlaylistItems:
+SELECT * FROM playlist_item WHERE playlist = ?;
+
+selectPlaylists:
+SELECT playlist, count(*) AS videos FROM playlist_item GROUP BY playlist ORDER BY playlist;
+
+insertSubscription:
+INSERT OR IGNORE INTO subscription (channel_id, added_at) VALUES (?, ?);
+
+updateSubscription:
+UPDATE subscription SET name = coalesce(:name, name) WHERE channel_id = :channel_id;
+
+selectSubscriptions:
+SELECT * FROM subscription ORDER BY name;
+
+insertWatchLater:
+INSERT OR IGNORE INTO watch_later VALUES (?, ?);
+
+deleteWatchLater:
+DELETE FROM watch_later WHERE video_id = ?;
+
+selectWatchLater:
+SELECT video_id FROM watch_later ORDER BY added_at DESC;
+
+-- Every video that must never be suggested again, whatever the profile.
+selectKnownVideoIds:
+SELECT video_id FROM watch_event
+UNION SELECT video_id FROM playlist_item
+UNION SELECT video_id FROM watch_later;
+
+insertProfile:
+INSERT INTO profile (name, created_at) VALUES (?, ?);
+
+selectProfileByName:
+SELECT * FROM profile WHERE name = ?;
+
+selectProfiles:
+SELECT * FROM profile ORDER BY id;
+
+upsertProfileVideo:
+INSERT OR REPLACE INTO profile_video VALUES (?, ?, ?, ?, ?, ?);
+
+deleteProfileVideo:
+DELETE FROM profile_video WHERE profile_id = ? AND video_id = ?;
+
+selectProfileVideos:
+SELECT * FROM profile_video WHERE profile_id = ? ORDER BY changed_at, video_id;
+
+deletePicks:
+DELETE FROM pick WHERE profile_id = ?;
+
+insertPick:
+INSERT INTO pick VALUES ?;
+
+selectPicks:
+SELECT * FROM pick WHERE profile_id = ? ORDER BY position;
