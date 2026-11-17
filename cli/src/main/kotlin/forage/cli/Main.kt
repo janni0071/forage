@@ -7,6 +7,8 @@ import forage.core.embedding.EmbeddingStore
 import forage.core.embedding.EmbeddingText
 import forage.core.embedding.Vectors
 import forage.core.importer.ImportResult
+import forage.core.language.LanguageFilter
+import forage.language.lingua.LinguaDetector
 import forage.core.importer.TakeoutCsv
 import forage.core.importer.TakeoutFolder
 import forage.core.importer.TakeoutWatchHistory
@@ -15,6 +17,7 @@ import forage.core.importer.WatchEvent
 import forage.core.library.HistoryFilter
 import forage.core.library.WatchHistory
 import forage.core.metadata.FetchOutcome
+import forage.core.metadata.FetchPolicy
 import forage.core.metadata.MetadataCache
 import forage.core.metadata.MetadataFetcher
 import forage.core.profile.ProfileFile
@@ -37,6 +40,7 @@ import java.io.FileDescriptor
 import java.io.FileOutputStream
 import java.io.PrintStream
 import java.nio.file.Path
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -64,10 +68,12 @@ private const val USAGE = """Usage:
   forage profile <profile.txt>
       Check a profile file: count videos, report duplicates and unreadable lines.
 
-  forage fetch <profile.txt | url-or-id> [--db FILE]
+  forage fetch <profile.txt | url-or-id> [--max-age HOURS] [--db FILE]
       Fetch metadata and related videos from YouTube into the local cache (needs network).
       With a profile file, fetches every video in it; cached videos are skipped, so an
-      interrupted or blocked run can simply be started again. Default cache: data/forage.db
+      interrupted or blocked run can simply be started again. --max-age fetches videos again
+      whose cached copy is older than that, to renew their related videos.
+      Default cache: data/forage.db
 
   forage embed [--db FILE] [--models DIR]
       Compute an embedding for every cached video that lacks one. Downloads the model
@@ -83,7 +89,8 @@ private const val USAGE = """Usage:
       profile first) plus one YouTube search per topic cluster.
         --takeout DIR      extracted Takeout folder: its history and playlists are never
                            suggested, and its subscriptions decide what counts as a new channel
-        --not-for-me FILE  profile-style file of videos to steer away from
+        --not-for-me FILE  profile-style file of videos to steer away from; fetch it first,
+                           since only videos with cached metadata can count
         --no-search        skip the searches (no network needed)
         --shorts           include Shorts
 
@@ -99,7 +106,7 @@ fun main(args: Array<String>) {
             "takeout" -> takeout(Args(rest, setOf("--top")))
             "pick" -> pick(Args(rest, setOf("--channel", "--title", "--min-watches", "--since", "--until", "--limit", "--db")))
             "profile" -> profile(Args(rest, emptySet()))
-            "fetch" -> fetch(Args(rest, setOf("--db")))
+            "fetch" -> fetch(Args(rest, setOf("--db", "--max-age")))
             "embed" -> embed(Args(rest, setOf("--db", "--models")))
             "similar" -> similar(Args(rest, setOf("--db", "--models", "--top")))
             "discover" -> discover(
@@ -174,7 +181,8 @@ private fun profile(args: Args) {
 private fun fetch(args: Args) {
     val arg = args.positional.singleOrNull() ?: throw UsageError(USAGE)
     val cache = MetadataCache(openDatabase(File(args.one("--db") ?: "data/forage.db")))
-    val fetcher = MetadataFetcher(YouTubeSource(), cache)
+    val policy = FetchPolicy(maxAge = args.int("--max-age")?.let { Duration.ofHours(it.toLong()) })
+    val fetcher = MetadataFetcher(YouTubeSource(), cache, policy)
     if (File(arg).isFile) fetchProfile(File(arg), fetcher) else fetchOne(arg, fetcher)
 }
 
@@ -273,14 +281,36 @@ private fun discover(args: Args) {
         if (missing > 0) System.err.println("$missing profile videos have no cached metadata and are left out; run 'forage fetch ${profileFile.path}'")
 
         val profileVectors = engine.embeddings.embed(known.associate { it.id to EmbeddingText.of(it) })
-        val negatives = engine.embeddings.embed(
-            notForMe.mapNotNull { cache.video(it)?.metadata }.associate { it.id to EmbeddingText.of(it) }
-        ).values.toList()
-        val profile = Profile(known.map { ProfileVideo(it.id, it.title, it.channel, profileVectors.getValue(it.id)) }, negatives)
-        val clusters = Clusters.of(profile, known.associate { it.id to EmbeddingText.keywordsSource(it) }, seed = seed)
+        val negativeVideos = notForMe.mapNotNull { cache.video(it)?.metadata }
+        if (negativeVideos.size < notForMe.size) {
+            System.err.println("${notForMe.size - negativeVideos.size} not-for-me videos have no cached metadata and don't count yet; run 'forage fetch' on that file")
+        }
+        val negatives = engine.embeddings.embed(negativeVideos.associate { it.id to EmbeddingText.of(it) }).values.toList()
 
-        println("Profile: ${profile.videos.size} videos in ${clusters.size} clusters")
-        clusters.forEach { c -> println("  %2d. %-45s %d videos".format(c.index + 1, c.label, c.videos.size)) }
+        // When each video was first saved or watched, to see how soon after its upload that was.
+        val firstSeen = HashMap<PlatformId, Instant>()
+        fun seen(id: PlatformId, at: Instant?) { if (at != null) firstSeen.merge(id, at) { a, b -> minOf(a, b) } }
+        takeout?.history?.events?.forEach { seen(it.video, it.watchedAt) }
+        takeout?.playlists?.values?.forEach { list -> list.forEach { seen(it.video, it.addedAt) } }
+
+        val profile = Profile(
+            known.map { v ->
+                val age = v.uploadedAt?.let { up -> firstSeen[v.id]?.let { Duration.between(up, it).toDays().coerceAtLeast(0) } }
+                ProfileVideo(v.id, v.title, v.channel, profileVectors.getValue(v.id), ageWhenAddedDays = age)
+            },
+            negatives,
+        )
+        val clusters = Clusters.of(
+            profile,
+            known.associate { it.id to EmbeddingText.keywordsSource(it) },
+            channelNames = known.mapNotNull { it.channelName },
+        )
+
+        println("Profile: ${profile.videos.size} videos, ${clusters.count { !it.isVaried }} topics")
+        clusters.forEach { c ->
+            val fresh = c.videos.count { it.addedFresh } * 100 / c.videos.size
+            println("  %2d. %-42s %3d videos, %3d%% saved within a month of upload".format(c.index + 1, c.label, c.videos.size, fresh))
+        }
 
         val exclude = buildSet {
             addAll(parsed.videos)
@@ -293,10 +323,17 @@ private fun discover(args: Args) {
         generator.searchFailures.forEach { System.err.println("Search skipped: $it") }
 
         // Candidates are mostly known from list results only; use the full text for those that happen to be cached.
-        val texts = stubs.associate { c -> c.stub.id to (cache.video(c.stub.id)?.metadata?.let(EmbeddingText::of) ?: EmbeddingText.of(c.stub)) }
-        System.err.println("Scoring ${stubs.size} candidates ...")
+        val languages = LanguageFilter(LinguaDetector(), known.map { "${it.title}\n${it.description.take(300)}" })
+        val (kept, foreign) = stubs.partition { languages.foreignLanguage(it.stub.title) == null }
+        System.err.println(
+            "Profile languages: ${languages.profileLanguages.entries.joinToString { "${it.key} ${it.value}" }}; " +
+                "dropped ${foreign.size} candidates in other languages"
+        )
+
+        val texts = kept.associate { c -> c.stub.id to (cache.video(c.stub.id)?.metadata?.let(EmbeddingText::of) ?: EmbeddingText.of(c.stub)) }
+        System.err.println("Scoring ${kept.size} candidates ...")
         val vectors = engine.embeddings.embed(texts)
-        val candidates = stubs.map { c ->
+        val candidates = kept.map { c ->
             val full = cache.video(c.stub.id)?.metadata
             Candidate(
                 id = c.stub.id,
@@ -304,7 +341,7 @@ private fun discover(args: Args) {
                 channel = c.stub.channel,
                 channelName = c.stub.channelName,
                 isShort = c.stub.isShort || full?.isShort == true,
-                uploadedAt = full?.uploadedAt,
+                uploadedAt = full?.uploadedAt ?: c.stub.uploadedAt,
                 vector = vectors.getValue(c.stub.id),
                 sources = c.sources,
             )

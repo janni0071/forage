@@ -30,6 +30,9 @@ internal fun details(id: String, related: List<String> = listOf("rel1", "rel2"))
         extra = mapOf("category" to "Howto & Style"),
     ),
     related = related.map {
-        VideoStub(PlatformId.youtube(it), "Related $it", null, "Some Channel", 60, isShort = it == "rel2")
+        VideoStub(
+            PlatformId.youtube(it), "Related $it", null, "Some Channel", 60, isShort = it == "rel2",
+            uploadedAt = Instant.parse("2026-09-01T00:00:00Z").takeIf { _ -> it == "rel1" },
+        )
     },
 )

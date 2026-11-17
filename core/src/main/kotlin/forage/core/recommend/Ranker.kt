@@ -24,13 +24,29 @@ data class RankingConfig(
     val explorationSlots: Int = 3,
     /** Similarity is the weighted mean over this many nearest profile videos. */
     val nearest: Int = 3,
-    val negativePenalty: Float = 0.5f,
+    /**
+     * Weight of the "not for me" penalty. It applies only as far as a candidate is closer to a
+     * negative example than to the profile, so rejecting a beginner tutorial doesn't sink the
+     * whole subject the user otherwise likes.
+     */
+    val negativePenalty: Float = 1f,
     /** Added when the channel is neither followed nor already in the profile. */
     val newChannelBonus: Float = 0.05f,
-    /** Largest freshness bonus, for a video uploaded today; halves roughly every four months. */
+    /** Freshness bonus every video uploaded today gets; it fades over about three months. */
     val freshnessBonus: Float = 0.03f,
+    /**
+     * Extra freshness bonus where the user follows things as they come out: scaled by the share of
+     * the nearest profile videos that were saved within a month of their upload. Release-driven
+     * interests (trailers, news) get recent uploads; timeless ones (documentaries) are left alone.
+     */
+    val followedFreshnessBonus: Float = 0.12f,
     /** MMR trade-off: 1 ranks purely by score, lower values favour variety. */
     val mmrLambda: Float = 0.7f,
+    /**
+     * Subtracted from candidates found only by keyword search. Search returns whatever is popular
+     * for the words; related videos carry the platform's knowledge of what viewers watch together.
+     */
+    val searchOnlyPenalty: Float = 0.05f,
     /** Titles differ enough that MMR alone lets one channel through repeatedly. */
     val maxPerChannel: Int = 2,
     val showShorts: Boolean = false,
@@ -73,7 +89,7 @@ class Ranker(private val config: RankingConfig = RankingConfig()) {
         val taken = main.map { it.candidate.id }.toSet()
         val pool = scored.filter { it.candidate.id !in taken && it.newChannel && it.similarity in band }
         val explore = mmr(pool.sortedByDescending { it.score }, main, config.explorationSlots, lambda = 0.3f)
-            .map { it.copy(exploration = true, reason = "exploration: a looser match" + (it.cluster?.let { c -> " near your ${c.label} cluster" } ?: "")) }
+            .map { it.copy(exploration = true, reason = "exploration: a looser match" + (it.cluster?.takeUnless { c -> c.isVaried }?.let { c -> " near your ${c.label} topic" } ?: "")) }
 
         // Top up from the main ranking when there weren't enough exploration candidates.
         val all = main + explore
@@ -87,17 +103,23 @@ class Ranker(private val config: RankingConfig = RankingConfig()) {
             .sortedByDescending { it.second }
             .take(config.nearest)
         val similarity = if (nearest.isEmpty()) 0f else nearest.map { it.second }.average().toFloat()
-        val negative = profile.negatives.maxOfOrNull { Vectors.dot(c.vector, it) }?.coerceAtLeast(0f) ?: 0f
+        val negative = profile.negatives.maxOfOrNull { Vectors.dot(c.vector, it) }
+            ?.let { (it - similarity).coerceAtLeast(0f) } ?: 0f
         // A candidate without a channel id can't be called new with any confidence.
         val newChannel = c.channel != null && c.channel !in knownChannels
-        val freshness = c.uploadedAt?.let { uploaded ->
-            val days = Duration.between(uploaded, now).toDays().coerceAtLeast(0)
-            config.freshnessBonus * exp(-days / 180.0).toFloat()
+        val followsReleases = if (nearest.isEmpty()) 0f else nearest.count { it.first.addedFresh }.toFloat() / nearest.size
+        val ageDays = c.uploadedAt?.let { Duration.between(it, now).toDays().coerceAtLeast(0) }
+        val freshness = ageDays?.let {
+            (config.freshnessBonus + config.followedFreshnessBonus * followsReleases) * exp(-it / 90.0).toFloat()
         } ?: 0f
+        val recent = ageDays != null && ageDays <= ProfileVideo.FRESH_DAYS && followsReleases >= 0.5f
+        val searchOnly = c.sources.isNotEmpty() && c.sources.all { it is CandidateSource.Search }
         val score = similarity - config.negativePenalty * negative +
-            (if (newChannel) config.newChannelBonus else 0f) + freshness
-        val cluster = clusters.maxByOrNull { Vectors.dot(c.vector, it.centroid) }
-        return Pick(c, score, similarity, nearest, cluster, newChannel, exploration = false, reason = reason(nearest, cluster, newChannel))
+            (if (newChannel) config.newChannelBonus else 0f) + freshness -
+            (if (searchOnly) config.searchOnlyPenalty else 0f)
+        // The candidate belongs with its nearest profile video; centroids mean little for the varied cluster.
+        val cluster = nearest.firstOrNull()?.first?.let { video -> clusters.firstOrNull { video in it.videos } }
+        return Pick(c, score, similarity, nearest, cluster, newChannel, exploration = false, reason = reason(nearest, cluster, newChannel) + if (recent) "; recent upload" else "")
     }
 
     /** Maximal marginal relevance: repeatedly take the pick that scores well and differs from those already taken. */
@@ -133,9 +155,9 @@ class Ranker(private val config: RankingConfig = RankingConfig()) {
             1 -> "similar to \"${close[0].first.title}\""
             else -> "similar to ${close.size} videos in your profile, e.g. \"${close[0].first.title}\""
         }
-        val near = cluster?.let { "near your ${it.label} cluster" }
+        val near = cluster?.takeUnless { it.isVaried }?.let { "near your ${it.label} topic" }
         return when {
-            newChannel && near != null -> listOfNotNull("new channel $near", similar).joinToString("; ")
+            newChannel -> listOfNotNull(listOfNotNull("new channel", near).joinToString(" "), similar).joinToString("; ")
             similar != null -> similar
             else -> near ?: "loosely related to your profile"
         }

@@ -54,6 +54,8 @@ data class VideoStub(
     val channelName: String?,
     val durationSeconds: Long?,
     val isShort: Boolean,
+    /** Often only approximate: list results say "3 months ago". */
+    val uploadedAt: Instant? = null,
 )
 
 data class VideoDetails(val metadata: VideoMetadata, val related: List<VideoStub>)

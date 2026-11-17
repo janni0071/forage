@@ -1,0 +1,2 @@
+-- Version 3 keeps the upload date of related videos, for the freshness bonus.
+ALTER TABLE related_video ADD COLUMN uploaded_at INTEGER;

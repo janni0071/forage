@@ -27,6 +27,7 @@ class MetadataCache(db: ForageDatabase, private val clock: () -> Instant = Insta
                 channelName = r.channel_name,
                 durationSeconds = r.duration_seconds,
                 isShort = r.is_short,
+                uploadedAt = r.uploaded_at?.let(Instant::ofEpochSecond),
             )
         }
         return VideoDetails(row.toMetadata(), related)
@@ -65,6 +66,7 @@ class MetadataCache(db: ForageDatabase, private val clock: () -> Instant = Insta
                         channel_name = r.channelName,
                         duration_seconds = r.durationSeconds,
                         is_short = r.isShort,
+                        uploaded_at = r.uploadedAt?.epochSecond,
                     )
                 )
             }

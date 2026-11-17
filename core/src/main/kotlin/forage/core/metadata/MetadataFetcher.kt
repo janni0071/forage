@@ -16,7 +16,7 @@ data class FetchPolicy(
     val firstBackoff: Duration = Duration.ofSeconds(10),
     /** In a bulk run, stop after this many videos in a row failed every attempt: the platform is blocking us. */
     val stopAfterFailedVideos: Int = 3,
-    /** Cached entries older than this are fetched again. Null keeps them forever. */
+    /** Cached entries older than this are fetched again (zero refetches everything, every time). Null keeps them forever. */
     val maxAge: Duration? = null,
 )
 

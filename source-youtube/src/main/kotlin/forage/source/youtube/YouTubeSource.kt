@@ -85,6 +85,7 @@ class YouTubeSource : ExtractorSource {
                 channelName = item.uploaderName?.takeIf { it.isNotBlank() },
                 durationSeconds = item.duration.takeIf { it > 0 },
                 isShort = item.isShortFormContent || ref.isShort,
+                uploadedAt = item.uploadDate?.offsetDateTime()?.toInstant(),
             )
         }
 

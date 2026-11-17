@@ -39,8 +39,10 @@ class CandidateGenerator(
         clusters: List<Cluster>,
         /** Videos never to suggest: watched, excluded, already saved, or in the profile. */
         exclude: Set<PlatformId>,
-        /** Profile videos sampled per cluster, so a big cluster can't supply most candidates. */
+        /** Profile videos sampled per topic, so a big topic can't supply most candidates. */
         samplePerCluster: Int = 8,
+        /** The varied cluster holds many unrelated interests, so it gets a larger sample. */
+        sampleVaried: Int = 24,
         keywordsPerSearch: Int = 3,
     ): List<CandidateStub> {
         val found = LinkedHashMap<PlatformId, CandidateStub>()
@@ -50,7 +52,7 @@ class CandidateGenerator(
         }
 
         for (cluster in clusters) {
-            for (video in cluster.videos.shuffled(random).take(samplePerCluster)) {
+            for (video in cluster.videos.shuffled(random).take(if (cluster.isVaried) sampleVaried else samplePerCluster)) {
                 cache.video(video.id)?.related?.forEach { add(it, CandidateSource.RelatedTo(video)) }
             }
         }
@@ -59,7 +61,8 @@ class CandidateGenerator(
         if (source != null && Capability.SEARCH in source.capabilities) {
             for (cluster in clusters) {
                 val query = cluster.keywords.take(keywordsPerSearch).joinToString(" ")
-                if (query.isBlank()) continue
+                // The varied cluster has no common subject to search for.
+                if (cluster.isVaried || query.isBlank()) continue
                 var failure: SourceException? = null
                 for (attempt in 1..searchAttempts) {
                     // Pause before every search but the very first, and longer after each failure.

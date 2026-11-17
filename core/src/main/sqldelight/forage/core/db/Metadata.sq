@@ -27,6 +27,7 @@ CREATE TABLE related_video (
     channel_name TEXT,
     duration_seconds INTEGER,
     is_short INTEGER AS kotlin.Boolean NOT NULL,
+    uploaded_at INTEGER,
     PRIMARY KEY (video_id, position)
 );
 

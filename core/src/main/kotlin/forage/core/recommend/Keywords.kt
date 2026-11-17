@@ -23,9 +23,10 @@ object Keywords {
 
     /**
      * [groups] holds one list of texts (one text per video) for each cluster.
-     * Returns up to [count] keywords per cluster, most characteristic first.
+     * Returns up to [count] keywords per cluster, most characteristic first. Words in [ignore]
+     * are never keywords: channel names say who made a video, not what it is about.
      */
-    fun top(groups: List<List<String>>, count: Int = 5): List<List<String>> {
+    fun top(groups: List<List<String>>, count: Int = 5, ignore: Set<String> = emptySet()): List<List<String>> {
         // Count each word once per video, so one keyword-stuffed description can't dominate.
         val frequencies = groups.map { texts ->
             texts.flatMap { tokens(it).distinct() }.groupingBy { it }.eachCount()
@@ -37,7 +38,7 @@ object Keywords {
             val size = groups[g].size.coerceAtLeast(1)
             f.entries
                 // A word seen in a single video describes that video, not the cluster.
-                .filter { it.value >= 2 || size == 1 }
+                .filter { (it.value >= 2 || size == 1) && it.key !in ignore }
                 .map { (word, n) -> word to (n.toDouble() / size) * ln((groups.size + 1.0) / groupsContaining.getValue(word)) }
                 .sortedWith(compareByDescending<Pair<String, Double>> { it.second }.thenBy { it.first })
                 .take(count)
