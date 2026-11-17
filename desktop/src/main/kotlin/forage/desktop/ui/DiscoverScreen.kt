@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import forage.core.recommend.TopicPreference
 import forage.desktop.DesktopModel
 import forage.desktop.ui.Thumbnail
 import forage.desktop.Feedback
@@ -187,7 +188,13 @@ private fun TopicsPanel(model: DesktopModel) {
                 items(model.topics, key = { it.index }) { topic ->
                     Row {
                         Text(
-                            topic.label,
+                            topic.label + when (topic.preference) {
+                                TopicPreference.PINNED -> "  · pinned"
+                                TopicPreference.MUTED -> "  · muted"
+                                null -> ""
+                            },
+                            color = if (topic.preference == TopicPreference.MUTED) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

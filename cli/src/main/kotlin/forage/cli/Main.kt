@@ -22,6 +22,8 @@ import forage.core.profile.VideoState
 import forage.core.recommend.Discover
 import forage.core.recommend.EmptyProfileException
 import forage.core.recommend.RankingConfig
+import forage.core.recommend.TopicPreference
+import forage.core.recommend.TopicStore
 import forage.core.source.SourceException
 import forage.core.source.VideoStub
 import forage.embedding.onnx.ModelFiles
@@ -323,6 +325,7 @@ private fun discover(args: Args) {
             source = YouTubeSource().takeUnless { args.flag("--no-search") },
             config = config,
             searchCache = SearchCache(vault.db),
+            topics = TopicStore(vault.db),
         ).run(vault.profile)
     }
 
@@ -332,7 +335,10 @@ private fun discover(args: Args) {
 
     val topics = result.clusters.filter { !it.isVaried }
     println("Profile \"${vault.profile.name}\": ${result.clusters.sumOf { it.videos.size }} videos, ${topics.size} topics")
-    result.clusters.forEach { c -> println("  %2d. %-42s %3d videos".format(c.index + 1, c.label, c.videos.size)) }
+    result.clusters.forEach { c ->
+        val pref = when (c.preference) { TopicPreference.PINNED -> "  pinned"; TopicPreference.MUTED -> "  muted"; null -> "" }
+        println("  %2d. %-42s %3d videos%s".format(c.index + 1, c.label, c.videos.size, pref))
+    }
     println(
         "\n${result.picks.size} picks from ${result.candidates} candidates" +
             if (result.foreignLanguage > 0) " (${result.foreignLanguage} more dropped for their language)" else ""

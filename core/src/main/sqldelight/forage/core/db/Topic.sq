@@ -1,0 +1,23 @@
+-- Pinned and muted topics. Topics are recomputed on every visit, so a topic is remembered by its
+-- member videos (a JSON list of ids) and recognised again by how many of them it still contains.
+
+CREATE TABLE topic_preference (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
+    preference TEXT NOT NULL,        -- pinned or muted
+    label TEXT NOT NULL,
+    members TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+selectTopicPreferences:
+SELECT * FROM topic_preference WHERE profile_id = ? ORDER BY id;
+
+insertTopicPreference:
+INSERT INTO topic_preference (profile_id, preference, label, members, updated_at) VALUES (?, ?, ?, ?, ?);
+
+updateTopicPreference:
+UPDATE topic_preference SET label = ?, members = ?, updated_at = ? WHERE id = ?;
+
+deleteTopicPreference:
+DELETE FROM topic_preference WHERE id = ?;

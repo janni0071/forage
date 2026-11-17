@@ -23,6 +23,8 @@ import forage.core.recommend.Cluster
 import forage.core.recommend.Discover
 import forage.core.recommend.EmptyProfileException
 import forage.core.recommend.RankingConfig
+import forage.core.recommend.TopicPreference
+import forage.core.recommend.TopicStore
 import forage.core.source.ExtractorSource
 import forage.embedding.onnx.ModelFiles
 import forage.embedding.onnx.ModelSpec
@@ -38,7 +40,7 @@ import java.io.File
 import java.time.Instant
 import java.util.Properties
 
-enum class Screen { LIBRARY, DISCOVER, LATER }
+enum class Screen { LIBRARY, TOPICS, DISCOVER, LATER }
 
 sealed interface LibrarySource {
     val label: String
@@ -100,6 +102,7 @@ class DesktopModel(
     private val source by lazy(sourceFactory)
     val thumbnails = Thumbnails(File(dataDir, "thumbnails")) { source.thumbnailUrl(it) }
     private val searchCache = SearchCache(db)
+    private val topicStore = TopicStore(db)
     private val modelLock = Any()
     private var embedder: OnnxEmbedder? = null
     private var detector: LanguageDetector? = null
@@ -171,6 +174,9 @@ class DesktopModel(
         private set
     var discoverNote by mutableStateOf<String?>(null)
         private set
+    /** True once [topics] reflects the profile as it is now. */
+    var topicsCurrent by mutableStateOf(false)
+        private set
 
     // Watch later
     var later by mutableStateOf<List<LibraryRow>>(emptyList())
@@ -225,6 +231,7 @@ class DesktopModel(
     fun markSelected(state: VideoState?) {
         val ids = selection.toList()
         if (ids.isEmpty()) return
+        topicsCurrent = false
         launchQuiet {
             ids.forEach { library.remember(it) }
             profiles.mark(profile, ids, state)
@@ -282,6 +289,41 @@ class DesktopModel(
             "${summary.subscriptions} subscriptions. Nothing was added to the profile."
     }
 
+    // Topics
+
+    private fun discoverer(embedder: OnnxEmbedder, withSearch: Boolean = false) = Discover(
+        cache, library, profiles, EmbeddingStore(db, embedder), detector(),
+        source.takeIf { withSearch }, RankingConfig(showShorts = settings.showShorts), searchCache, topicStore,
+    )
+
+    /** Groups the profile into topics without running a whole Discover. */
+    fun loadTopics() {
+        val included = profiles.entries(profile, VideoState.INCLUDED).map { it.video }
+        if (included.none { cache.video(it) != null }) {
+            message = "Add videos to the profile and fetch their details to see its topics"
+            return
+        }
+        runJob("Grouping your profile into topics") { update ->
+            update("Loading the models")
+            val embedder = embedder(update)
+            update("Grouping")
+            topics = discoverer(embedder).topics(profile)
+            topicsCurrent = true
+            "Your profile has ${topics.count { !it.isVaried }} topics"
+        }
+    }
+
+    /** Pins, mutes or (null) frees a topic; takes effect in the next batch. */
+    fun setTopicPreference(topic: Cluster, preference: TopicPreference?) = launchQuiet {
+        topicStore.set(profile, topic, preference)
+        topics = topics.map { if (it.index == topic.index) it.copy(preference = preference) else it }
+        message = when (preference) {
+            TopicPreference.PINNED -> "Pinned \"${topic.label}\": it gets a few picks in every batch"
+            TopicPreference.MUTED -> "Muted \"${topic.label}\": no more picks from it"
+            null -> "\"${topic.label}\" is back to normal"
+        }
+    }
+
     // Discover
 
     fun discover() {
@@ -298,16 +340,12 @@ class DesktopModel(
     private fun runDiscover() = runJob("Finding recommendations") { update ->
         update("Loading the models")
         val embedder = embedder(update)
-        val detector = detector()
         update(if (settings.searchYouTube) "Collecting candidates and searching YouTube" else "Collecting and ranking candidates")
-        val config = RankingConfig(showShorts = settings.showShorts)
         try {
-            val result = Discover(
-                cache, library, profiles, EmbeddingStore(db, embedder), detector,
-                source.takeIf { settings.searchYouTube }, config, searchCache,
-            ).run(profile)
+            val result = discoverer(embedder, settings.searchYouTube).run(profile)
             val seconds = result.timings.values.sum() / 1000.0
             topics = result.clusters
+            topicsCurrent = true
             discoverNote = buildList {
                 add("${result.picks.size} picks from ${result.candidates} candidates in %.0f s".format(seconds))
                 if (result.foreignLanguage > 0) add("${result.foreignLanguage} dropped for their language")

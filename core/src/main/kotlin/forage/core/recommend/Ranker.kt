@@ -50,6 +50,8 @@ data class RankingConfig(
     /** Titles differ enough that MMR alone lets one channel through repeatedly. */
     val maxPerChannel: Int = 2,
     val showShorts: Boolean = false,
+    /** Picks each pinned topic gets at least, when it has enough candidates. */
+    val perPinnedTopic: Int = 3,
 )
 
 data class Pick(
@@ -80,7 +82,19 @@ class Ranker(private val config: RankingConfig = RankingConfig()) {
             .filter { config.showShorts || !it.isShort }
             .map { score(it, profile, clusters, knownChannels, now) }
 
-        val main = mmr(scored.sortedByDescending { it.score }, emptyList(), config.slots - config.explorationSlots)
+        // Candidates nearest a muted topic are left out entirely.
+            .filter { it.cluster?.preference != TopicPreference.MUTED }
+
+        // Pinned topics first get their guaranteed share, then the rest is filled as usual.
+        val reserved = ArrayList<Pick>()
+        for (topic in clusters.filter { it.preference == TopicPreference.PINNED }) {
+            val own = scored.filter { it.cluster?.index == topic.index && reserved.none { r -> r.candidate.id == it.candidate.id } }
+            reserved += mmr(own.sortedByDescending { it.score }, reserved, config.perPinnedTopic)
+        }
+        val mainSlots = (config.slots - config.explorationSlots).coerceAtLeast(reserved.size)
+        val reservedIds = reserved.map { it.candidate.id }.toSet()
+        val main = (reserved + mmr(scored.filter { it.candidate.id !in reservedIds }.sortedByDescending { it.score }, reserved, mainSlots - reserved.size))
+            .sortedByDescending { it.score }
 
         // Exploration: unfamiliar channels from the middle of the similarity range, as different
         // from the main picks as possible.

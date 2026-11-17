@@ -58,15 +58,22 @@ class CandidateGenerator(
             found.merge(stub.id, CandidateStub(stub, listOf(from))) { old, new -> old.copy(sources = old.sources + new.sources) }
         }
 
-        for (cluster in clusters) {
-            for (video in cluster.videos.shuffled(random).take(if (cluster.isVaried) sampleVaried else samplePerCluster)) {
+        // Muted topics supply nothing; pinned ones twice the usual sample, so they have enough to fill their slots.
+        val active = clusters.filter { it.preference != TopicPreference.MUTED }
+        for (cluster in active) {
+            val sample = when {
+                cluster.isVaried -> sampleVaried
+                cluster.preference == TopicPreference.PINNED -> samplePerCluster * 2
+                else -> samplePerCluster
+            }
+            for (video in cluster.videos.shuffled(random).take(sample)) {
                 cache.video(video.id)?.related?.forEach { add(it, CandidateSource.RelatedTo(video)) }
             }
         }
 
         if (source != null && Capability.SEARCH in source.capabilities) {
             // The varied cluster has no common subject to search for.
-            val searches = clusters.filter { !it.isVaried }
+            val searches = active.filter { !it.isVaried }
                 .map { it to it.keywords.take(keywordsPerSearch).joinToString(" ") }
                 .filter { it.second.isNotBlank() }
             // Results are merged in topic order afterwards, so the outcome doesn't depend on which search finished first.

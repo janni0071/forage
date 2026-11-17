@@ -7,7 +7,9 @@ import forage.core.language.LanguageFilter
 import forage.core.library.LibraryStore
 import forage.core.metadata.MetadataCache
 import forage.core.metadata.SearchCache
+import forage.core.profile.ProfileEntry
 import forage.core.profile.ProfileRef
+import forage.core.source.VideoMetadata
 import forage.core.profile.ProfileStore
 import forage.core.profile.StoredPick
 import forage.core.profile.VideoState
@@ -50,17 +52,25 @@ class Discover(
     private val source: ExtractorSource? = null,
     private val config: RankingConfig = RankingConfig(),
     private val searchCache: SearchCache? = null,
+    /** Pinned and muted topics; null ignores them. */
+    private val topics: TopicStore? = null,
     private val seed: Long = 1,
     private val now: () -> Instant = Instant::now,
 ) {
-    fun run(profile: ProfileRef): DiscoverResult {
-        val timings = LinkedHashMap<String, Long>()
-        var mark = System.nanoTime()
-        fun lap(stage: String) {
-            val now = System.nanoTime()
-            timings[stage] = (now - mark) / 1_000_000
-            mark = now
-        }
+    /** The profile as topics, with the user's pins and mutes applied. Needs metadata for the profile's videos. */
+    fun topics(profile: ProfileRef): List<Cluster> = taste(profile).clusters
+
+    private class Taste(
+        val entries: List<ProfileEntry>,
+        val included: Int,
+        val rejected: Int,
+        val known: List<VideoMetadata>,
+        val knownRejected: Int,
+        val profile: Profile,
+        val clusters: List<Cluster>,
+    )
+
+    private fun taste(profile: ProfileRef): Taste {
         val entries = profiles.entries(profile)
         val included = entries.filter { it.state == VideoState.INCLUDED }
         val rejected = entries.filter { it.state == VideoState.NEGATIVE }
@@ -88,7 +98,25 @@ class Discover(
             known.associate { (_, v) -> v.id to EmbeddingText.keywordsSource(v) },
             channelNames = known.mapNotNull { it.second.channelName },
         )
+        return Taste(
+            entries, included.size, rejected.size, known.map { it.second }, knownRejected.size, taste,
+            topics?.apply(profile, clusters) ?: clusters,
+        )
+    }
 
+    fun run(profile: ProfileRef): DiscoverResult {
+        val timings = LinkedHashMap<String, Long>()
+        var mark = System.nanoTime()
+        fun lap(stage: String) {
+            val now = System.nanoTime()
+            timings[stage] = (now - mark) / 1_000_000
+            mark = now
+        }
+        val t = taste(profile)
+        val entries = t.entries
+        val taste = t.profile
+        val clusters = t.clusters
+        val known = t.known
         lap("profile")
 
         // Never suggest what is watched, saved, or already decided on in this profile.
@@ -97,7 +125,7 @@ class Discover(
         val stubs = generator.generate(clusters, exclude)
         lap("candidates")
 
-        val languages = detector?.let { d -> LanguageFilter(d, known.map { (_, v) -> "${v.title}\n${v.description.take(300)}" }) }
+        val languages = detector?.let { d -> LanguageFilter(d, known.map { v -> "${v.title}\n${v.description.take(300)}" }) }
         val kept = if (languages == null) stubs else stubs.filter { languages.foreignLanguage(it.stub.title) == null }
         lap("language")
 
@@ -136,7 +164,7 @@ class Discover(
             candidates = candidates.size,
             foreignLanguage = stubs.size - kept.size,
             profileLanguages = languages?.profileLanguages.orEmpty(),
-            withoutMetadata = (included.size - known.size) + (rejected.size - knownRejected.size),
+            withoutMetadata = (t.included - known.size) + (t.rejected - t.knownRejected),
             searchFailures = generator.searchFailures,
             timings = timings.also { lap("ranking") },
         )

@@ -49,12 +49,14 @@ fun App(model: DesktopModel, onImport: () -> Unit) {
                 NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                     Spacer(Modifier.height(8.dp))
                     RailItem(model, Screen.LIBRARY, "▤", "Library")
+                    RailItem(model, Screen.TOPICS, "◉", "Topics")
                     RailItem(model, Screen.DISCOVER, "✦", "Discover")
                     RailItem(model, Screen.LATER, "◷", "Later", badge = model.later.size.takeIf { it > 0 })
                 }
                 Box(Modifier.weight(1f).fillMaxSize()) {
                     when (model.screen) {
                         Screen.LIBRARY -> LibraryScreen(model, onImport)
+                        Screen.TOPICS -> TopicsScreen(model)
                         Screen.DISCOVER -> DiscoverScreen(model)
                         Screen.LATER -> LaterScreen(model)
                     }

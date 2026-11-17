@@ -37,6 +37,7 @@ data class Cluster(
     val keywords: List<String>,
     /** True for the catch-all of one-off interests, which share no topic and have no keywords. */
     val isVaried: Boolean = false,
+    val preference: TopicPreference? = null,
 ) {
     val label get() = if (isVaried) "varied interests" else keywords.take(3).joinToString(", ").ifEmpty { "topic ${index + 1}" }
 }

@@ -27,6 +27,7 @@ fun main(args: Array<String>) {
             Screen.LIBRARY -> model.visibleRows.take(14).map { it.id }
             Screen.DISCOVER -> model.picks.take(6).map { it.pick.video }
             Screen.LATER -> model.later.map { it.id }
+            Screen.TOPICS -> model.topics.take(4).flatMap { t -> t.videos.take(6).map { it.id } }
         }
         runBlocking { onScreen.forEach { model.thumbnails.load(it) } }
         val scene = ImageComposeScene(width = 2560, height = 1640, density = Density(2f)) {
@@ -56,6 +57,12 @@ fun main(args: Array<String>) {
         }
     }
     shot("4-later") { screen = Screen.LATER }
+    shot("7-topics") {
+        screen = Screen.TOPICS
+        loadTopics()
+        topics.getOrNull(0)?.let { setTopicPreference(it, forage.core.recommend.TopicPreference.PINNED) }
+        topics.getOrNull(4)?.let { setTopicPreference(it, forage.core.recommend.TopicPreference.MUTED) }
+    }
     shot("5-discover-dark", dark = true) { screen = Screen.DISCOVER }
     shot("6-library-dark", dark = true) {
         screen = Screen.LIBRARY
