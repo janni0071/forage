@@ -25,6 +25,10 @@ class Settings(private val file: File) {
         get() = properties.getProperty("thumbnails", "true").toBoolean()
         set(value) = set("thumbnails", value.toString())
 
+    var libraryGrid: Boolean
+        get() = properties.getProperty("library.grid", "false").toBoolean()
+        set(value) = set("library.grid", value.toString())
+
     var theme: Theme
         get() = properties.getProperty("theme")?.let { runCatching { Theme.valueOf(it) }.getOrNull() } ?: Theme.SYSTEM
         set(value) = set("theme", value.name)

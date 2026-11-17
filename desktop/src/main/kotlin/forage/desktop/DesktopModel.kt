@@ -152,6 +152,14 @@ class DesktopModel(
     var showThumbnails by mutableStateOf(settings.showThumbnails)
         private set
 
+    var libraryGrid by mutableStateOf(settings.libraryGrid)
+        private set
+
+    fun showLibraryAsGrid(grid: Boolean) {
+        settings.libraryGrid = grid
+        libraryGrid = grid
+    }
+
     var theme by mutableStateOf(settings.theme)
         private set
 
@@ -249,14 +257,16 @@ class DesktopModel(
     fun clearSelection() { selection = emptySet() }
 
     /** Sets the profile state of the selected videos; null clears it. */
-    fun markSelected(state: VideoState?) {
-        val ids = selection.toList()
+    fun markSelected(state: VideoState?) = mark(selection.toList(), state)
+
+    /** Sets the profile state of [ids]; null clears it. Clears the selection afterwards. */
+    fun mark(ids: List<PlatformId>, state: VideoState?) {
         if (ids.isEmpty()) return
         topicsCurrent = false
         launchQuiet {
             ids.forEach { library.remember(it) }
             profiles.mark(profile, ids, state)
-            message = "${ids.size} videos " + when (state) {
+            message = (if (ids.size == 1) "1 video " else "${ids.size} videos ") + when (state) {
                 VideoState.INCLUDED -> "added to the profile"
                 VideoState.EXCLUDED -> "excluded"
                 VideoState.NEGATIVE -> "marked not for me"

@@ -81,7 +81,17 @@ fun main(args: Array<String>) {
         stateFilter = StateFilter.INCLUDED
         listOf(1, 3).mapNotNull { visibleRows.getOrNull(it)?.id }.forEach(::toggle)
     }
+    shot("8-library-grid") {
+        screen = Screen.LIBRARY
+        stateFilter = StateFilter.ALL
+        showLibraryAsGrid(true)
+        selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })
+        visibleRows.drop(2).take(2).forEach { toggle(it.id) }
+        runBlocking { visibleRows.take(24).forEach { thumbnails.load(it.id) } }
+    }
     shot("3-library-history") {
+        showLibraryAsGrid(false)
+        clearSelection()
         screen = Screen.LIBRARY
         stateFilter = StateFilter.ALL
         selectSource(LibrarySource.History)

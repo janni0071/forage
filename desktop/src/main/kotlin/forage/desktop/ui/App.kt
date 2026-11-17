@@ -37,6 +37,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -203,6 +205,14 @@ private fun StatusToast(model: DesktopModel, modifier: Modifier) {
         listOfNotNull(j.label, j.total?.let { "${j.done} of $it" }, j.detail.takeIf { it.isNotBlank() }).joinToString(" · ")
     } ?: model.message
     val background = model.background
+    // Messages close themselves after a while: longer ones, and problems, stay a little longer.
+    val message = model.message
+    LaunchedEffect(message, job == null) {
+        if (message == null || job != null) return@LaunchedEffect
+        val problem = listOf("failed", "couldn't", "can't", "isn't", "wrong", "needs").any { it in message.lowercase() }
+        delay(((if (problem) 9_000L else 4_000L) + message.length * 40L).coerceAtMost(15_000L))
+        if (model.message == message) model.message = null
+    }
     if (text == null && background == null) return
     val c = MaterialTheme.colorScheme
     Surface(
