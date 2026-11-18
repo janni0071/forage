@@ -114,25 +114,27 @@ class Thumbnails(
 
     /**
      * Downloads the first of the video's images that loads, within [MAX_REQUESTS]. Images on a
-     * server that refused one are skipped; once none are left, the addresses are looked up afresh
-     * (signed links expire) and the first new one is tried. A network error or busy server gets
-     * one more try.
+     * server that refused one are skipped. Once none are left, the addresses are looked up afresh,
+     * up to [MAX_LOOKUPS] times: the first time the first new one is tried whatever its server
+     * (signed links expire), after that only ones on other servers, since a platform may hand out
+     * links on a different server each time it's asked. A network error or busy server gets one
+     * more try.
      */
     private fun download(key: Key): ByteArray {
         var candidates = urls(key.id, key.large, false)
         if (candidates.isEmpty()) throw Failure(NO_ADDRESS)
         val tried = HashSet<String>()
         val refusedHosts = LinkedHashSet<String>()
-        var refreshed = false
+        var lookups = 0
         var retried = false
         var requests = 0
         var last: Failure? = null
         while (requests < MAX_REQUESTS) {
             var address = candidates.firstOrNull { it !in tried && host(it) !in refusedHosts }
-            if (address == null && !refreshed) {
-                refreshed = true
+            while (address == null && lookups < MAX_LOOKUPS) {
+                lookups++
                 candidates = urls(key.id, key.large, true)
-                address = candidates.firstOrNull { it !in tried }
+                address = candidates.firstOrNull { it !in tried && (lookups == 1 || host(it) !in refusedHosts) }
             }
             if (address == null) break
             tried += address
@@ -200,7 +202,8 @@ class Thumbnails(
     private companion object {
         const val NO_ADDRESS = "no image address"
         /** Requests per image, across its alternatives: enough to find one that loads, not enough to hammer a server. */
-        const val MAX_REQUESTS = 4
+        const val MAX_REQUESTS = 5
+        const val MAX_LOOKUPS = 3
         val REFUSALS = setOf(401, 403, 404, 410)
     }
 }

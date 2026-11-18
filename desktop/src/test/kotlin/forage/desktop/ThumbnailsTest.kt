@@ -82,4 +82,27 @@ class ThumbnailsTest {
             second.stop(0)
         }
     }
+
+    @Test
+    fun `when a server refuses, the platform is asked again until it names another server`() {
+        val second = HttpServer.create(InetSocketAddress("127.0.0.2", 0), 0).apply {
+            createContext("/") { e -> e.sendResponseHeaders(200, png.size.toLong()); e.responseBody.use { it.write(png) } }
+            start()
+        }
+        var lookups = 0
+        val thumbnails = Thumbnails(null) { _, large, fresh ->
+            when {
+                large -> emptyList()
+                !fresh -> listOf("$base/a.png")
+                // The first two fresh answers still point at the refusing server, the third elsewhere.
+                else -> listOf(if (++lookups < 3) "$base/b$lookups.png" else "http://127.0.0.2:${second.address.port}/c.png")
+            }
+        }
+        try {
+            assertNotNull(runBlocking { thumbnails.load(id) })
+            assertEquals(3, lookups)
+        } finally {
+            second.stop(0)
+        }
+    }
 }
