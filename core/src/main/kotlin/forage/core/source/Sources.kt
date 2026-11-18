@@ -35,7 +35,8 @@ class Sources(val members: List<ExtractorSource>) : ExtractorSource {
 
     override fun watchUrl(id: PlatformId): String = of(id).watchUrl(id)
 
-    override fun thumbnailUrl(id: PlatformId, large: Boolean): String? = byPlatform[id.platform]?.thumbnailUrl(id, large)
+    override fun thumbnailUrl(id: PlatformId, large: Boolean, fresh: Boolean): String? =
+        byPlatform[id.platform]?.thumbnailUrl(id, large, fresh)
 
     override fun parseLink(text: String): PlatformId? = members.firstNotNullOfOrNull { it.parseLink(text) }
 }

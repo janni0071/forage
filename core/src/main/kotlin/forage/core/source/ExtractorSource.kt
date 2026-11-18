@@ -32,9 +32,10 @@ interface ExtractorSource {
     /**
      * A preview image for the video, if the platform has a stable address for one. [large] asks
      * for one sharp enough for a big card; it may not exist for every video, so callers fall back
-     * to the small one.
+     * to the small one. [fresh] asks for a new address when the last one was refused, for
+     * platforms whose image links expire.
      */
-    fun thumbnailUrl(id: PlatformId, large: Boolean = false): String? = null
+    fun thumbnailUrl(id: PlatformId, large: Boolean = false, fresh: Boolean = false): String? = null
 
     /** The video a pasted link (or bare ID) points to, if it is one of this platform's. */
     fun parseLink(text: String): PlatformId? = null

@@ -107,15 +107,17 @@ class PornhubSource(
      * The address seen most recently in a search or lookup, or a fresh lookup when it is old or
      * was never seen (results reused from the search cache carry none). There is only one size.
      */
-    override fun thumbnailUrl(id: PlatformId, large: Boolean): String? {
+    override fun thumbnailUrl(id: PlatformId, large: Boolean, fresh: Boolean): String? {
         if (id.platform != platform || large) return null
-        thumbs[id.id]?.takeIf { it.at > clock() - THUMB_MAX_AGE }?.let { return it.url }
-        // A long list asks for many at once, and the site may ask Forage to slow down; one more try after a pause.
-        repeat(2) { attempt ->
+        if (!fresh) thumbs[id.id]?.takeIf { it.at > clock() - THUMB_MAX_AGE }?.let { return it.url }
+        // A long list asks for many at once, and the site may ask Forage to slow down: back off and try again.
+        var wait = Duration.ofSeconds(3)
+        repeat(LOOKUP_ATTEMPTS) { attempt ->
             try {
                 return video(id).metadata.thumbnailUrl
             } catch (e: SourceException.Blocked) {
-                if (attempt == 0) sleep(Duration.ofSeconds(3))
+                if (attempt < LOOKUP_ATTEMPTS - 1) sleep(wait)
+                wait = wait.multipliedBy(2)
             } catch (e: SourceException) {
                 return null
             }
@@ -211,6 +213,7 @@ class PornhubSource(
         private const val SITE = "https://www.pornhub.com"
         private val THUMB_MAX_AGE = Duration.ofHours(6)
         private const val MAX_NAMED_PERFORMERS = 2
+        private const val LOOKUP_ATTEMPTS = 3
         private val VIEWKEY = Regex("[A-Za-z0-9]{6,40}")
         private val NOT_FOUND = listOf("no video", "not found", "no such", "removed", "deleted", "inactive")
         private val DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")

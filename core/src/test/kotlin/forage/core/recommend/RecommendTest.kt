@@ -180,9 +180,29 @@ class RecommendTest {
     @Test
     fun `names are never topic keywords`() {
         val alike = v(1f, 0f, 0f)
-        val videos = (0 until 3).map { ProfileVideo(PlatformId("other", "n$it"), "Clip $it", null, alike) }
-        val tags = videos.associate { it.id to listOf("shared subject", "some name") }
-        val topic = Clusters.of(Profile(videos), tagTerms = tags, channelNames = listOf("Some Name")).single()
+        val named = (0 until 3).map { ProfileVideo(PlatformId("other", "n$it"), "Clip $it", null, alike) }
+        val others = (0 until 4).map { ProfileVideo(PlatformId("other", "m$it"), "Other $it", null, alike) }
+        val tags = named.associate { it.id to listOf("shared subject", "some name") } +
+            others.associate { it.id to listOf("other subject", "more") }
+        val topics = Clusters.of(Profile(named + others), tagTerms = tags, channelNames = listOf("Some Name"))
+        val topic = topics.single { named.first() in it.videos }
         assertEquals(listOf("shared subject"), topic.keywords)
+    }
+
+    @Test
+    fun `tagged videos sharing a few rare tags among many form a topic`() {
+        val alike = v(1f, 0.1f, 0f)
+        // Each pair of these three shares two rare tags out of twelve; the rest are their own.
+        val ids = (0 until 3).map { PlatformId("other", "p$it") }
+        val tags = ids.associateWith { id -> listOf("rare a", "rare b") + (0 until 10).map { "own $id $it" } }
+        val outsider = PlatformId("other", "q")
+        val others = (0 until 3).map { PlatformId("other", "o$it") }
+        val all = ids + others + outsider
+        val videos = all.map { ProfileVideo(it, it.id, null, alike) }
+        val terms = tags + others.associateWith { listOf("rare c", "rare d") + (0 until 10).map { n -> "own $it $n" } } +
+            (outsider to (0 until 12).map { "own q $it" })
+        val topics = Clusters.of(Profile(videos), tagTerms = terms)
+        assertEquals(setOf(ids.toSet(), others.toSet()), topics.filter { !it.isVaried }.map { g -> g.videos.map { it.id }.toSet() }.toSet())
+        assertEquals(listOf(outsider), topics.single { it.isVaried }.videos.map { it.id })
     }
 }

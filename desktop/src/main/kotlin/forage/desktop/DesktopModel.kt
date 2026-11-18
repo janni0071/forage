@@ -164,7 +164,7 @@ class DesktopModel(
     var profileDialog by mutableStateOf<ProfileDialog?>(null)
 
     private val source by lazy(sourceFactory)
-    val thumbnails = Thumbnails(storage.thumbnailsDir) { id, large -> source.thumbnailUrl(id, large) }
+    val thumbnails = Thumbnails(storage.thumbnailsDir) { id, large, fresh -> source.thumbnailUrl(id, large, fresh) }
 
     /** Platforms whose topics are grouped by their tags. */
     private val tagPlatforms by lazy {

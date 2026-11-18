@@ -85,7 +85,7 @@ class YouTubeSource : ExtractorSource {
     }
 
     /** Every YouTube video has the 320×180 image; most also have a 1280×720 one. No metadata fetch needed. */
-    override fun thumbnailUrl(id: PlatformId, large: Boolean): String? =
+    override fun thumbnailUrl(id: PlatformId, large: Boolean, fresh: Boolean): String? =
         if (id.platform != platform) null
         else "https://i.ytimg.com/vi/${id.id}/${if (large) "hq720" else "mqdefault"}.jpg"
 

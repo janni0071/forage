@@ -111,6 +111,13 @@ fun SettingsDialog(model: DesktopModel) {
                     checked = model.showThumbnails,
                     onChange = model::setThumbnails,
                 )
+                val thumbnailProblems = remember { model.thumbnails.problems() }
+                if (thumbnailProblems.isNotEmpty()) {
+                    Hint(
+                        "Some didn't load since Forage started: " +
+                            thumbnailProblems.joinToString("; ") { (reason, n) -> "$n × $reason" } + ".",
+                    )
+                }
 
                 if (model.isPrivate) {
                     Section(
