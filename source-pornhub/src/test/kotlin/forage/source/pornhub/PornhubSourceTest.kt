@@ -135,6 +135,30 @@ class PornhubSourceTest {
     }
 
     @Test
+    fun `preview frames are worked out from a numbered image address`() {
+        val frames = PornhubSource.framesFromImage("https://ei.phncdn.com/videos/201901/31/1/original/(m=eaAaGwObaaaa)(mh=a1b2)12.jpg")
+        assertEquals(16, frames.size)
+        assertEquals("https://ei.phncdn.com/videos/201901/31/1/original/(m=eaAaGwObaaaa)(mh=a1b2)1.jpg", frames.first())
+        assertEquals("https://ei.phncdn.com/videos/201901/31/1/original/(m=eaAaGwObaaaa)(mh=a1b2)16.jpg", frames.last())
+        val signed = PornhubSource.framesFromImage("https://pix.example/videos/202510/05/2/original/x.mov/plain/(m=a)(mh=b)3.jpg?hdnea=st=1~exp=2")
+        assertEquals("https://pix.example/videos/202510/05/2/original/x.mov/plain/(m=a)(mh=b)7.jpg?hdnea=st=1~exp=2", signed[6])
+        assertEquals(emptyList(), PornhubSource.framesFromImage("https://img.example/a.jpg"))
+    }
+
+    @Test
+    fun `the API's preview frames come from the last answer, or a lookup`() {
+        val http = FakeHttp { uri ->
+            if (uri.path.endsWith("search")) ok("""{"videos":[${video("ph1111aaaa")}]}""") else ok("""{"video":${video("ph2222bbbb")}}""")
+        }
+        val source = source(http)
+        source.search("x")
+        assertEquals(listOf("https://img.example/ph1111aaaa-1.jpg"), source.previewFrames(PlatformId("pornhub", "ph1111aaaa")))
+        assertEquals(1, http.asked.size)
+        assertEquals(listOf("https://img.example/ph2222bbbb-1.jpg"), source.previewFrames(PlatformId("pornhub", "ph2222bbbb")))
+        assertEquals("/webmasters/video_by_id", http.asked.last().path)
+    }
+
+    @Test
     fun `durations and dates`() {
         assertEquals(3723L, PornhubSource.parseDuration("1:02:03"))
         assertEquals(45L, PornhubSource.parseDuration("0:45"))

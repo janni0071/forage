@@ -44,6 +44,12 @@ interface ExtractorSource {
     fun thumbnailUrls(id: PlatformId, large: Boolean = false, fresh: Boolean = false): List<String> =
         listOfNotNull(thumbnailUrl(id, large, fresh))
 
+    /**
+     * Still frames from across the video, in order, for a preview on hover; empty where the
+     * platform has none. May ask the platform.
+     */
+    fun previewFrames(id: PlatformId): List<String> = emptyList()
+
     /** The video a pasted link (or bare ID) points to, if it is one of this platform's. */
     fun parseLink(text: String): PlatformId? = null
 

@@ -64,6 +64,31 @@ class Thumbnails(
     /** True when the last try for [id] ended with the image server refusing every image. */
     fun refused(id: PlatformId): Boolean = id in refusedIds
 
+    private val frames = Collections.synchronizedMap(object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>) = size > 160
+    })
+    private val failedFrames = Collections.synchronizedSet(HashSet<String>())
+
+    /** One preview frame by its address, kept in memory only; null when it won't load. */
+    suspend fun frame(url: String): ImageBitmap? {
+        frames[url]?.let { return it }
+        if (url in failedFrames) return null
+        val image = permits.withPermit {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val response = client.send(
+                        HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(15))
+                            .header("Accept", "image/jpeg,image/png,image/webp;q=0.9,image/gif;q=0.5").build(),
+                        HttpResponse.BodyHandlers.ofByteArray(),
+                    )
+                    if (response.statusCode() == 200) Image.makeFromEncoded(response.body()).toComposeImageBitmap() else null
+                }.getOrNull()
+            }
+        }
+        if (image == null) failedFrames += url else frames[url] = image
+        return image
+    }
+
     /** The image if it is already in memory; never blocks. */
     fun cached(id: PlatformId, large: Boolean = false): ImageBitmap? = memory[Key(id, large)]
 

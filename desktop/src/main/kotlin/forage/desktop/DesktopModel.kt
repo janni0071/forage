@@ -182,6 +182,18 @@ class DesktopModel(
         fromCatalogue?.let { listOf(it) } ?: source.thumbnailUrls(id, large, fresh)
     }
 
+    /**
+     * Frames from across the video for a preview on hover; empty where there are none. Worked out
+     * from the catalogue's thumbnail where possible, which needs no request; [fromPlatform] asks
+     * the platform instead, for when those don't load. Blocks.
+     */
+    fun previewFrames(id: PlatformId, fromPlatform: Boolean = false): List<String> {
+        if (!fromPlatform && isPrivate && id.platform == PornhubSource.PLATFORM) {
+            openCatalogue()?.thumbnailUrl(id)?.let(PornhubSource::framesFromImage)?.takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        return runCatching { source.previewFrames(id) }.getOrDefault(emptyList())
+    }
+
     /** Platforms whose topics are grouped by their tags. */
     private val tagPlatforms by lazy {
         ((source as? Sources)?.members ?: listOf(source))

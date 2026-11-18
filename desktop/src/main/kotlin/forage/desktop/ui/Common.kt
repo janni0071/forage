@@ -38,6 +38,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import forage.core.PlatformId
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.layout.height
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import forage.desktop.DesktopModel
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,6 +48,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import forage.core.profile.VideoState
@@ -160,7 +164,15 @@ private sealed interface ThumbnailState {
  * server refused every image, says that the preview is only on the site instead of staying blank.
  */
 @Composable
-fun BoxScope.ThumbnailImage(model: DesktopModel, id: PlatformId, large: Boolean = false, zoom: Float = 1f, compact: Boolean = false) {
+fun BoxScope.ThumbnailImage(
+    model: DesktopModel,
+    id: PlatformId,
+    large: Boolean = false,
+    zoom: Float = 1f,
+    compact: Boolean = false,
+    /** True while the pointer rests on the card: frames from across the video take turns, where the platform has them. */
+    preview: Boolean = false,
+) {
     // Keyed by the video: a card that shows another video after a new batch must not keep the old image.
     var state by remember(id, large) {
         mutableStateOf(model.thumbnails.cached(id, large)?.let { ThumbnailState.Shown(it) } ?: ThumbnailState.Loading)
@@ -184,7 +196,70 @@ fun BoxScope.ThumbnailImage(model: DesktopModel, id: PlatformId, large: Boolean 
         is ThumbnailState.Missing -> if (s.refused) RefusedPreview(compact)
         ThumbnailState.Loading -> {}
     }
+    if (preview) PreviewFrames(model, id, zoom)
 }
+
+/**
+ * Cycles through the video's frames over the thumbnail, with a bar of segments showing where in
+ * the video the frame is. Starts after a short rest, so sweeping the pointer across cards doesn't
+ * load every video's frames.
+ */
+@Composable
+private fun BoxScope.PreviewFrames(model: DesktopModel, id: PlatformId, zoom: Float) {
+    var frame by remember(id) { mutableStateOf<ImageBitmap?>(null) }
+    var position by remember(id) { mutableStateOf(0 to 0) }
+    LaunchedEffect(id) {
+        delay(PREVIEW_REST_MS)
+        var urls = withContext(Dispatchers.IO) { model.previewFrames(id) }
+        var askedPlatform = false
+        var i = 0
+        var misses = 0
+        while (urls.isNotEmpty() && misses < urls.size) {
+            val image = model.thumbnails.frame(urls[i])
+            if (image == null && i == 0 && !askedPlatform) {
+                // Worked-out addresses that don't load: ask the platform for the real ones.
+                askedPlatform = true
+                urls = withContext(Dispatchers.IO) { model.previewFrames(id, fromPlatform = true) }
+                continue
+            }
+            if (image != null) {
+                misses = 0
+                frame = image
+                position = i to urls.size
+                delay(PREVIEW_FRAME_MS)
+            } else {
+                misses++
+            }
+            i = (i + 1) % urls.size
+        }
+    }
+    frame?.let {
+        Image(
+            it, contentDescription = null, contentScale = ContentScale.Crop,
+            modifier = Modifier.matchParentSize().graphicsLayer { scaleX = zoom; scaleY = zoom },
+        )
+        val (at, of) = position
+        // A soft shade under the bar keeps it readable on light frames.
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(26.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f)))),
+        )
+        Row(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            repeat(of) { n ->
+                Box(
+                    Modifier.weight(1f).height(3.dp).clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = if (n == at) 0.95f else 0.35f)),
+                )
+            }
+        }
+    }
+}
+
+private const val PREVIEW_REST_MS = 350L
+private const val PREVIEW_FRAME_MS = 750L
 
 @Composable
 private fun BoxScope.RefusedPreview(compact: Boolean) {

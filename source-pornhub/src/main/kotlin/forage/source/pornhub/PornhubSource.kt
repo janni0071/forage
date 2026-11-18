@@ -72,7 +72,7 @@ class PornhubSource(
     }
 
     /** A video's preview images, best first: the thumbnail, then the alternate one and the preview frames. */
-    private data class Thumb(val urls: List<String>, val at: Instant)
+    private data class Thumb(val urls: List<String>, val at: Instant, val frames: List<String> = emptyList())
 
     private val thumbs = ConcurrentHashMap<String, Thumb>()
     private val gate = Any()
@@ -131,16 +131,24 @@ class PornhubSource(
 
     override fun parseLink(text: String): PlatformId? = Companion.parseLink(text)
 
+    /** The frames from the last search or lookup if recent, otherwise from a lookup. */
+    override fun previewFrames(id: PlatformId): List<String> {
+        if (id.platform != platform) return emptyList()
+        thumbs[id.id]?.takeIf { it.at > clock() - THUMB_MAX_AGE && it.frames.isNotEmpty() }?.let { return it.frames }
+        return runCatching { video(id) }.map { thumbs[id.id]?.frames.orEmpty() }.getOrDefault(emptyList())
+    }
+
     private fun parse(video: JsonObject): VideoMetadata? {
         val key = video.string("url")?.let(::viewkey) ?: return null
         val tags = video.names("tags", "tag_name")
         val categories = video.names("categories", "category")
         val performers = video.names("pornstars", "pornstar_name")
-        val images = (listOfNotNull(video.string("default_thumb"), video.string("thumb")) +
-            (video["thumbs"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.string("src") })
+        val frames = (video["thumbs"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.string("src") }
+            .filter { it.startsWith("https://") }
+        val images = (listOfNotNull(video.string("default_thumb"), video.string("thumb")) + frames)
             .filter { it.startsWith("https://") }.distinct()
         val thumb = images.firstOrNull()
-        if (images.isNotEmpty()) thumbs[key] = Thumb(images, clock())
+        if (images.isNotEmpty()) thumbs[key] = Thumb(images, clock(), frames)
         return VideoMetadata(
             id = PlatformId(platform, key),
             title = unescape(video.string("title").orEmpty()).ifBlank { "(no title)" },
@@ -253,6 +261,19 @@ class PornhubSource(
             val parts = text.trim().split(':').map { it.toLongOrNull() ?: return null }
             if (parts.isEmpty() || parts.size > 3) return null
             return parts.fold(0L) { total, part -> total * 60 + part }.takeIf { it > 0 }
+        }
+
+        private val FRAME_NUMBER = Regex("""\)(\d{1,2})\.jpg$""")
+
+        /**
+         * The video's numbered frames worked out from one of its image addresses, which differ only in
+         * the number before `.jpg` (`…)(mh=…)12.jpg`); empty when the address isn't numbered.
+         */
+        fun framesFromImage(url: String, count: Int = 16): List<String> {
+            val path = url.substringBefore('?')
+            val match = FRAME_NUMBER.find(path) ?: return emptyList()
+            val number = match.groups[1]!!.range
+            return (1..count).map { url.replaceRange(number, it.toString()) }
         }
 
         private val IMAGE_DATE = Regex("""/videos/(\d{4})(\d{2})/(\d{2})/""")

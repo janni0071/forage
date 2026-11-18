@@ -412,7 +412,7 @@ private fun details(row: LibraryRow): String = listOfNotNull(
 private fun LibraryThumbnail(model: DesktopModel, row: LibraryRow, modifier: Modifier, playOnHover: Boolean = false, compact: Boolean = false) {
     val zoom by animateFloatAsState(if (playOnHover) 1.04f else 1f)
     Box(modifier.aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
-        if (model.showThumbnails) ThumbnailImage(model, row.id, zoom = zoom, compact = compact)
+        if (model.showThumbnails) ThumbnailImage(model, row.id, zoom = zoom, compact = compact, preview = playOnHover)
         if (playOnHover) {
             Box(
                 Modifier
