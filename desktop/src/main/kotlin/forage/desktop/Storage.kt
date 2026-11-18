@@ -20,16 +20,29 @@ class Storage(
     val playerLog: File?,
     /** Set for the private vault. */
     val encrypted: EncryptedDatabase? = null,
+    private val closeAction: () -> Unit = {},
 ) {
     val isPrivate get() = encrypted != null
 
+    /** Closes the database. The private vault closes through its model's shutdown instead. */
+    fun close() = closeAction()
+
     companion object {
-        fun plain(dataDir: File) = Storage(
-            db = DesktopModel.openDatabase(File(dataDir, "forage.db")),
-            settings = Settings(File(dataDir, "settings.properties")),
-            thumbnailsDir = File(dataDir, "thumbnails"),
-            playerLog = File(dataDir, "logs/player.log"),
-        )
+        fun plain(dataDir: File): Storage {
+            val driver = DesktopModel.openDriver(File(dataDir, "forage.db"))
+            return Storage(
+                db = ForageDatabase(driver),
+                settings = Settings(File(dataDir, "settings.properties")),
+                thumbnailsDir = File(dataDir, "thumbnails"),
+                playerLog = File(dataDir, "logs/player.log"),
+                closeAction = {
+                    // Recent changes sit in a side file (forage.db-wal) until folded in. Doing that on exit
+                    // leaves everything in forage.db alone, so copying that one file to another computer is enough.
+                    driver.execute(null, "PRAGMA wal_checkpoint(TRUNCATE)", 0)
+                    driver.close()
+                },
+            )
+        }
 
         /** The private vault's storage. Settings start as a copy of [settings] and aren't written anywhere. */
         fun private(database: EncryptedDatabase, settings: Settings) = Storage(

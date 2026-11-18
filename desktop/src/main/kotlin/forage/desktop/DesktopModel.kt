@@ -717,8 +717,10 @@ class DesktopModel(
         }
     }
 
+    /** Closes the models and the database, folding pending changes into the database file. */
     fun close() {
         models.close()
+        runCatching { storage.close() }
     }
 
     /** Stops this model's work and, for the private vault, saves and drops the decrypted copy. */
@@ -795,14 +797,17 @@ class DesktopModel(
     }
 
     companion object {
-        fun openDatabase(file: File): ForageDatabase {
+        fun openDatabase(file: File): ForageDatabase = ForageDatabase(openDriver(file))
+
+        /** Opens (creating or upgrading) the vault's database file. */
+        fun openDriver(file: File): JdbcSqliteDriver {
             file.absoluteFile.parentFile.mkdirs()
             // Background fetches write while the UI reads; WAL lets them do so without blocking each other.
             val properties = Properties().apply {
                 setProperty("journal_mode", "WAL")
                 setProperty("busy_timeout", "10000")
             }
-            return ForageDatabase(JdbcSqliteDriver("jdbc:sqlite:${file.path}", properties, ForageDatabase.Schema))
+            return JdbcSqliteDriver("jdbc:sqlite:${file.path}", properties, ForageDatabase.Schema)
         }
     }
 }

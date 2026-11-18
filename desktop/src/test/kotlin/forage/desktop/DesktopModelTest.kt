@@ -208,6 +208,18 @@ class DesktopModelTest {
     }
 
     @Test
+    fun `closing folds every change into the database file`() {
+        val folder = dir.resolve("closing")
+        val plain = DesktopModel(folder, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined) { offline }
+        plain.library.remember(id("z"), "Written just before closing")
+        plain.close()
+        val wal = folder.resolve("forage.db-wal")
+        assertTrue(!wal.exists() || wal.length() == 0L, "pending changes left in ${wal.name}")
+        // A fresh open of the file alone sees the change.
+        assertEquals("Written just before closing", forage.core.library.LibraryStore(DesktopModel.openDatabase(folder.resolve("forage.db"))).video(id("z"))?.title)
+    }
+
+    @Test
     fun `discover on an empty profile explains what to do`() {
         model.discover()
         assertTrue("no videos yet" in model.message!!, model.message)
