@@ -97,6 +97,11 @@ class PornhubSourceTest {
         assertEquals("https://img.example/ph1111aaaa.jpg?hdnea=1", source.thumbnailUrl(id))
         assertEquals(1, http.asked.size)
         assertNull(source.thumbnailUrl(id, large = true))
+        // The alternate image and the preview frames follow, to try when the first won't load.
+        assertEquals(
+            listOf("https://img.example/ph1111aaaa.jpg?hdnea=1", "https://img.example/ph1111aaaa-t.jpg", "https://img.example/ph1111aaaa-1.jpg"),
+            source.thumbnailUrls(id),
+        )
 
         now += Duration.ofHours(7)
         assertEquals("https://img.example/ph1111aaaa.jpg?hdnea=1", source.thumbnailUrl(id))

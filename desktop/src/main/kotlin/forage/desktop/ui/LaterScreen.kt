@@ -207,14 +207,7 @@ private fun BigThumbnail(model: DesktopModel, item: LaterItem, width: Dp, playIc
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable { model.open(item.id) },
     ) {
-        if (model.showThumbnails) {
-            val image by produceState(model.thumbnails.cached(item.id, large = true), item.id) {
-                if (value == null) value = model.thumbnails.load(item.id, large = true)
-            }
-            image?.let {
-                Image(it, null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize().graphicsLayer { scaleX = zoom; scaleY = zoom })
-            }
-        }
+        if (model.showThumbnails) ThumbnailImage(model, item.id, large = true, zoom = zoom, compact = width < 300.dp)
         if (hovered) {
             Box(
                 Modifier.align(Alignment.Center).size(playIcon).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)),

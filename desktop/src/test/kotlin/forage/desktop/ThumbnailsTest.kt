@@ -10,8 +10,10 @@ import javax.imageio.ImageIO
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class ThumbnailsTest {
     private val png = ByteArrayOutputStream().also { ImageIO.write(BufferedImage(4, 3, BufferedImage.TYPE_INT_RGB), "png", it) }.toByteArray()
@@ -38,7 +40,7 @@ class ThumbnailsTest {
         val asked = ArrayList<Boolean>()
         val thumbnails = Thumbnails(null) { _, large, fresh ->
             asked += fresh
-            if (large) null else if (fresh) "$base/fresh.png" else "$base/expired.png"
+            if (large) emptyList() else if (fresh) listOf("$base/fresh.png") else listOf("$base/expired.png")
         }
         assertNotNull(runBlocking { thumbnails.load(id, large = true) })
         assertEquals(listOf(false, false, true), asked)
@@ -48,12 +50,36 @@ class ThumbnailsTest {
 
     @Test
     fun `failures are reported by reason`() {
-        val thumbnails = Thumbnails(null) { v, _, _ -> if (v.id == "v1") "$base/expired.png" else "$base/page" }
+        val thumbnails = Thumbnails(null) { v, _, _ -> listOf(if (v.id == "v1") "$base/expired.png" else "$base/page") }
         assertNull(runBlocking { thumbnails.load(id) })
         assertNull(runBlocking { thumbnails.load(PlatformId("other", "v2")) })
         assertEquals(
             setOf("HTTP 403 from 127.0.0.1", "the image isn't in a format Forage can show (a web page)"),
             thumbnails.problems().map { it.first }.toSet(),
         )
+        assertTrue(thumbnails.refused(id))
+        assertFalse(thumbnails.refused(PlatformId("other", "v2")))
+    }
+
+    @Test
+    fun `images on another server are tried when one server refuses`() {
+        // A second server on another loopback address counts as another host.
+        val second = HttpServer.create(InetSocketAddress("127.0.0.2", 0), 0).apply {
+            createContext("/") { e -> e.sendResponseHeaders(200, png.size.toLong()); e.responseBody.use { it.write(png) } }
+            start()
+        }
+        val other = "http://127.0.0.2:${second.address.port}"
+        val asked = ArrayList<String>()
+        val thumbnails = Thumbnails(null) { _, _, _ ->
+            // Two on the refusing server, then one elsewhere: the second on the same server is skipped.
+            listOf("$base/expired.png", "$base/expired2.png", "$other/fresh.png").also { asked += "list" }
+        }
+        try {
+            assertNotNull(runBlocking { thumbnails.load(id) })
+            assertEquals(listOf("list"), asked)
+            assertFalse(thumbnails.refused(id))
+        } finally {
+            second.stop(0)
+        }
     }
 }

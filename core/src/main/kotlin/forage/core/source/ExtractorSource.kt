@@ -37,6 +37,13 @@ interface ExtractorSource {
      */
     fun thumbnailUrl(id: PlatformId, large: Boolean = false, fresh: Boolean = false): String? = null
 
+    /**
+     * Every preview image the platform offers for the video, best first: callers try the next
+     * when one won't load. Most platforms have just the one from [thumbnailUrl].
+     */
+    fun thumbnailUrls(id: PlatformId, large: Boolean = false, fresh: Boolean = false): List<String> =
+        listOfNotNull(thumbnailUrl(id, large, fresh))
+
     /** The video a pasted link (or bare ID) points to, if it is one of this platform's. */
     fun parseLink(text: String): PlatformId? = null
 

@@ -377,7 +377,7 @@ private fun VideoRow(model: DesktopModel, row: LibraryRow) {
     ) {
         SelectDot(selected, visible = true, onImage = false) { model.toggle(row.id) }
         Spacer(Modifier.width(12.dp))
-        LibraryThumbnail(model, row, Modifier.width(168.dp))
+        LibraryThumbnail(model, row, Modifier.width(168.dp), compact = true)
         Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
             Title(row, maxLines = 1)
             Text(details(row), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
@@ -443,15 +443,10 @@ private fun details(row: LibraryRow): String = listOfNotNull(
 ).joinToString("  ·  ").ifEmpty { if (row.hasMetadata) "" else "No details yet" }
 
 @Composable
-private fun LibraryThumbnail(model: DesktopModel, row: LibraryRow, modifier: Modifier, playOnHover: Boolean = false) {
+private fun LibraryThumbnail(model: DesktopModel, row: LibraryRow, modifier: Modifier, playOnHover: Boolean = false, compact: Boolean = false) {
     val zoom by animateFloatAsState(if (playOnHover) 1.04f else 1f)
     Box(modifier.aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
-        if (model.showThumbnails) {
-            val image by produceState(model.thumbnails.cached(row.id), row.id) { if (value == null) value = model.thumbnails.load(row.id) }
-            image?.let {
-                Image(it, null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize().graphicsLayer { scaleX = zoom; scaleY = zoom })
-            }
-        }
+        if (model.showThumbnails) ThumbnailImage(model, row.id, zoom = zoom, compact = compact)
         if (playOnHover) {
             Box(
                 Modifier

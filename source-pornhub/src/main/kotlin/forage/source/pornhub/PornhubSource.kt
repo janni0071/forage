@@ -71,7 +71,8 @@ class PornhubSource(
         }
     }
 
-    private data class Thumb(val url: String, val at: Instant)
+    /** A video's preview images, best first: the thumbnail, then the alternate one and the preview frames. */
+    private data class Thumb(val urls: List<String>, val at: Instant)
 
     private val thumbs = ConcurrentHashMap<String, Thumb>()
     private val gate = Any()
@@ -103,26 +104,29 @@ class PornhubSource(
         return "$SITE/view_video.php?viewkey=${URLEncoder.encode(id.id, Charsets.UTF_8)}"
     }
 
+    override fun thumbnailUrl(id: PlatformId, large: Boolean, fresh: Boolean): String? = thumbnailUrls(id, large, fresh).firstOrNull()
+
     /**
-     * The address seen most recently in a search or lookup, or a fresh lookup when it is old or
-     * was never seen (results reused from the search cache carry none). There is only one size.
+     * The images seen most recently in a search or lookup, or a fresh lookup when they are old or
+     * were never seen (results reused from the search cache carry none). There is only one size.
      */
-    override fun thumbnailUrl(id: PlatformId, large: Boolean, fresh: Boolean): String? {
-        if (id.platform != platform || large) return null
-        if (!fresh) thumbs[id.id]?.takeIf { it.at > clock() - THUMB_MAX_AGE }?.let { return it.url }
+    override fun thumbnailUrls(id: PlatformId, large: Boolean, fresh: Boolean): List<String> {
+        if (id.platform != platform || large) return emptyList()
+        if (!fresh) thumbs[id.id]?.takeIf { it.at > clock() - THUMB_MAX_AGE }?.let { return it.urls }
         // A long list asks for many at once, and the site may ask Forage to slow down: back off and try again.
         var wait = Duration.ofSeconds(3)
         repeat(LOOKUP_ATTEMPTS) { attempt ->
             try {
-                return video(id).metadata.thumbnailUrl
+                video(id)
+                return thumbs[id.id]?.urls.orEmpty()
             } catch (e: SourceException.Blocked) {
                 if (attempt < LOOKUP_ATTEMPTS - 1) sleep(wait)
                 wait = wait.multipliedBy(2)
             } catch (e: SourceException) {
-                return null
+                return emptyList()
             }
         }
-        return null
+        return emptyList()
     }
 
     override fun parseLink(text: String): PlatformId? = Companion.parseLink(text)
@@ -132,8 +136,11 @@ class PornhubSource(
         val tags = video.names("tags", "tag_name")
         val categories = video.names("categories", "category")
         val performers = video.names("pornstars", "pornstar_name")
-        val thumb = video.string("default_thumb") ?: video.string("thumb")
-        if (thumb != null) thumbs[key] = Thumb(thumb, clock())
+        val images = (listOfNotNull(video.string("default_thumb"), video.string("thumb")) +
+            (video["thumbs"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.string("src") })
+            .filter { it.startsWith("https://") }.distinct()
+        val thumb = images.firstOrNull()
+        if (images.isNotEmpty()) thumbs[key] = Thumb(images, clock())
         return VideoMetadata(
             id = PlatformId(platform, key),
             title = unescape(video.string("title").orEmpty()).ifBlank { "(no title)" },

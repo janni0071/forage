@@ -28,10 +28,10 @@ class Thumbnails(
     private val retryAfter: Duration = Duration.ofMinutes(5),
     private val clock: () -> Long = System::nanoTime,
     /**
-     * The image's address: (video, large, fresh), where fresh asks for a newly looked-up one.
-     * Last, so callers can pass it as a trailing lambda.
+     * The video's preview images, best first: (video, large, fresh), where fresh asks for newly
+     * looked-up addresses. Last, so callers can pass it as a trailing lambda.
      */
-    private val url: (PlatformId, Boolean, Boolean) -> String?,
+    private val urls: (PlatformId, Boolean, Boolean) -> List<String>,
 ) {
     private data class Key(val id: PlatformId, val large: Boolean)
 
@@ -57,6 +57,12 @@ class Thumbnails(
             .build()
     }
 
+    /** Videos whose images the server refused, so the UI can say the preview is only on the site. */
+    private val refusedIds = Collections.synchronizedSet(HashSet<PlatformId>())
+
+    /** True when the last try for [id] ended with the image server refusing every image. */
+    fun refused(id: PlatformId): Boolean = id in refusedIds
+
     /** The image if it is already in memory; never blocks. */
     fun cached(id: PlatformId, large: Boolean = false): ImageBitmap? = memory[Key(id, large)]
 
@@ -66,7 +72,7 @@ class Thumbnails(
 
     private val problemCounts = HashMap<String, Int>()
 
-    private class Failure(val reason: String) : Exception(reason)
+    private class Failure(val reason: String, val refused: Boolean = false) : Exception(reason)
 
     suspend fun load(id: PlatformId, large: Boolean = false): ImageBitmap? {
         val key = Key(id, large)
@@ -75,8 +81,9 @@ class Thumbnails(
         val image = permits.withPermit {
             withContext(Dispatchers.IO) {
                 try {
-                    image(key)
+                    image(key).also { refusedIds -= id }
                 } catch (e: Failure) {
+                    if (e.refused) refusedIds += id
                     // A large image missing is normal: most platforms have one size only.
                     if (!(large && e.reason == NO_ADDRESS)) synchronized(problemCounts) { problemCounts.merge(e.reason, 1, Int::plus) }
                     null
@@ -106,17 +113,32 @@ class Thumbnails(
     }
 
     /**
-     * Downloads the image, trying once more where that can help: after a network error or a busy
-     * server, and with a newly looked-up address when the server refuses one (signed links expire).
+     * Downloads the first of the video's images that loads, within [MAX_REQUESTS]. Images on a
+     * server that refused one are skipped; once none are left, the addresses are looked up afresh
+     * (signed links expire) and the first new one is tried. A network error or busy server gets
+     * one more try.
      */
     private fun download(key: Key): ByteArray {
-        var address = url(key.id, key.large, false) ?: throw Failure(NO_ADDRESS)
+        var candidates = urls(key.id, key.large, false)
+        if (candidates.isEmpty()) throw Failure(NO_ADDRESS)
+        val tried = HashSet<String>()
+        val refusedHosts = LinkedHashSet<String>()
         var refreshed = false
         var retried = false
-        while (true) {
-            val host = runCatching { URI(address).host }.getOrNull() ?: throw Failure("unreadable image address")
-            val status: Int
-            try {
+        var requests = 0
+        var last: Failure? = null
+        while (requests < MAX_REQUESTS) {
+            var address = candidates.firstOrNull { it !in tried && host(it) !in refusedHosts }
+            if (address == null && !refreshed) {
+                refreshed = true
+                candidates = urls(key.id, key.large, true)
+                address = candidates.firstOrNull { it !in tried }
+            }
+            if (address == null) break
+            tried += address
+            requests++
+            val host = host(address) ?: run { last = Failure("unreadable image address"); null } ?: continue
+            val status = try {
                 val response = client.send(
                     HttpRequest.newBuilder(URI(address))
                         .timeout(Duration.ofSeconds(20))
@@ -125,34 +147,35 @@ class Thumbnails(
                         .build(),
                     HttpResponse.BodyHandlers.ofByteArray(),
                 )
-                status = response.statusCode()
-                if (status == 200) return response.body()
+                if (response.statusCode() == 200) return response.body()
+                response.statusCode()
             } catch (e: java.io.IOException) {
+                last = Failure("${e.javaClass.simpleName} from $host")
                 if (!retried) {
                     retried = true
+                    tried -= address
                     Thread.sleep(1500)
-                    continue
                 }
-                throw Failure("${e.javaClass.simpleName} from $host")
+                continue
             }
             when {
-                status in listOf(401, 403, 404, 410) && !refreshed -> {
-                    refreshed = true
-                    val fresh = url(key.id, key.large, true)
-                    if (fresh != null && fresh != address) {
-                        address = fresh
-                        continue
-                    }
+                status in REFUSALS -> {
+                    refusedHosts += host
+                    last = Failure("HTTP $status from ${refusedHosts.joinToString(", ")}", refused = true)
                 }
                 (status == 429 || status >= 500) && !retried -> {
                     retried = true
+                    tried -= address
+                    last = Failure("HTTP $status from $host")
                     Thread.sleep(1500)
-                    continue
                 }
+                else -> last = Failure("HTTP $status from $host")
             }
-            throw Failure("HTTP $status from $host")
         }
+        throw last ?: Failure(NO_ADDRESS)
     }
+
+    private fun host(address: String): String? = runCatching { URI(address).host }.getOrNull()
 
     private fun decode(bytes: ByteArray, what: String): ImageBitmap = try {
         Image.makeFromEncoded(bytes).toComposeImageBitmap()
@@ -176,5 +199,8 @@ class Thumbnails(
 
     private companion object {
         const val NO_ADDRESS = "no image address"
+        /** Requests per image, across its alternatives: enough to find one that loads, not enough to hammer a server. */
+        const val MAX_REQUESTS = 4
+        val REFUSALS = setOf(401, 403, 404, 410)
     }
 }

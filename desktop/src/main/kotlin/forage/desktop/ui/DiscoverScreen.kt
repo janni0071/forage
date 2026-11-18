@@ -166,17 +166,7 @@ private fun PickCard(model: DesktopModel, view: PickView) {
                 .pointerHoverIcon(PointerIcon.Hand)
                 .clickable { model.open(pick.video) },
         ) {
-            if (model.showThumbnails) {
-                val image by produceState(model.thumbnails.cached(pick.video, large = true), pick.video) {
-                    if (value == null) value = model.thumbnails.load(pick.video, large = true)
-                }
-                image?.let {
-                    Image(
-                        it, contentDescription = null, contentScale = ContentScale.Crop,
-                        modifier = Modifier.matchParentSize().graphicsLayer { scaleX = zoom; scaleY = zoom },
-                    )
-                }
-            }
+            if (model.showThumbnails) ThumbnailImage(model, pick.video, large = true, zoom = zoom)
             formatDuration(pick.durationSeconds)?.let {
                 Badge(it, Modifier.align(Alignment.BottomEnd).padding(8.dp))
             }
