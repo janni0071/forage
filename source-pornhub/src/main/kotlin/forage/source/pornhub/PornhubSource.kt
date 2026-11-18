@@ -1,0 +1,251 @@
+package forage.source.pornhub
+
+import forage.core.PlatformId
+import forage.core.source.Capability
+import forage.core.source.ExtractorSource
+import forage.core.source.SourceException
+import forage.core.source.VideoDetails
+import forage.core.source.VideoMetadata
+import forage.core.source.VideoStub
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import java.net.ProxySelector
+import java.net.URI
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * The private platform plugin (SPEC, "Sensitive platforms"): the site's public webmasters API,
+ * which answers in JSON without an account or key. Only the private vault offers it.
+ *
+ * The API has search and per-video lookups but no related videos, so candidates come from
+ * searches (see the candidate generator). Thumbnail links are signed and expire after about a
+ * day, so they are remembered for a few hours only and looked up again after that.
+ */
+class PornhubSource(
+    private val http: Http = Http.jdk(),
+    /** Gap between two requests, whichever thread sends them. */
+    private val pause: Duration = Duration.ofMillis(400),
+    private val clock: () -> Instant = Instant::now,
+    private val sleep: (Duration) -> Unit = { Thread.sleep(it.toMillis()) },
+) : ExtractorSource {
+    override val platform = PLATFORM
+    override val displayName = "Pornhub"
+    override val capabilities = setOf(Capability.SEARCH)
+
+    /** A GET that returns the status and body; replaceable for tests. */
+    fun interface Http {
+        fun get(uri: URI): Response
+
+        data class Response(val status: Int, val body: String)
+
+        companion object {
+            fun jdk(): Http {
+                val client = HttpClient.newBuilder()
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .proxy(ProxySelector.getDefault())
+                    .build()
+                return Http { uri ->
+                    val request = HttpRequest.newBuilder(uri)
+                        .timeout(Duration.ofSeconds(20))
+                        .header("Accept", "application/json")
+                        .build()
+                    val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+                    Response(response.statusCode(), response.body())
+                }
+            }
+        }
+    }
+
+    private data class Thumb(val url: String, val at: Instant)
+
+    private val thumbs = ConcurrentHashMap<String, Thumb>()
+    private val gate = Any()
+    private var lastRequest: Instant? = null
+
+    override fun video(id: PlatformId): VideoDetails {
+        require(id.platform == platform) { "Not a $displayName id: $id" }
+        val json = request("video $id", "video_by_id", "id" to id.id)
+        val video = json["video"] as? JsonObject
+            ?: throw apiError(json, "video $id", notFoundIsGone = true)
+        val parsed = parse(video) ?: throw SourceException("The answer for video $id had no video link")
+        return VideoDetails(parsed.copy(id = id), related = emptyList())
+    }
+
+    override fun search(query: String): List<VideoStub> {
+        val json = request("search '$query'", "search", "search" to query)
+        val videos = json["videos"] as? JsonArray ?: run {
+            // No results come back as an error object.
+            if (isNotFound(json)) return emptyList()
+            throw apiError(json, "search '$query'", notFoundIsGone = false)
+        }
+        return videos.mapNotNull { (it as? JsonObject)?.let(::parse) }.map {
+            VideoStub(it.id, it.title, channel = null, channelName = null, it.durationSeconds, isShort = false, it.uploadedAt)
+        }
+    }
+
+    override fun watchUrl(id: PlatformId): String {
+        require(id.platform == platform) { "Not a $displayName id: $id" }
+        return "$SITE/view_video.php?viewkey=${URLEncoder.encode(id.id, Charsets.UTF_8)}"
+    }
+
+    /**
+     * The address seen most recently in a search or lookup, or a fresh lookup when it is old or
+     * was never seen (results reused from the search cache carry none). There is only one size.
+     */
+    override fun thumbnailUrl(id: PlatformId, large: Boolean): String? {
+        if (id.platform != platform || large) return null
+        thumbs[id.id]?.takeIf { it.at > clock() - THUMB_MAX_AGE }?.let { return it.url }
+        return runCatching { video(id).metadata.thumbnailUrl }.getOrNull()
+    }
+
+    override fun parseLink(text: String): PlatformId? = Companion.parseLink(text)
+
+    private fun parse(video: JsonObject): VideoMetadata? {
+        val key = video.string("url")?.let(::viewkey) ?: return null
+        val tags = video.names("tags", "tag_name")
+        val categories = video.names("categories", "category")
+        val performers = video.names("pornstars", "pornstar_name")
+        val thumb = video.string("default_thumb") ?: video.string("thumb")
+        if (thumb != null) thumbs[key] = Thumb(thumb, clock())
+        return VideoMetadata(
+            id = PlatformId(platform, key),
+            title = unescape(video.string("title").orEmpty()).ifBlank { "(no title)" },
+            description = "",
+            // Categories and performers describe a video as much as its tags do; one list keeps them all in the profile.
+            tags = (categories + tags + performers).distinctBy { it.lowercase() },
+            durationSeconds = video.string("duration")?.let(::parseDuration),
+            channel = null,
+            channelName = null,
+            language = null,
+            thumbnailUrl = thumb,
+            uploadedAt = video.string("publish_date")?.let(::parseDate),
+            isShort = false,
+            extra = buildMap {
+                if (performers.isNotEmpty()) put("performers", performers.joinToString(", "))
+                if (categories.isNotEmpty()) put("categories", categories.joinToString(", "))
+                video.string("views")?.let { put("viewCount", it) }
+                video.string("rating")?.let { put("rating", it) }
+            },
+        )
+    }
+
+    private fun request(what: String, endpoint: String, vararg params: Pair<String, String>): JsonObject {
+        val query = params.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, Charsets.UTF_8)}" }
+        val uri = URI("$SITE/webmasters/$endpoint?$query")
+        waitForTurn()
+        val response = try {
+            http.get(uri)
+        } catch (e: java.io.IOException) {
+            throw SourceException("Couldn't reach $displayName for $what: ${e.message ?: e}", e)
+        }
+        when (response.status) {
+            200 -> {}
+            403, 451 -> throw SourceException.Blocked(
+                "$displayName refused $what (HTTP ${response.status}). The site blocks some regions over age-verification laws; " +
+                    "if it opens in your browser, try again later",
+            )
+            429 -> throw SourceException.Blocked("$displayName asked Forage to slow down ($what)")
+            else -> throw SourceException("$displayName answered $what with HTTP ${response.status}")
+        }
+        val body = response.body.trimStart()
+        if (!body.startsWith("{")) {
+            throw SourceException.Blocked(
+                "$displayName answered $what with a web page instead of data. Where the site requires age verification, " +
+                    "it shows that page to programs like Forage too",
+            )
+        }
+        return try {
+            Json.parseToJsonElement(body) as JsonObject
+        } catch (e: Exception) {
+            throw SourceException("$displayName sent an answer to $what that Forage can't read", e)
+        }
+    }
+
+    private fun waitForTurn() = synchronized(gate) {
+        lastRequest?.let { last ->
+            val wait = Duration.between(clock(), last + pause)
+            if (!wait.isNegative && !wait.isZero) sleep(wait)
+        }
+        lastRequest = clock()
+    }
+
+    private fun isNotFound(json: JsonObject): Boolean {
+        val message = json.string("message")?.lowercase() ?: return false
+        return NOT_FOUND.any { it in message }
+    }
+
+    private fun apiError(json: JsonObject, what: String, notFoundIsGone: Boolean): SourceException {
+        val message = json.string("message") ?: "no data"
+        return if (notFoundIsGone && isNotFound(json)) SourceException.NotAvailable("Not available: $what ($message)")
+        else SourceException("$displayName couldn't answer $what: $message")
+    }
+
+    companion object {
+        const val PLATFORM = "pornhub"
+        private const val SITE = "https://www.pornhub.com"
+        private val THUMB_MAX_AGE = Duration.ofHours(6)
+        private val VIEWKEY = Regex("[A-Za-z0-9]{6,40}")
+        private val NOT_FOUND = listOf("no video", "not found", "no such", "removed", "deleted", "inactive")
+        private val DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+        /** `view_video.php?viewkey=…` and `/embed/…` links on the site's domains, or `pornhub:<viewkey>`. */
+        fun parseLink(text: String): PlatformId? {
+            val t = text.trim()
+            if (t.startsWith("$PLATFORM:")) return t.removePrefix("$PLATFORM:").takeIf(VIEWKEY::matches)?.let { PlatformId(PLATFORM, it) }
+            val uri = runCatching { URI(t) }.getOrNull() ?: return null
+            val host = uri.host?.lowercase() ?: return null
+            if (!(host == "pornhub.com" || host.endsWith(".pornhub.com") || host == "pornhub.org" || host.endsWith(".pornhub.org"))) return null
+            return viewkey(t)?.let { PlatformId(PLATFORM, it) }
+        }
+
+        private fun viewkey(url: String): String? {
+            val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return null
+            val path = uri.path.orEmpty()
+            val raw = when {
+                path.startsWith("/embed/") -> path.removePrefix("/embed/").substringBefore('/')
+                else -> uri.rawQuery.orEmpty().split('&')
+                    .firstOrNull { it.startsWith("viewkey=") }
+                    ?.substringAfter('=')
+                    ?.let { URLDecoder.decode(it, Charsets.UTF_8) }
+            }
+            return raw?.takeIf(VIEWKEY::matches)
+        }
+
+        /** "10:30" or "1:02:03". */
+        internal fun parseDuration(text: String): Long? {
+            val parts = text.trim().split(':').map { it.toLongOrNull() ?: return null }
+            if (parts.isEmpty() || parts.size > 3) return null
+            return parts.fold(0L) { total, part -> total * 60 + part }.takeIf { it > 0 }
+        }
+
+        /** "2025-11-03 08:24:34"; the API doesn't say which time zone, so it's read as UTC. */
+        internal fun parseDate(text: String): Instant? =
+            runCatching { LocalDateTime.parse(text.trim(), DATE).toInstant(ZoneOffset.UTC) }.getOrNull()
+
+        private val ENTITIES = mapOf("&amp;" to "&", "&quot;" to "\"", "&#39;" to "'", "&#039;" to "'", "&lt;" to "<", "&gt;" to ">")
+
+        private fun unescape(text: String): String = ENTITIES.entries.fold(text) { s, (from, to) -> s.replace(from, to) }.trim()
+
+        private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+
+        private fun JsonObject.names(list: String, field: String): List<String> =
+            (this[list] as? JsonArray).orEmpty().mapNotNull { item: JsonElement ->
+                (item as? JsonObject)?.string(field)?.let(::unescape)?.takeIf { it.isNotBlank() }
+            }
+    }
+}

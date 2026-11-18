@@ -109,7 +109,7 @@ private fun Header(model: DesktopModel) {
         model.discoverNote ?: if (model.picks.isEmpty()) "Recommendations from your profile, only when you ask"
         else "${model.picks.size} picks in the last batch",
     ) {
-        ToggleChip("Search YouTube", search) { search = it; model.settings.searchYouTube = it }
+        ToggleChip(if (model.isPrivate) "Search online" else "Search YouTube", search) { search = it; model.settings.searchYouTube = it }
         ToggleChip("Shorts", shorts) { shorts = it; model.settings.showShorts = it }
         Spacer(Modifier.width(6.dp))
         AccentButton(if (model.picks.isEmpty()) "Find recommendations" else "New batch", Icons.Filled.AutoAwesome, enabled = model.job == null, onClick = model::discover)

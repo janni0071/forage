@@ -197,16 +197,17 @@ private fun AddLinkDialog(model: DesktopModel) {
         text = {
             Column {
                 Text(
-                    "Paste a YouTube link. The video goes straight into this profile.",
+                    "Paste a link from ${model.linkPlatforms}, or several, one per line. The videos go straight into this profile.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
                 OutlinedTextField(
                     value = link,
                     onValueChange = { link = it; problem = null },
-                    label = { Text("Link") },
+                    label = { Text("Links") },
                     placeholder = { Text("https://www.youtube.com/watch?v=…") },
-                    singleLine = true,
+                    minLines = 1,
+                    maxLines = 6,
                     isError = problem != null,
                     supportingText = problem?.let { { Text(it) } },
                     shape = RoundedCornerShape(12.dp),

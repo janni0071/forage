@@ -31,6 +31,7 @@ class YouTubeSource : ExtractorSource {
     }
 
     override val platform = Platforms.YOUTUBE
+    override val displayName = "YouTube"
     override val capabilities = setOf(Capability.RELATED_VIDEOS, Capability.SEARCH)
 
     override fun video(id: PlatformId): VideoDetails = guarded("video $id") {
@@ -59,6 +60,14 @@ class YouTubeSource : ExtractorSource {
         val handler = ServiceList.YouTube.searchQHFactory
             .fromQuery(query, listOf(YoutubeSearchQueryHandlerFactory.VIDEOS), "")
         stubs(SearchInfo.getInfo(ServiceList.YouTube, handler).relatedItems)
+    }
+
+    /** A link in any of YouTube's shapes, a bare 11-character ID, or `youtube:<id>`. */
+    override fun parseLink(text: String): PlatformId? {
+        val t = text.trim()
+        if (BARE_ID.matches(t)) return PlatformId.youtube(t)
+        if (t.startsWith("$platform:")) return runCatching { PlatformId.parse(t) }.getOrNull()
+        return YouTubeUrls.video(t)?.id
     }
 
     override fun watchUrl(id: PlatformId): String {
@@ -108,5 +117,9 @@ class YouTubeSource : ExtractorSource {
             throw SourceException.Blocked("YouTube answered $what with a web page instead of data, which usually means this network is being bot-checked", e)
         }
         throw SourceException("Failed to load $what: ${e.message ?: e.toString()}", e)
+    }
+
+    private companion object {
+        val BARE_ID = Regex("[A-Za-z0-9_-]{11}")
     }
 }

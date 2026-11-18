@@ -21,12 +21,15 @@ data class CandidateStub(val stub: VideoStub, val sources: List<CandidateSource>
 
 /**
  * Collects videos worth scoring (SPEC, Candidates): the related videos of a sample of profile
- * videos from every cluster, plus one search per cluster built from its keywords.
+ * videos from every cluster, plus searches built from each cluster's keywords.
  * Channel-collaboration candidates are not implemented yet.
  */
 class CandidateGenerator(
     private val cache: MetadataCache,
-    /** Used for searches. Null, or a source without [Capability.SEARCH], means related videos only. */
+    /**
+     * Used for searches, per platform through [ExtractorSource.forPlatform]. Null, or platforms
+     * without [Capability.SEARCH], means related videos only.
+     */
     private val source: ExtractorSource? = null,
     private val random: Random = Random(1),
     /** Recent results of the same search are reused instead of asking again. */
@@ -38,6 +41,9 @@ class CandidateGenerator(
     /** Wait before each further search on the same worker, and the base of the backoff after a failure. */
     private val pause: Duration = Duration.ofSeconds(1),
     private val sleep: (Duration) -> Unit = { Thread.sleep(it.toMillis()) },
+    /** On platforms without related videos: profile videos per topic searched for by their tags. */
+    private val tagSearchesPerCluster: Int = 3,
+    private val tagSearchesVaried: Int = 6,
 ) {
     /** What went wrong with searches, for the caller to report. Candidate generation itself never fails on them. */
     val searchFailures: MutableList<String> = java.util.Collections.synchronizedList(ArrayList())
@@ -71,25 +77,53 @@ class CandidateGenerator(
             }
         }
 
-        if (source != null && Capability.SEARCH in source.capabilities) {
-            // The varied cluster has no common subject to search for.
-            val searches = active.filter { !it.isVaried }
-                .map { it to it.keywords.take(keywordsPerSearch).joinToString(" ") }
-                .filter { it.second.isNotBlank() }
-            // Results are merged in topic order afterwards, so the outcome doesn't depend on which search finished first.
-            search(searches.map { it.second }).forEachIndexed { i, results ->
-                val (cluster, query) = searches[i]
-                results.forEach { add(it, CandidateSource.Search(query, cluster.index)) }
+        if (source != null) {
+            val searches = plannedSearches(active, keywordsPerSearch)
+            // Results are merged in plan order afterwards, so the outcome doesn't depend on which search finished first.
+            search(searches.map { it.source to it.query }).forEachIndexed { i, results ->
+                results.forEach { add(it, CandidateSource.Search(searches[i].query, searches[i].cluster)) }
             }
         }
         return found.values.toList()
     }
 
-    private fun search(queries: List<String>): List<List<VideoStub>> {
-        val source = source!!
+    private data class PlannedSearch(val source: ExtractorSource, val query: String, val cluster: Int)
+
+    /**
+     * One search per topic from its keywords, on the platform most of the topic's videos come from.
+     * A platform without related videos gets more: a second keyword search per topic, and searches
+     * for a sample of profile videos by their own tags, which stand in for their related videos.
+     */
+    private fun plannedSearches(clusters: List<Cluster>, keywordsPerSearch: Int): List<PlannedSearch> {
+        val planned = LinkedHashMap<Pair<String, String>, PlannedSearch>()
+        fun plan(source: ExtractorSource, words: List<String>, cluster: Int) {
+            val query = words.map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
+            if (query.isNotEmpty()) planned.putIfAbsent(source.platform to query, PlannedSearch(source, query, cluster))
+        }
+        for (cluster in clusters) {
+            val platform = cluster.videos.groupingBy { it.id.platform }.eachCount().maxByOrNull { it.value }?.key ?: continue
+            val source = source?.forPlatform(platform)?.takeIf { Capability.SEARCH in it.capabilities } ?: continue
+            val withoutRelated = Capability.RELATED_VIDEOS !in source.capabilities
+            // The varied cluster has no common subject to search for.
+            if (!cluster.isVaried) {
+                cluster.keywords.chunked(keywordsPerSearch).take(if (withoutRelated) 2 else 1)
+                    .forEach { plan(source, it, cluster.index) }
+            }
+            if (withoutRelated) {
+                val sample = if (cluster.isVaried) tagSearchesVaried else tagSearchesPerCluster
+                cluster.videos.filter { it.id.platform == platform }.shuffled(random).take(sample).forEach { video ->
+                    val tags = cache.video(video.id)?.metadata?.tags.orEmpty()
+                    plan(source, tags.take(keywordsPerSearch), cluster.index)
+                }
+            }
+        }
+        return planned.values.toList()
+    }
+
+    private fun search(queries: List<Pair<ExtractorSource, String>>): List<List<VideoStub>> {
         val results = arrayOfNulls<List<VideoStub>>(queries.size)
         val pending = ArrayList<Int>()
-        queries.forEachIndexed { i, q ->
+        queries.forEachIndexed { i, (source, q) ->
             val cached = searchCache?.get(source.platform, q)
             if (cached != null) results[i] = cached else pending += i
         }
@@ -100,7 +134,7 @@ class CandidateGenerator(
                     pool.submit {
                         // Stagger the first wave so the searches don't all start in the same instant.
                         if (n in 1 until parallelSearches) sleep(pause.multipliedBy(n.toLong()).dividedBy(parallelSearches.toLong()))
-                        results[i] = searchWithRetries(source, queries[i], first = n < parallelSearches)
+                        results[i] = searchWithRetries(queries[i].first, queries[i].second, first = n < parallelSearches)
                     }
                 }.forEach { it.get() }
             } finally {

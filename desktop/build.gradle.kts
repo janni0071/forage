@@ -16,6 +16,7 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(project(":source-youtube"))
+    implementation(project(":source-pornhub"))
     implementation(project(":embedding-onnx"))
     implementation(project(":language-lingua"))
     implementation(libs.sqldelight.sqlite.driver)
@@ -42,7 +43,7 @@ compose.desktop {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.Dmg, TargetFormat.Msi)
             // The name people see; Debian's package name below must be lowercase.
             packageName = "Forage"
-            packageVersion = "0.1.4"
+            packageVersion = "0.1.5"
             description = "Local-first video recommendations you control"
             vendor = "Forage"
             licenseFile.set(rootProject.file("LICENSE"))

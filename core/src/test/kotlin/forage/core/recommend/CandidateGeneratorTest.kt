@@ -35,7 +35,7 @@ class CandidateGeneratorTest {
     private class SearchOnly(private var failures: Int) : ExtractorSource {
         val queries = ArrayList<String>()
         override val platform = "youtube"
-        override val capabilities = setOf(Capability.SEARCH)
+        override val capabilities = setOf(Capability.RELATED_VIDEOS, Capability.SEARCH)
         override fun video(id: PlatformId): VideoDetails = error("not used")
         override fun search(query: String): List<VideoStub> {
             queries += query
@@ -80,6 +80,8 @@ class CandidateGeneratorTest {
     fun `many searches run in parallel and merge in topic order`() {
         val topics = (0 until 6).map { i -> clusters[0].copy(index = i, keywords = listOf("topic$i")) }
         val source = object : ExtractorSource by SearchOnly(0) {
+            // Delegation would hand back the wrapped source.
+            override fun forPlatform(platform: String) = this
             override fun search(query: String): List<VideoStub> {
                 Thread.sleep(if (query == "topic0") 300 else 10)
                 return listOf(VideoStub(PlatformId.youtube("v-$query"), query, null, null, null, false))
@@ -96,5 +98,41 @@ class CandidateGeneratorTest {
         val generator = CandidateGenerator(cache, SearchOnly(failures = 99), sleep = {})
         assertEquals(2, generator.generate(clusters, setOf(id("seen"))).size)
         assertEquals(1, generator.searchFailures.size)
+    }
+
+    /** A platform with search only, like the private plugin's. */
+    private class OtherPlatform : ExtractorSource {
+        val queries = java.util.Collections.synchronizedList(ArrayList<String>())
+        override val platform = "other"
+        override val capabilities = setOf(Capability.SEARCH)
+        override fun video(id: PlatformId): VideoDetails = error("not used")
+        override fun search(query: String): List<VideoStub> {
+            queries += query
+            return listOf(VideoStub(PlatformId("other", "hit-${query.hashCode()}"), "Hit", null, null, null, false))
+        }
+        override fun watchUrl(id: PlatformId) = ""
+    }
+
+    @Test
+    fun `a platform without related videos is searched by keywords and by its videos' tags`() {
+        val o = { s: String -> PlatformId("other", s) }
+        val cache = MetadataCache(memoryDatabase()).apply {
+            put(details("x").let { it.copy(metadata = it.metadata.copy(id = o("x"), tags = listOf("t1", "t2", "t3", "t4")), related = emptyList()) })
+            put(details("y").let { it.copy(metadata = it.metadata.copy(id = o("y"), tags = listOf("t5")), related = emptyList()) })
+        }
+        val topic = Cluster(
+            0, listOf(ProfileVideo(o("x"), "X", null, floatArrayOf(1f)), ProfileVideo(o("y"), "Y", null, floatArrayOf(1f))),
+            floatArrayOf(1f), listOf("k1", "k2", "k3", "k4", "k5", "k6", "k7"),
+        )
+        val varied = topic.copy(index = 1, keywords = emptyList(), isVaried = true)
+        val other = OtherPlatform()
+        val youtube = SearchOnly(0)
+        val found = CandidateGenerator(cache, forage.core.source.Sources(youtube, other), sleep = {})
+            .generate(listOf(topic, varied), emptySet())
+        // Two keyword searches for the topic, and tag searches for its videos; the varied group repeats them, so they run once.
+        assertEquals(setOf("k1 k2 k3", "k4 k5 k6", "t1 t2 t3", "t5"), other.queries.toSet())
+        assertEquals(4, other.queries.size)
+        assertEquals(emptyList(), youtube.queries)
+        assertTrue(found.all { it.stub.id.platform == "other" })
     }
 }

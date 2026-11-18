@@ -29,7 +29,15 @@ class PrivateVaultTest {
         override fun search(query: String): List<VideoStub> = emptyList()
         override fun watchUrl(id: PlatformId) = ""
     }
-    private val model = DesktopModel(dir, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined) { offline }
+    /** The real plugin, answering every lookup as gone without touching the network. */
+    private val privatePlatform = forage.source.pornhub.PornhubSource(
+        http = { forage.source.pornhub.PornhubSource.Http.Response(200, """{"code":"2002","message":"No video with this ID."}""") },
+        sleep = {},
+    )
+    private val model = DesktopModel(
+        dir, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined,
+        privateSourceFactory = { forage.core.source.Sources(offline, privatePlatform) },
+    ) { offline }
     private val video = PlatformId.youtube("aaaaaaaaaa1")
 
     @AfterTest
@@ -65,6 +73,20 @@ class PrivateVaultTest {
         val again = assertNotNull(model.privateModel, model.privateError)
         assertEquals("A very private title", again.library.video(video)?.title)
         assertEquals(listOf(video), again.profiles.entries(again.profile).map { it.video })
+        lock()
+    }
+
+    @Test
+    fun `only the private vault takes links from the private platform`() {
+        val link = "https://www.pornhub.com/view_video.php?viewkey=ph0000000001"
+        assertNotNull(model.addByLink(link))
+        unlock("quiet harbour lantern", create = true)
+        val vault = assertNotNull(model.privateModel, model.privateError)
+        assertEquals("youtube and Pornhub", vault.linkPlatforms)
+        assertNull(vault.addByLink(link))
+        // The private vault works on its own thread.
+        runBlocking { withTimeout(10_000) { while (vault.job != null) kotlinx.coroutines.delay(20) } }
+        assertEquals(listOf(PlatformId("pornhub", "ph0000000001")), vault.profiles.entries(vault.profile).map { it.video })
         lock()
     }
 

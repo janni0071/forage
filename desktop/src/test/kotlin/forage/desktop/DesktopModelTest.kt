@@ -37,6 +37,8 @@ class DesktopModelTest {
         }
         override fun search(query: String): List<VideoStub> = emptyList()
         override fun watchUrl(id: PlatformId) = ""
+        override fun parseLink(text: String) =
+            text.removePrefix("https://www.youtube.com/watch?v=").takeIf { it.length == 11 && "/" !in it }?.let(PlatformId::youtube)
     }
 
     private val dir = Files.createTempDirectory("forage-test").toFile()
@@ -64,6 +66,17 @@ class DesktopModelTest {
             )
         )
         runBlocking { reload() }
+    }
+
+    @Test
+    fun `several links can be added at once, and anything else is refused`() {
+        assertEquals("That doesn't look like a link to a video on youtube", model.addByLink("https://example.com/x"))
+        val refused = model.addByLink("https://www.youtube.com/watch?v=aaaaaaaaaa1\nnot-a-link")
+        assertEquals("1 of these aren't video links Forage knows, e.g. not-a-link", refused)
+        assertNull(model.addByLink(" https://www.youtube.com/watch?v=aaaaaaaaaa1\n\nhttps://www.youtube.com/watch?v=bbbbbbbbbb2 "))
+        val included = model.profiles.entries(model.profile, VideoState.INCLUDED).map { it.video.id }
+        assertEquals(setOf("aaaaaaaaaa1", "bbbbbbbbbb2"), included.toSet())
+        assertEquals("Added 2 videos; 2 still need details (Fetch profile details)", model.message)
     }
 
     @Test

@@ -22,4 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "forage"
 
-include(":core", ":source-youtube", ":embedding-onnx", ":language-lingua", ":cli", ":desktop")
+include(":core", ":source-youtube", ":source-pornhub", ":embedding-onnx", ":language-lingua", ":cli", ":desktop")

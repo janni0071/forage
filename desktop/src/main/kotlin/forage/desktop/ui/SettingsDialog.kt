@@ -104,7 +104,9 @@ fun SettingsDialog(model: DesktopModel) {
                 Section("Thumbnails", null)
                 SwitchRow(
                     title = "Show thumbnails",
-                    text = "Loaded from YouTube's image server (i.ytimg.com), one request per video, then kept on disk. " +
+                    text = if (model.isPrivate) "Loaded from each site's image server, one request per video, and kept in memory only. " +
+                        "Turn off to send no requests for them."
+                    else "Loaded from YouTube's image server (i.ytimg.com), one request per video, then kept on disk. " +
                         "Turn off to send no requests for them.",
                     checked = model.showThumbnails,
                     onChange = model::setThumbnails,

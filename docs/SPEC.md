@@ -137,9 +137,20 @@ The private vault as built (Nov 2026):
 - **Existence stays hidden.** The vault's file name is derived from the PIN, so a wrong PIN and no vault look identical, and creating a vault never overwrites another. "Private profiles…" is always in the profile menu. Someone browsing the data folder sees that encrypted files exist, but not what they hold.
 - **Shared, impersonal parts.** The embedding and language models are shared with the normal vault; they hold no personal data.
 - **Limits.** A short numeric PIN can be guessed offline by someone with the file, so the app recommends a passphrase. A forgotten PIN can't be recovered. While unlocked, the data is in memory, where the operating system may swap it to disk.
-- **Platform.** The vault works with YouTube today; the first sensitive platform plugin is still to come, after checking the site's API terms.
+- **Platform.** The vault offers YouTube and the first sensitive platform (below); the normal vault offers YouTube only.
 
-Plan: design for it from M1 (the vault boundary), build the first sensitive plugin after M1's core loop works, as a separate module outside the default build. Before writing it, check that the HubTraffic API still exists and what its terms allow. There is no known history export to import from, so such a profile starts from pasted URLs.
+The first sensitive platform plugin as built (Nov 2026), module `source-pornhub`:
+
+- **API.** The HubTraffic API lives on under the site itself (`/webmasters/search`, `/webmasters/video_by_id`): JSON, no account or key. hubtraffic.com no longer resolves; whether the terms at hubtraffic.net still apply, and what they allow for automated use, is unverified and up to the user to check.
+- **Metadata.** Title, tags, categories, performers, duration and publish date. Categories, tags and performers go into the profile as tags; there is no description, channel or language.
+- **Candidates without related videos.** The API has none, so the candidate generator routes searches by platform and, for a platform without related videos, runs two keyword searches per topic plus searches by the tags of a few sampled profile videos (including from the varied group), which stand in for their related videos. Mixed vaults search each topic on the platform most of its videos come from.
+- **Thumbnails.** The links are signed and expire after about a day, so they are kept for a few hours and looked up again after that; memory only, like the rest of the vault.
+- **Region-aware.** HTTP 403/451 and age-verification pages instead of JSON are reported as blocked, with an explanation, rather than as missing videos.
+- **Playback** in the browser. FreeTube and mpv stay YouTube-only.
+- **Starting a profile.** There is still no history export, so the add dialog takes several pasted links at once; "More like this" on picks grows the profile from there.
+- **Distribution.** The desktop package includes the plugin but offers it only inside the private vault. A separate distribution matters for app stores (Android, later), not for the self-installed desktop package.
+
+Plan (followed): design for it from M1 (the vault boundary), build the first sensitive plugin after M1's core loop works, as a separate module. There is no known history export to import from, so such a profile starts from pasted URLs.
 
 ## Risks and decisions
 

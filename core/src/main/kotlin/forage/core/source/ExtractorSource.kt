@@ -14,6 +14,9 @@ interface ExtractorSource {
     /** Platform prefix of the IDs this source handles, e.g. `youtube`. */
     val platform: String
 
+    /** The platform's name as people know it, for messages. */
+    val displayName: String get() = platform
+
     /** What this source can do. Callers check before calling and skip what's missing. */
     val capabilities: Set<Capability>
 
@@ -32,6 +35,15 @@ interface ExtractorSource {
      * to the small one.
      */
     fun thumbnailUrl(id: PlatformId, large: Boolean = false): String? = null
+
+    /** The video a pasted link (or bare ID) points to, if it is one of this platform's. */
+    fun parseLink(text: String): PlatformId? = null
+
+    /**
+     * The source that handles [platform]: this one, or for a [Sources] the matching member.
+     * Lets callers that work per platform (searches) accept either.
+     */
+    fun forPlatform(platform: String): ExtractorSource? = takeIf { it.platform == platform }
 }
 
 enum class Capability { RELATED_VIDEOS, SEARCH }

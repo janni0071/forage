@@ -1,6 +1,7 @@
 package forage.desktop
 
 import forage.core.PlatformId
+import forage.core.Platforms
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -43,18 +44,14 @@ enum class Player(val label: String) {
         private const val FREETUBE_FLATPAK = "io.freetubeapp.FreeTube"
         private const val MPV_FLATPAK = "io.mpv.Mpv"
 
-        fun watchUrl(id: PlatformId): String {
-            require(id.platform == "youtube") { "No player link for $id" }
-            return "https://www.youtube.com/watch?v=${id.id}"
-        }
-
         /**
-         * Opens [id] in [player]. Returns the started process, so the caller can report it if it
-         * quits with an error; null for the browser. Throws with a readable message when the player
-         * can't be started at all.
+         * Opens [url], the link to [id], in [player]. FreeTube and mpv are for YouTube; videos from
+         * other platforms open in the browser. Returns the started process, so the caller can report
+         * it if it quits with an error; null for the browser. Throws with a readable message when
+         * the player can't be started at all.
          */
-        fun open(player: Player, id: PlatformId, log: File?): Process? {
-            val url = watchUrl(id)
+        fun open(player: Player, id: PlatformId, url: String, log: File?): Process? {
+            val player = if (id.platform == Platforms.YOUTUBE) player else BROWSER
             if (player == BROWSER) {
                 if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
                     error("This system can't open a browser from Java; copy the link instead: $url")

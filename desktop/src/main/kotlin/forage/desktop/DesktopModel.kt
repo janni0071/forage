@@ -31,6 +31,8 @@ import forage.embedding.onnx.ModelFiles
 import forage.embedding.onnx.ModelSpec
 import forage.embedding.onnx.OnnxEmbedder
 import forage.language.lingua.LinguaDetector
+import forage.core.source.Sources
+import forage.source.pornhub.PornhubSource
 import forage.source.youtube.YouTubeSource
 import forage.core.vault.PrivateVaults
 import forage.core.vault.VaultDamagedException
@@ -115,7 +117,9 @@ class DesktopModel(
     private val storage: Storage = Storage.plain(dataDir),
     /** Shared with the private vault's model, so the models load only once. */
     private val models: Models = Models(dataDir),
-    /** Replaceable for tests; created on first use otherwise, since it starts network clients. */
+    /** The private vault also offers the sensitive platform (SPEC, "Sensitive platforms"). */
+    private val privateSourceFactory: () -> ExtractorSource = { Sources(YouTubeSource(), PornhubSource()) },
+    /** Replaceable for tests; created on first use otherwise, since it starts network clients. Last, so tests can pass it as a trailing lambda. */
     private val sourceFactory: () -> ExtractorSource = { YouTubeSource() },
 ) {
     val db: ForageDatabase = storage.db
@@ -357,7 +361,7 @@ class DesktopModel(
             message = "Every profile video already has its details"
             return
         }
-        runJob("Fetching details from YouTube", ids.size) { update ->
+        runJob("Fetching details from ${source.displayName}", ids.size) { update ->
             val job = currentCoroutineContext()[CoroutineJob]
             val summary = MetadataFetcher(source, cache).fetchAll(ids) { id, outcome ->
                 if (job?.isActive == false) throw CancellationException("Stopped")
@@ -374,9 +378,9 @@ class DesktopModel(
             buildString {
                 append("Fetched ${summary.fetched}")
                 if (summary.cached > 0) append(", ${summary.cached} already had details")
-                if (summary.unavailable > 0) append(", ${summary.unavailable} no longer on YouTube")
+                if (summary.unavailable > 0) append(", ${summary.unavailable} no longer available")
                 if (summary.failed > 0) append(", ${summary.failed} failed")
-                if (summary.stoppedEarly) append(". YouTube kept refusing; try again later to continue")
+                if (summary.stoppedEarly) append(". ${source.displayName} kept refusing; try again later to continue")
             }
         }
     }
@@ -439,30 +443,53 @@ class DesktopModel(
         profileList = profiles.profiles().map { it to profiles.entries(it, VideoState.INCLUDED).size }
     }
 
+    /** The platforms links can be added from in this vault, for the add dialog. */
+    val linkPlatforms: String get() = source.displayName
+
     /**
-     * Adds a video by its link (SPEC, Manual add): fetches its details and puts it in the profile.
-     * Returns why the link wasn't accepted, or null.
+     * Adds videos by their links (SPEC, Manual add), one or several separated by spaces or lines:
+     * fetches their details and puts them in the profile. Returns why the text wasn't accepted, or null.
      */
     fun addByLink(text: String): String? {
-        val entry = text.trim().let { if (Regex("[A-Za-z0-9_-]{11}").matches(it)) "youtube:$it" else it }
-        val id = forage.core.profile.ProfileFile.parse(entry).videos.singleOrNull()
-            ?: return "That doesn't look like a YouTube video link"
+        val words = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (words.isEmpty()) return "Paste a link first"
+        val ids = words.map { source.parseLink(it) }
+        val unknown = words.filterIndexed { i, _ -> ids[i] == null }
+        if (unknown.isNotEmpty()) {
+            return if (words.size == 1) "That doesn't look like a link to a video on $linkPlatforms"
+            else "${unknown.size} of these aren't video links Forage knows, e.g. ${unknown.first().take(60)}"
+        }
+        val found = ids.filterNotNull().distinct()
         addDialogOpen = false
-        runJob("Adding a video") { update ->
-            update("Fetching its details")
-            val details = when (val outcome = MetadataFetcher(source, cache).fetch(id)) {
-                is FetchOutcome.Fetched -> outcome.details
-                is FetchOutcome.Cached -> outcome.details
-                else -> null
+        runJob(if (found.size == 1) "Adding a video" else "Adding ${found.size} videos", found.size) { update ->
+            val titles = ArrayList<String>()
+            val reached = HashSet<PlatformId>()
+            var missing = 0
+            MetadataFetcher(source, cache).fetchAll(found) { id, outcome ->
+                reached += id
+                val details = when (outcome) {
+                    is FetchOutcome.Fetched -> outcome.details
+                    is FetchOutcome.Cached -> outcome.details
+                    else -> null
+                }
+                val v = details?.metadata
+                if (v == null) missing++ else titles += v.title
+                library.remember(id, v?.title, v?.channel, v?.channelName, v?.isShort ?: false, v?.durationSeconds, v?.uploadedAt)
+                update(v?.title ?: "no details yet: $id")
             }
-            val v = details?.metadata
-            library.remember(id, v?.title, v?.channel, v?.channelName, v?.isShort ?: false, v?.durationSeconds, v?.uploadedAt)
-            profiles.mark(profile, listOf(id), VideoState.INCLUDED)
+            // Videos the fetch never reached (it stops after repeated failures) still go in, without details.
+            found.filter { it !in reached }.forEach { library.remember(it, null, null, null, false, null, null); missing++ }
+            profiles.mark(profile, found, VideoState.INCLUDED)
             topicsCurrent = false
-            // Show it where it now is.
+            // Show them where they now are.
             currentSource = LibrarySource.InProfile
             loadRows()
-            if (v != null) "Added \"${v.title}\" to the profile" else "Added the video; its details couldn't be fetched yet (Fetch profile details)"
+            when {
+                found.size == 1 && titles.size == 1 -> "Added \"${titles.single()}\" to the profile"
+                found.size == 1 -> "Added the video; its details couldn't be fetched yet (Fetch profile details)"
+                missing == 0 -> "Added ${found.size} videos to the profile"
+                else -> "Added ${found.size} videos; $missing still need details (Fetch profile details)"
+            }
         }
         return null
     }
@@ -533,7 +560,7 @@ class DesktopModel(
     private fun runDiscover() = runJob("Finding recommendations") { update ->
         update("Loading the models")
         val embedder = embedder(update)
-        update(if (settings.searchYouTube) "Collecting candidates and searching YouTube" else "Collecting and ranking candidates")
+        update(if (settings.searchYouTube) "Collecting candidates and searching ${source.displayName}" else "Collecting and ranking candidates")
         try {
             val result = discoverer(embedder, settings.searchYouTube).run(profile)
             val seconds = result.timings.values.sum() / 1000.0
@@ -597,7 +624,7 @@ class DesktopModel(
         val player = player
         val log = storage.playerLog
         val process = try {
-            Player.open(player, id, log)
+            Player.open(player, id, source.watchUrl(id), log)
         } catch (e: Exception) {
             message = e.message
             return
@@ -779,7 +806,10 @@ class DesktopModel(
                     unlocked?.let { u ->
                         val database = EncryptedDatabase(vaults, u)
                         // One thread for everything: the decrypted database is a single in-memory connection.
-                        DesktopModel(dataDir, scope, Dispatchers.IO.limitedParallelism(1), Storage.private(database, settings), models, sourceFactory)
+                        DesktopModel(
+                            dataDir, scope, Dispatchers.IO.limitedParallelism(1), Storage.private(database, settings), models,
+                            privateSourceFactory = privateSourceFactory, sourceFactory = privateSourceFactory,
+                        )
                     }
                 }
                 if (opened == null) {
