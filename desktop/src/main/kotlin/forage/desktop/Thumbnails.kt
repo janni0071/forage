@@ -22,7 +22,11 @@ import java.util.Collections
  * Each image is downloaded once; failures are remembered for the session so a missing image
  * isn't requested on every scroll. Large images fall back to small ones where they don't exist.
  */
-class Thumbnails(private val dir: File, private val url: (PlatformId, Boolean) -> String?) {
+class Thumbnails(
+    /** Null keeps images in memory only, for the private vault. */
+    private val dir: File?,
+    private val url: (PlatformId, Boolean) -> String?,
+) {
     private data class Key(val id: PlatformId, val large: Boolean)
 
     private val memory = Collections.synchronizedMap(object : LinkedHashMap<Key, ImageBitmap>(256, 0.75f, true) {
@@ -60,14 +64,15 @@ class Thumbnails(private val dir: File, private val url: (PlatformId, Boolean) -
     }
 
     private fun bytes(key: Key): ByteArray? {
-        val file = File(dir, "${key.id.platform}/${key.id.id}${if (key.large) "-large" else ""}.jpg")
-        if (file.isFile) return file.readBytes()
+        val file = dir?.let { File(it, "${key.id.platform}/${key.id.id}${if (key.large) "-large" else ""}.jpg") }
+        if (file?.isFile == true) return file.readBytes()
         val address = url(key.id, key.large) ?: return null
         val response = client.send(
             HttpRequest.newBuilder(URI(address)).timeout(Duration.ofSeconds(20)).build(),
             HttpResponse.BodyHandlers.ofByteArray(),
         )
         if (response.statusCode() != 200) return null
+        if (file == null) return response.body()
         file.parentFile.mkdirs()
         val partial = File(file.parentFile, "${file.name}.part")
         partial.writeBytes(response.body())

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.BubbleChart
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FileUpload
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material.icons.outlined.WatchLater
@@ -86,7 +87,16 @@ private fun Sidebar(model: DesktopModel, onImport: () -> Unit) {
                 Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Color(0xFF3E0423), modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(12.dp))
-            Text("Forage", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Column {
+                Text("Forage", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                if (model.isPrivate) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Lock, contentDescription = null, tint = c.tertiary, modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Private vault", style = MaterialTheme.typography.labelMedium, color = c.tertiary, maxLines = 1)
+                    }
+                }
+            }
         }
 
         NavItem(Icons.Outlined.VideoLibrary, "Library", model.screen == Screen.LIBRARY) { model.screen = Screen.LIBRARY }
@@ -99,7 +109,11 @@ private fun Sidebar(model: DesktopModel, onImport: () -> Unit) {
         }
 
         Spacer(Modifier.weight(1f))
-        NavItem(Icons.Outlined.FileUpload, "Import Takeout", selected = false, enabled = model.job == null, onClick = onImport)
+        if (model.isPrivate) {
+            NavItem(Icons.Outlined.Lock, "Lock private vault", selected = false) { model.onLock?.invoke() }
+        } else {
+            NavItem(Icons.Outlined.FileUpload, "Import Takeout", selected = false, enabled = model.job == null, onClick = onImport)
+        }
         SettingsItem(model)
         HorizontalDivider(Modifier.padding(top = 14.dp, bottom = 8.dp), color = c.outlineVariant)
         ProfileSwitcher(model)

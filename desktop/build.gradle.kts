@@ -19,6 +19,7 @@ dependencies {
     implementation(project(":embedding-onnx"))
     implementation(project(":language-lingua"))
     implementation(libs.sqldelight.sqlite.driver)
+    implementation(libs.sqlite.jdbc)
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     // Large, but packaging strips the icons that aren't used.
@@ -41,7 +42,7 @@ compose.desktop {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.Dmg, TargetFormat.Msi)
             // The name people see; Debian's package name below must be lowercase.
             packageName = "Forage"
-            packageVersion = "0.1.1"
+            packageVersion = "0.1.2"
             description = "Local-first video recommendations you control"
             vendor = "Forage"
             licenseFile.set(rootProject.file("LICENSE"))

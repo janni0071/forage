@@ -45,6 +45,8 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
@@ -57,6 +59,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -79,8 +83,9 @@ import forage.desktop.StateFilter
 
 @Composable
 fun LibraryScreen(model: DesktopModel, onImport: () -> Unit) {
-    if (model.sources.size <= 1 && model.rows.isEmpty() && model.currentSource == LibrarySource.History) {
-        EmptyLibrary(onImport)
+    if (model.addDialogOpen) AddLinkDialog(model)
+    if (model.libraryEmpty) {
+        EmptyLibrary(model, onImport)
         return
     }
     val visible = model.visibleRows
@@ -96,6 +101,11 @@ fun LibraryScreen(model: DesktopModel, onImport: () -> Unit) {
                 modifier = Modifier.width(300.dp),
             )
             ViewToggle(model)
+            OutlinedButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
+                Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Add by link")
+            }
             OutlinedButton(onClick = model::fetchDetails, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
                 Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
@@ -138,7 +148,7 @@ fun LibraryScreen(model: DesktopModel, onImport: () -> Unit) {
 }
 
 @Composable
-private fun EmptyLibrary(onImport: () -> Unit) {
+private fun EmptyLibrary(model: DesktopModel, onImport: () -> Unit) {
     val c = MaterialTheme.colorScheme
     Column(
         Modifier.fillMaxSize().padding(48.dp),
@@ -146,18 +156,67 @@ private fun EmptyLibrary(onImport: () -> Unit) {
         verticalArrangement = Arrangement.Center,
     ) {
         Box(Modifier.size(96.dp).clip(CircleShape).background(c.primaryContainer), contentAlignment = Alignment.Center) {
-            Icon(Icons.Outlined.CloudDownload, contentDescription = null, tint = c.onPrimaryContainer, modifier = Modifier.size(44.dp))
+            Icon(
+                if (model.isPrivate) Icons.Outlined.Lock else Icons.Outlined.CloudDownload,
+                contentDescription = null, tint = c.onPrimaryContainer, modifier = Modifier.size(44.dp),
+            )
         }
-        Text("Your library is empty", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 20.dp))
         Text(
-            "Import a Google Takeout export of your YouTube data. Videos land in the library as watched;\n" +
-                "nothing enters your profile until you choose it.",
+            if (model.isPrivate) "Your private vault is empty" else "Your library is empty",
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.padding(top = 20.dp),
+        )
+        Text(
+            if (model.isPrivate) {
+                "Add videos by their link. They go into this vault's profile and stay here, encrypted,\n" +
+                    "apart from everything else in Forage."
+            } else {
+                "Import a Google Takeout export of your YouTube data, or add videos by their link.\n" +
+                    "Imported videos land in the library as watched; nothing enters your profile until you choose it."
+            },
             style = MaterialTheme.typography.bodyLarge,
             color = c.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 16.dp),
         )
-        AccentButton("Import Takeout folder", Icons.Outlined.CloudDownload, onClick = onImport)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (!model.isPrivate) AccentButton("Import Takeout folder", Icons.Outlined.CloudDownload, onClick = onImport)
+            if (model.isPrivate) AccentButton("Add a video by link", Icons.Outlined.Link) { model.addDialogOpen = true }
+            else OutlinedButton(onClick = { model.addDialogOpen = true }, shape = RoundedCornerShape(12.dp)) { Text("Add a video by link") }
+        }
     }
+}
+
+@Composable
+private fun AddLinkDialog(model: DesktopModel) {
+    var link by remember { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { model.addDialogOpen = false },
+        icon = { Icon(Icons.Outlined.Link, contentDescription = null) },
+        title = { Text("Add a video") },
+        text = {
+            Column {
+                Text(
+                    "Paste a YouTube link. The video goes straight into this profile.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                OutlinedTextField(
+                    value = link,
+                    onValueChange = { link = it; problem = null },
+                    label = { Text("Link") },
+                    placeholder = { Text("https://www.youtube.com/watch?v=…") },
+                    singleLine = true,
+                    isError = problem != null,
+                    supportingText = problem?.let { { Text(it) } },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.width(440.dp),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { problem = model.addByLink(link) }) { Text("Add") } },
+        dismissButton = { TextButton(onClick = { model.addDialogOpen = false }) { Text("Cancel") } },
+    )
 }
 
 /** List or grid, as a two-part switch. */

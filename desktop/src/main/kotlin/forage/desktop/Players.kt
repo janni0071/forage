@@ -53,7 +53,7 @@ enum class Player(val label: String) {
          * quits with an error; null for the browser. Throws with a readable message when the player
          * can't be started at all.
          */
-        fun open(player: Player, id: PlatformId, log: File): Process? {
+        fun open(player: Player, id: PlatformId, log: File?): Process? {
             val url = watchUrl(id)
             if (player == BROWSER) {
                 if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
@@ -71,8 +71,9 @@ enum class Player(val label: String) {
                     }
                 )
                 is Launch.Command -> {
-                    log.parentFile?.mkdirs()
-                    ProcessBuilder(launch.args).redirectErrorStream(true).redirectOutput(log).start()
+                    log?.parentFile?.mkdirs()
+                    ProcessBuilder(launch.args).redirectErrorStream(true)
+                        .redirectOutput(log?.let(ProcessBuilder.Redirect::to) ?: ProcessBuilder.Redirect.DISCARD).start()
                 }
             }
         }

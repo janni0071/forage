@@ -35,7 +35,7 @@ fun main(args: Array<String>) {
             if (model.screen == Screen.LATER) model.later.forEach { model.thumbnails.load(it.id, large = true) }
         }
         val scene = ImageComposeScene(width = 2560, height = 1640, density = Density(2f)) {
-            ForageTheme(dark = dark) { App(model, onImport = {}) }
+            ForageTheme(dark = dark) { App(model.privateModel ?: model, onImport = {}) }
         }
         // Frames over about a second, so layout settles and menus and dialogs finish fading in.
         repeat(12) { scene.render(it * 100_000_000L) }
@@ -112,7 +112,18 @@ fun main(args: Array<String>) {
         settingsOpen = true
     }
     shot("12-settings-dark", dark = true) { settingsOpen = true }
+    shot("13-private-dialog") {
+        settingsOpen = false
+        message = null
+        profileDialog = ProfileDialog.PRIVATE
+    }
+    shot("14-private-vault") {
+        profileDialog = null
+        runBlocking { unlockPrivate("screenshot vault passphrase".toCharArray(), create = true)?.join() }
+        privateModel?.screen = Screen.LIBRARY
+    }
     shot("3-library-history") {
+        runBlocking { lockPrivate()?.join() }
         settingsOpen = false
         showLibraryAsGrid(false)
         clearSelection()

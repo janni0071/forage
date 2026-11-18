@@ -14,6 +14,7 @@ import androidx.compose.ui.window.rememberWindowState
 import forage.desktop.ui.App
 import forage.desktop.ui.ForageTheme
 import java.io.File
+import kotlinx.coroutines.runBlocking
 import javax.swing.JFileChooser
 
 /** Where the vault lives: `--data DIR`, else `$FORAGE_DATA`, else the platform's per-user data folder. */
@@ -38,21 +39,27 @@ fun main(args: Array<String>) {
             model.reload()
             model.warmUp()
         }
+        // While the private vault is unlocked, it replaces the normal one on screen.
+        val active = model.privateModel ?: model
         Window(
-            onCloseRequest = { model.close(); exitApplication() },
+            onCloseRequest = {
+                runBlocking { model.privateModel?.shutdown() }
+                model.close()
+                exitApplication()
+            },
             title = "Forage",
             icon = remember { BitmapPainter(useResource("forage.png", ::loadImageBitmap)) },
             state = rememberWindowState(width = 1280.dp, height = 860.dp),
         ) {
             val systemDark = isSystemInDarkTheme()
             val linuxDark = remember { if ("linux" in System.getProperty("os.name").lowercase()) Theme.linuxPrefersDark() else null }
-            val dark = when (model.theme) {
+            val dark = when (active.theme) {
                 Theme.LIGHT -> false
                 Theme.DARK -> true
                 Theme.SYSTEM -> linuxDark ?: systemDark
             }
             ForageTheme(dark = dark) {
-                App(model, onImport = {
+                App(active, onImport = {
                     val chooser = JFileChooser().apply {
                         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
                         dialogTitle = "Choose the extracted Takeout folder"

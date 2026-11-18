@@ -130,6 +130,15 @@ v1 implication: the profile model must support multiple isolated profiles from t
 
 How this is built: the database file is the isolation boundary. A "vault" is one database file holding its own profiles, history, metadata cache and vectors, and no code path reads across files. The main vault is unencrypted; a sensitive platform gets its own encrypted file, which can be wiped by deleting it. Within a vault, several profiles ("learning", "evening") can share history and cache.
 
+The private vault as built (Nov 2026):
+
+- **Encryption.** The whole database is sealed with AES-256-GCM, with the key derived from the user's PIN or passphrase by PBKDF2-HMAC-SHA256 (600,000 rounds, per-installation salt). Only the JDK's own cryptography is used; no extra library or native code.
+- **Never on disk in the clear.** Unlocking decrypts the file into an in-memory SQLite database; changes are encrypted back to the file a few seconds after they happen and on lock. Its thumbnails, settings and player output stay in memory too.
+- **Existence stays hidden.** The vault's file name is derived from the PIN, so a wrong PIN and no vault look identical, and creating a vault never overwrites another. "Private profiles…" is always in the profile menu. Someone browsing the data folder sees that encrypted files exist, but not what they hold.
+- **Shared, impersonal parts.** The embedding and language models are shared with the normal vault; they hold no personal data.
+- **Limits.** A short numeric PIN can be guessed offline by someone with the file, so the app recommends a passphrase. A forgotten PIN can't be recovered. While unlocked, the data is in memory, where the operating system may swap it to disk.
+- **Platform.** The vault works with YouTube today; the first sensitive platform plugin is still to come, after checking the site's API terms.
+
 Plan: design for it from M1 (the vault boundary), build the first sensitive plugin after M1's core loop works, as a separate module outside the default build. Before writing it, check that the HubTraffic API still exists and what its terms allow. There is no known history export to import from, so such a profile starts from pasted URLs.
 
 ## Risks and decisions

@@ -32,7 +32,14 @@ import forage.embedding.onnx.ModelSpec
 import forage.embedding.onnx.OnnxEmbedder
 import forage.language.lingua.LinguaDetector
 import forage.source.youtube.YouTubeSource
+import forage.core.vault.PrivateVaults
+import forage.core.vault.VaultDamagedException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job as CoroutineJob
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -105,18 +112,23 @@ class DesktopModel(
     val dataDir: File,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val storage: Storage = Storage.plain(dataDir),
+    /** Shared with the private vault's model, so the models load only once. */
+    private val models: Models = Models(dataDir),
     /** Replaceable for tests; created on first use otherwise, since it starts network clients. */
-    sourceFactory: () -> ExtractorSource = { YouTubeSource() },
+    private val sourceFactory: () -> ExtractorSource = { YouTubeSource() },
 ) {
-    val db: ForageDatabase = openDatabase(File(dataDir, "forage.db"))
+    val db: ForageDatabase = storage.db
     val cache = MetadataCache(db)
     val library = LibraryStore(db)
     val profiles = ProfileStore(db)
-    val settings = Settings(File(dataDir, "settings.properties"))
+    val isPrivate = storage.isPrivate
+    val settings = storage.settings
 
     /** The profile everything on screen belongs to. Profiles share the vault's library but nothing else. */
     var profile by mutableStateOf(
-        settings.lastProfile?.let(profiles::find) ?: profiles.profiles().firstOrNull() ?: profiles.profile()
+        settings.lastProfile?.let(profiles::find) ?: profiles.profiles().firstOrNull()
+            ?: profiles.profile(if (storage.isPrivate) "Private" else ProfileStore.DEFAULT)
     )
         private set
 
@@ -147,24 +159,24 @@ class DesktopModel(
     var profileDialog by mutableStateOf<ProfileDialog?>(null)
 
     private val source by lazy(sourceFactory)
-    val thumbnails = Thumbnails(File(dataDir, "thumbnails")) { id, large -> source.thumbnailUrl(id, large) }
+    val thumbnails = Thumbnails(storage.thumbnailsDir) { id, large -> source.thumbnailUrl(id, large) }
     private val searchCache = SearchCache(db)
     private val topicStore = TopicStore(db)
-    private val modelLock = Any()
-    private var embedder: OnnxEmbedder? = null
-    private var detector: LanguageDetector? = null
+    private fun embedder(update: (String) -> Unit = {}): OnnxEmbedder = models.embedder(update)
 
-    /** The embedding model, loaded (and downloaded on first use) when first needed. */
-    private fun embedder(update: (String) -> Unit = {}): OnnxEmbedder = synchronized(modelLock) {
-        embedder ?: run {
-            val spec = ModelSpec.MULTILINGUAL_MINILM
-            val files = ModelFiles.ensure(spec, File(dataDir, "models/minilm").toPath()) { update("Downloading $it (about 470 MB)") }
-            OnnxEmbedder(spec, files).also { embedder = it }
+    private fun detector(): LanguageDetector = models.detector()
+
+    /** Everything this model starts runs here, so locking a private vault can stop all of it. */
+    private val ownScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[CoroutineJob]))
+
+    /** The private vault's encrypted copy is written a few seconds after each change. */
+    private val saver: CoroutineJob? = storage.encrypted?.let { encrypted ->
+        ownScope.launch {
+            while (true) {
+                delay(5_000)
+                withContext(io) { encrypted.saveIfChanged() }
+            }
         }
-    }
-
-    private fun detector(): LanguageDetector = synchronized(modelLock) {
-        detector ?: LinguaDetector().also { detector = it }
     }
 
     /**
@@ -172,7 +184,7 @@ class DesktopModel(
      * the model is already downloaded: a first-time download stays tied to an explicit Discover.
      */
     fun warmUp() {
-        if (!File(dataDir, "models/minilm/model.onnx").isFile) return
+        if (!models.downloaded) return
         launchQuiet {
             inBackground("Loading the recommendation models") {
                 embedder()
@@ -221,6 +233,10 @@ class DesktopModel(
         private set
     var profileSize by mutableStateOf(0)
         private set
+    /** True while the vault has no videos at all, so the library can say how to start. */
+    var libraryEmpty by mutableStateOf(false)
+        private set
+    var addDialogOpen by mutableStateOf(false)
 
     // Discover
     var picks by mutableStateOf<List<PickView>>(emptyList())
@@ -328,7 +344,9 @@ class DesktopModel(
             return
         }
         runJob("Fetching details from YouTube", ids.size) { update ->
+            val job = currentCoroutineContext()[CoroutineJob]
             val summary = MetadataFetcher(source, cache).fetchAll(ids) { id, outcome ->
+                if (job?.isActive == false) throw CancellationException("Stopped")
                 val text = when (outcome) {
                     is FetchOutcome.Cached -> "cached"
                     is FetchOutcome.Fetched -> outcome.details.metadata.title
@@ -405,6 +423,34 @@ class DesktopModel(
 
     private fun loadProfiles() {
         profileList = profiles.profiles().map { it to profiles.entries(it, VideoState.INCLUDED).size }
+    }
+
+    /**
+     * Adds a video by its link (SPEC, Manual add): fetches its details and puts it in the profile.
+     * Returns why the link wasn't accepted, or null.
+     */
+    fun addByLink(text: String): String? {
+        val entry = text.trim().let { if (Regex("[A-Za-z0-9_-]{11}").matches(it)) "youtube:$it" else it }
+        val id = forage.core.profile.ProfileFile.parse(entry).videos.singleOrNull()
+            ?: return "That doesn't look like a YouTube video link"
+        addDialogOpen = false
+        runJob("Adding a video") { update ->
+            update("Fetching its details")
+            val details = when (val outcome = MetadataFetcher(source, cache).fetch(id)) {
+                is FetchOutcome.Fetched -> outcome.details
+                is FetchOutcome.Cached -> outcome.details
+                else -> null
+            }
+            val v = details?.metadata
+            library.remember(id, v?.title, v?.channel, v?.channelName, v?.isShort ?: false, v?.durationSeconds, v?.uploadedAt)
+            profiles.mark(profile, listOf(id), VideoState.INCLUDED)
+            topicsCurrent = false
+            // Show it where it now is.
+            currentSource = LibrarySource.InProfile
+            loadRows()
+            if (v != null) "Added \"${v.title}\" to the profile" else "Added the video; its details couldn't be fetched yet (Fetch profile details)"
+        }
+        return null
     }
 
     // Topics
@@ -535,7 +581,7 @@ class DesktopModel(
 
     fun open(id: PlatformId) {
         val player = player
-        val log = File(dataDir, "logs/player.log")
+        val log = storage.playerLog
         val process = try {
             Player.open(player, id, log)
         } catch (e: Exception) {
@@ -543,12 +589,12 @@ class DesktopModel(
             return
         } ?: return
         // A player that can't play the link usually quits within seconds; say why instead of doing nothing.
-        scope.launch(io) {
+        ownScope.launch(io) {
             if (process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS) && process.exitValue() != 0) {
                 // The last line is usually a generic "Exiting"; the line naming the error says more.
-                val lines = runCatching { log.readLines().map { it.trim() }.filter { it.isNotEmpty() } }.getOrDefault(emptyList())
+                val lines = runCatching { log?.readLines().orEmpty().map { it.trim() }.filter { it.isNotEmpty() } }.getOrDefault(emptyList())
                 val last = lines.lastOrNull { "ERROR" in it } ?: lines.lastOrNull()
-                message = "${player.label} couldn't play the video" + (last?.let { ": $it" } ?: "") + " (full output: ${log.path})"
+                message = "${player.label} couldn't play the video" + (last?.let { ": $it" } ?: "") + (log?.let { " (full output: ${it.path})" } ?: "")
             }
         }
     }
@@ -557,6 +603,7 @@ class DesktopModel(
 
     private fun loadRows() {
         val states = profiles.entries(profile).associate { it.video to it.state }
+        libraryEmpty = library.counts().first == 0L && states.isEmpty()
         profileSize = states.values.count { it == VideoState.INCLUDED }
         val events: List<WatchEvent> = when (val s = currentSource) {
             LibrarySource.History -> library.events()
@@ -618,7 +665,7 @@ class DesktopModel(
     // Running work
 
     private fun launchQuiet(block: suspend () -> Unit) {
-        scope.launch {
+        ownScope.launch {
             try {
                 withContext(io) { block() }
             } catch (e: CancellationException) {
@@ -657,7 +704,7 @@ class DesktopModel(
             if (total != null) done++
             job = Job(label, done, total, detail)
         }
-        scope.launch {
+        ownScope.launch {
             message = try {
                 withContext(io) { block(update) }
             } catch (e: CancellationException) {
@@ -671,7 +718,80 @@ class DesktopModel(
     }
 
     fun close() {
-        synchronized(modelLock) { embedder?.close() }
+        models.close()
+    }
+
+    /** Stops this model's work and, for the private vault, saves and drops the decrypted copy. */
+    suspend fun shutdown() {
+        saver?.cancel()
+        ownScope.coroutineContext[CoroutineJob]?.cancel()
+        withContext(io + NonCancellable) { storage.encrypted?.close() }
+    }
+
+    // The private vault, opened from the normal vault's model.
+
+    private val privateVaults: PrivateVaults? = if (storage.isPrivate) null else PrivateVaults(File(dataDir, "private"))
+
+    /** The open private vault, shown instead of this one while it's set. */
+    var privateModel by mutableStateOf<DesktopModel?>(null)
+        private set
+    var privateError by mutableStateOf<String?>(null)
+    var privateBusy by mutableStateOf(false)
+        private set
+
+    /** Set on a private vault's model: locks it and returns to the normal vault. */
+    var onLock: (() -> Unit)? = null
+        private set
+
+    /**
+     * Unlocks the private vault for [pin], or with [create] makes one (opening it instead if that
+     * PIN has one already). The PIN is wiped from memory afterwards.
+     */
+    fun unlockPrivate(pin: CharArray, create: Boolean): CoroutineJob? {
+        val vaults = privateVaults ?: return null
+        if (privateBusy) return null
+        privateError = null
+        privateBusy = true
+        return scope.launch {
+            try {
+                val opened = withContext(Dispatchers.IO) {
+                    val unlocked = try {
+                        if (create) vaults.create(pin) else vaults.unlock(pin)
+                    } finally {
+                        pin.fill('\u0000')
+                    }
+                    unlocked?.let { u ->
+                        val database = EncryptedDatabase(vaults, u)
+                        // One thread for everything: the decrypted database is a single in-memory connection.
+                        DesktopModel(dataDir, scope, Dispatchers.IO.limitedParallelism(1), Storage.private(database, settings), models, sourceFactory)
+                    }
+                }
+                if (opened == null) {
+                    privateError = "Nothing unlocks with that PIN"
+                } else {
+                    opened.onLock = { lockPrivate() }
+                    opened.reload()
+                    privateModel = opened
+                    profileDialog = null
+                    profileMenuOpen = false
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: VaultDamagedException) {
+                privateError = e.message
+            } catch (e: Throwable) {
+                privateError = "Couldn't open the private vault: ${e.message ?: e}"
+            } finally {
+                privateBusy = false
+            }
+        }
+    }
+
+    /** Locks the private vault: it disappears at once, then finishes saving in the background. */
+    fun lockPrivate(): CoroutineJob? {
+        val open = privateModel ?: return null
+        privateModel = null
+        return scope.launch { open.shutdown() }
     }
 
     companion object {

@@ -6,6 +6,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -101,12 +109,20 @@ fun ProfileSwitcher(model: DesktopModel) {
                 )
             }
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            // Always shown, whether or not a private vault exists, so the menu never gives one away.
-            DropdownMenuItem(
-                leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
-                text = { Text("Private profiles…") },
-                onClick = { model.profileMenuOpen = false; model.profileDialog = ProfileDialog.PRIVATE },
-            )
+            if (model.isPrivate) {
+                DropdownMenuItem(
+                    leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+                    text = { Text("Lock private vault") },
+                    onClick = { model.profileMenuOpen = false; model.onLock?.invoke() },
+                )
+            } else {
+                // Always shown, whether or not a private vault exists, so the menu never gives one away.
+                DropdownMenuItem(
+                    leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+                    text = { Text("Private profiles…") },
+                    onClick = { model.profileMenuOpen = false; model.privateError = null; model.profileDialog = ProfileDialog.PRIVATE },
+                )
+            }
         }
     }
     ProfileDialogs(model)
@@ -141,19 +157,7 @@ private fun ProfileDialogs(model: DesktopModel) {
             confirmButton = { TextButton(onClick = model::deleteProfile) { Text("Delete profile", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { model.profileDialog = null }) { Text("Keep it") } },
         )
-        ProfileDialog.PRIVATE -> AlertDialog(
-            onDismissRequest = { model.profileDialog = null },
-            icon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
-            title = { Text("Private profiles") },
-            text = {
-                Text(
-                    "Private profiles will live in their own encrypted vault, unlocked with a PIN. Until you unlock it, " +
-                        "nothing about it shows anywhere in Forage, and it never mixes with your other profiles.\n\n" +
-                        "This isn't built yet: it comes together with the first private platform."
-                )
-            },
-            confirmButton = { TextButton(onClick = { model.profileDialog = null }) { Text("OK") } },
-        )
+        ProfileDialog.PRIVATE -> PrivateVaultDialog(model)
         null -> {}
     }
 }
@@ -189,5 +193,97 @@ private fun NewProfileDialog(model: DesktopModel) {
         },
         confirmButton = { TextButton(onClick = { create() }) { Text("Create") } },
         dismissButton = { TextButton(onClick = { model.profileDialog = null }) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Unlocks the private vault, or creates one. It never says whether a vault exists: a wrong PIN
+ * and no vault at all get the same answer.
+ */
+@Composable
+private fun PrivateVaultDialog(model: DesktopModel) {
+    var creating by remember { mutableStateOf(false) }
+    var pin by remember { mutableStateOf("") }
+    var repeat by remember { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+    val shownProblem = problem ?: model.privateError
+    val submit = {
+        problem = when {
+            pin.isEmpty() -> "Enter your PIN or passphrase"
+            creating && pin.length < 6 -> "Use at least 6 characters; a few words are best"
+            creating && pin != repeat -> "The two entries don't match"
+            else -> null
+        }
+        if (problem == null) {
+            model.unlockPrivate(pin.toCharArray(), create = creating)
+            pin = ""
+            repeat = ""
+        }
+    }
+    AlertDialog(
+        onDismissRequest = { if (!model.privateBusy) model.profileDialog = null },
+        icon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+        title = { Text(if (creating) "Create a private vault" else "Private profiles") },
+        text = {
+            Column(Modifier.widthIn(max = 460.dp)) {
+                Text(
+                    if (creating) {
+                        "A private vault is separate from everything else in Forage: its own library, profiles and " +
+                            "recommendations, stored encrypted. Until you unlock it, nothing about it shows anywhere.\n\n" +
+                            "There's no way to recover a forgotten PIN, not even for you. Prefer a few words over a short " +
+                            "number: someone with the file could try short PINs one by one."
+                    } else {
+                        "Enter the PIN or passphrase of your private vault."
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                SecretField(pin, if (creating) "New PIN or passphrase" else "PIN or passphrase", shownProblem.takeIf { !creating }, submit) {
+                    pin = it; problem = null; model.privateError = null
+                }
+                if (creating) {
+                    Spacer(Modifier.height(10.dp))
+                    SecretField(repeat, "Repeat it", shownProblem, submit) { repeat = it; problem = null }
+                }
+                if (model.privateBusy) {
+                    Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Unlocking… this takes a moment on purpose", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (!creating) {
+                    TextButton(
+                        onClick = { creating = true; problem = null; model.privateError = null },
+                        modifier = Modifier.padding(top = 8.dp),
+                    ) { Text("Create a private vault…") }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { submit() }, enabled = !model.privateBusy) { Text(if (creating) "Create" else "Unlock") }
+        },
+        dismissButton = {
+            TextButton(onClick = { if (creating) creating = false else model.profileDialog = null }, enabled = !model.privateBusy) {
+                Text(if (creating) "Back" else "Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun SecretField(value: String, label: String, problem: String?, onSubmit: () -> Unit, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        isError = problem != null,
+        supportingText = problem?.let { { Text(it) } },
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { e ->
+            if (e.type == KeyEventType.KeyDown && e.key == Key.Enter) { onSubmit(); true } else false
+        },
     )
 }

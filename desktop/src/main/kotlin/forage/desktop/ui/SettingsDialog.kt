@@ -101,6 +101,14 @@ fun SettingsDialog(model: DesktopModel) {
                     onChange = model::setThumbnails,
                 )
 
+                if (model.isPrivate) {
+                    Section(
+                        "This private vault",
+                        "Stored encrypted; nothing from it is written to disk in the clear, not even thumbnails or settings. " +
+                            "Changes to these settings last until you lock the vault.",
+                    )
+                    return@Column
+                }
                 Section("Your data", "Everything Forage knows lives in one folder on this computer. Nothing is sent anywhere else.")
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
