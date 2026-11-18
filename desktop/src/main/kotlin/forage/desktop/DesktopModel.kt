@@ -523,7 +523,10 @@ class DesktopModel(
     var catalogueInfo by mutableStateOf<String?>(null)
         private set
 
-    private fun openCatalogue(): PornhubCatalogue? = synchronized(catalogueLock) {
+    /** The catalogue if there is a usable one; one an older Forage built is left alone until it's imported again. */
+    private fun openCatalogue(): PornhubCatalogue? = openAnyCatalogue()?.takeIf { it.current }
+
+    private fun openAnyCatalogue(): PornhubCatalogue? = synchronized(catalogueLock) {
         if (!isPrivate) return null
         if (catalogue == null && catalogueFile.isFile) catalogue = runCatching { PornhubCatalogue.open(catalogueFile) }.getOrNull()
         catalogue
@@ -535,8 +538,8 @@ class DesktopModel(
     }
 
     private fun describeCatalogue() {
-        val c = openCatalogue()
-        catalogueInfo = c?.let {
+        val c = openAnyCatalogue()
+        catalogueInfo = if (c != null && !c.current) "Imported by an older Forage: import the dump again to use it" else c?.let {
             val count = if (it.size >= 1_000_000) "%.1f million".format(it.size / 1e6) else "%,d".format(it.size)
             val date = java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy")
                 .format(java.time.Instant.ofEpochSecond(it.importedAt).atZone(java.time.ZoneId.systemDefault()))
@@ -562,8 +565,8 @@ class DesktopModel(
                 return@runJob "${e.message}. Its layout: ${e.layout}"
             }
             describeCatalogue()
-            "Imported %,d videos into the catalogue (%,d left out with under %,d views, %,d lines unreadable). The zip can go now."
-                .format(summary.videos, summary.skippedFewViews, PornhubCatalogue.MIN_VIEWS, summary.skippedUnreadable)
+            "Imported %,d videos into the catalogue (%,d left out with under %,d views, %,d lines unreadable; layout: %s). The zip can go now."
+                .format(summary.videos, summary.skippedFewViews, PornhubCatalogue.MIN_VIEWS, summary.skippedUnreadable, summary.layout)
         }
     }
 

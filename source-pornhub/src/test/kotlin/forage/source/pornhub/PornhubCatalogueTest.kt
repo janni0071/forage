@@ -25,10 +25,10 @@ class PornhubCatalogueTest {
 
     private fun line(
         key: String, title: String = "Video $key", tags: String = "tag a;tag b", categories: String = "Cat X",
-        performers: String = "", duration: String = "630", views: String = "5000",
+        performers: String = "", duration: String = "630", views: String = "5000", extra: String = "",
     ) = """<iframe src="https://www.pornhub.com/embed/$key" frameborder="0" width="560" height="315" scrolling="no" allowfullscreen></iframe>""" +
         "|https://img.example/$key.jpg|https://img.example/$key-1.jpg;https://img.example/$key-2.jpg|$title|$tags|$categories|$performers" +
-        "|$duration|$views|90|10|https://img.example/$key-big.jpg;https://img.example/$key-big2.jpg"
+        "|$duration|$views|90|10|https://img.example/$key-big.jpg;https://img.example/$key-big2.jpg$extra"
 
     private fun zip(lines: List<String>): File {
         val file = File(dir, "pornhub.com-db.zip")
@@ -100,5 +100,27 @@ class PornhubCatalogueTest {
         }
         assertEquals(before, target.length())
         assertFalse(File(target.parentFile, "pornhub.db.importing").exists())
+    }
+
+    @Test
+    fun `counts are found by content when lines carry more fields than expected`() {
+        val lines = filler() + listOf(
+            line("more1", title = "Title | with a bar", tags = "special;tag a", performers = "Perf One", duration = "603", views = "299759", extra = "|2024-01-02|1"),
+            line("more2", tags = "special", performers = "Perf Two", duration = "1200", views = "4812136", extra = "|x"),
+            line("more3", tags = "special"),
+        )
+        val summary = PornhubCatalogue.import(zip(lines), target)
+        assertEquals(15, summary.videos)
+        assertEquals("12 fields, counts in fields 8–11 (most lines)", summary.layout)
+        PornhubCatalogue.open(target).use { c ->
+            val m = c.matching(mapOf("special" to 1.0), limit = 20).associateBy { it.stub.id.id }
+            val one = m.getValue("more1").stub
+            assertEquals("Title | with a bar", one.title)
+            assertEquals("Perf One", one.channelName)
+            assertEquals(603L, one.durationSeconds)
+            assertEquals(setOf("special", "tag a", "cat x"), one.tags.toSet())
+            assertEquals("Perf Two", m.getValue("more2").stub.channelName)
+            assertEquals(1200L, m.getValue("more2").stub.durationSeconds)
+        }
     }
 }

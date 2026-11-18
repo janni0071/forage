@@ -30,6 +30,8 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
     override val size: Int
     /** When the dump was imported, as epoch seconds. */
     val importedAt: Long
+    /** False for an index an older Forage built, whose layout or reading this version doesn't trust: import again. */
+    val current: Boolean
     /** Tags per video and a 0–255 quality from views and rating, indexed by row id. */
     private val tagCounts: ByteArray
     private val quality: ByteArray
@@ -41,6 +43,7 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
         }
         size = meta("count")?.decodeToString()?.toInt() ?: 0
         importedAt = meta("imported_at")?.decodeToString()?.toLong() ?: 0
+        current = meta("version")?.decodeToString() == SCHEMA_VERSION
         tagCounts = meta("tag_counts") ?: ByteArray(size + 1)
         quality = meta("quality") ?: ByteArray(size + 1)
     }
@@ -161,7 +164,14 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
     }
 
     /** What an import did. */
-    data class ImportSummary(val videos: Int, val skippedUnreadable: Int, val skippedFewViews: Int, val tags: Int)
+    data class ImportSummary(
+        val videos: Int,
+        val skippedUnreadable: Int,
+        val skippedFewViews: Int,
+        val tags: Int,
+        /** How most lines were laid out, without content, e.g. "13 fields, counts in fields 8–11". */
+        val layout: String = "",
+    )
 
     /** The file isn't laid out the way Forage expects; [layout] describes it without its content. */
     class LayoutException(message: String, val layout: String) : Exception(message)
@@ -174,7 +184,8 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
         private const val QUALITY_SHARE = 0.2f
         /** Videos seen by fewer people than this are left out: mostly uploads nobody found worth watching. */
         const val MIN_VIEWS = 1000L
-        private const val SCHEMA_VERSION = "1"
+        /** 2: counts found by content (version 1 misread lines with an extra field). */
+        private const val SCHEMA_VERSION = "2"
         private val EMBED_KEY = Regex("""/embed/([A-Za-z0-9]+)""")
 
         fun open(file: File): PornhubCatalogue {
@@ -239,10 +250,14 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
             return summary
         }
 
-        /** One dump line: embed | thumb | thumbs | title | tags | categories | performers | duration | views | likes | dislikes | big thumbs. */
+        /**
+         * One dump line: embed | thumb | thumbs | title | tags | categories | performers | duration |
+         * views | likes | dislikes | big thumbs, and possibly more fields after those. [numbersAt] is
+         * where the duration was found, for the import report.
+         */
         private class Parsed(
             val key: String, val title: String, val thumb: String?, val tags: List<String>, val performers: List<String>,
-            val duration: Long, val views: Long, val likes: Long, val dislikes: Long,
+            val duration: Long, val views: Long, val likes: Long, val dislikes: Long, val fields: Int, val numbersAt: Int,
         )
 
         private const val FIELDS = 12
@@ -250,26 +265,33 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
         private fun parse(line: String): Parsed? {
             val f = line.split('|')
             if (f.size < FIELDS) return null
-            val n = f.size
             val key = EMBED_KEY.find(f[0])?.groupValues?.get(1) ?: return null
-            val duration = f[n - 5].trim().toLongOrNull() ?: return null
-            val views = f[n - 4].trim().toLongOrNull() ?: return null
+            // The four counts (duration, views, likes, dislikes) are the first run of four whole numbers
+            // after the title, tags, categories and performers; the rest is placed around them. Positions
+            // counted from either end are off whenever a title holds a '|' or the dump adds a field.
+            fun number(i: Int) = f[i].trim().let { it.isNotEmpty() && it.length <= 12 && it.all(Char::isDigit) }
+            val at = (FIRST_NUMBERS_AT..f.size - 4).firstOrNull { i -> (i until i + 4).all(::number) } ?: return null
             // A title containing '|' spreads over several fields; everything between thumbs and tags is the title.
-            val title = f.subList(3, n - 8).joinToString("|").trim()
+            val title = f.subList(3, at - 3).joinToString("|").trim()
             if (title.isEmpty()) return null
             fun list(s: String) = s.split(';').map { it.trim() }.filter { it.isNotEmpty() }
             return Parsed(
                 key = key,
                 title = title,
                 thumb = f[1].trim().takeIf { it.startsWith("https://") },
-                tags = list(f[n - 8]) + list(f[n - 7]),
-                performers = list(f[n - 6]),
-                duration = duration,
-                views = views,
-                likes = f[n - 3].trim().toLongOrNull() ?: 0,
-                dislikes = f[n - 2].trim().toLongOrNull() ?: 0,
+                tags = list(f[at - 3]) + list(f[at - 2]),
+                performers = list(f[at - 1]),
+                duration = f[at].trim().toLong(),
+                views = f[at + 1].trim().toLong(),
+                likes = f[at + 2].trim().toLong(),
+                dislikes = f[at + 3].trim().toLong(),
+                fields = f.size,
+                numbersAt = at,
             )
         }
+
+        /** Where the counts can start: after embed, thumb, thumbs, title, tags, categories and performers. */
+        private const val FIRST_NUMBERS_AT = 7
 
         /** The layout of a line with letters as x and digits as 9, for reports. */
         private fun describe(line: String): String {
@@ -304,6 +326,7 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
             var unreadable = 0
             var fewViews = 0
             var firstLine: String? = null
+            val layouts = HashMap<Pair<Int, Int>, Int>()
 
             val insert = db.prepareStatement("INSERT INTO video (id, key, title, duration, views, rating, thumb, performers, tags) VALUES (?,?,?,?,?,?,?,?,?)")
             while (true) {
@@ -321,6 +344,7 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
                     }
                     continue
                 }
+                layouts.merge(p.fields to p.numbersAt, 1, Int::plus)
                 if (p.views < MIN_VIEWS) {
                     fewViews++
                     continue
@@ -389,7 +413,9 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
             }
             db.createStatement().use { it.execute("CREATE INDEX video_key ON video (key)") }
             db.commit()
-            return ImportSummary(row, unreadable, fewViews, keptTags)
+            val (fields, at) = layouts.maxBy { it.value }.key
+            val layout = "$fields fields, counts in fields ${at + 1}–${at + 4}" + if (layouts.size > 1) " (most lines)" else ""
+            return ImportSummary(row, unreadable, fewViews, keptTags, layout)
         }
 
         private fun decodePostings(bytes: ByteArray, each: (Int) -> Unit) {
