@@ -137,30 +137,25 @@ fun SettingsDialog(model: DesktopModel) {
                             "instead of a few searches, and previews load from it. Kept unencrypted in Forage's data folder; " +
                             "it holds only the site's public catalogue, nothing about you.",
                     )
-                    Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(model.catalogueInfo ?: "Not imported yet", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                if (model.catalogueInfo == null) "Download pornhub.com-db.zip from the site's webmasters page, then choose it here. Importing takes a few minutes."
-                                else "Import a newer dump to update it.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = c.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        if (model.catalogueInfo != null) {
-                            TextButton(onClick = model::removeCatalogue) { Text("Remove") }
-                            Spacer(Modifier.width(4.dp))
-                        }
-                        OutlinedButton(
-                            onClick = { chooseZip()?.let(model::importCatalogue) },
-                            enabled = model.job == null,
-                            shape = RoundedCornerShape(12.dp),
-                        ) {
-                            Text(if (model.catalogueInfo == null) "Import…" else "Update…")
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(16.dp)) {
+                        Text(model.catalogueInfo ?: "Not imported yet", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (model.catalogueInfo == null) "Forage downloads the dump from the site (1.6 GB), imports it in a few minutes and deletes " +
+                                "the download; the catalogue then takes about 1.3 GB. If the download breaks off, starting it again continues it."
+                            else "The site updates the dump now and then; download it again to catch up.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = c.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            AccentButton(if (model.catalogueInfo == null) "Download and import" else "Download again", null, enabled = model.job == null) {
+                                model.downloadCatalogue()
+                            }
+                            OutlinedButton(onClick = { chooseZip()?.let(model::importCatalogue) }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
+                                Text("Choose a downloaded file…")
+                            }
+                            Spacer(Modifier.weight(1f))
+                            if (model.catalogueInfo != null) TextButton(onClick = model::removeCatalogue) { Text("Remove") }
                         }
                     }
                 }

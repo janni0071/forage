@@ -35,6 +35,7 @@ import forage.embedding.onnx.ModelSpec
 import forage.embedding.onnx.OnnxEmbedder
 import forage.language.lingua.LinguaDetector
 import forage.core.source.Sources
+import forage.source.pornhub.DumpDownload
 import forage.source.pornhub.PornhubCatalogue
 import forage.source.pornhub.PornhubSource
 import forage.source.youtube.YouTubeSource
@@ -588,6 +589,45 @@ class DesktopModel(
             describeCatalogue()
             "Imported %,d videos into the catalogue (%,d left out with under %,d views, %,d lines unreadable; layout: %s). The zip can go now."
                 .format(summary.videos, summary.skippedFewViews, PornhubCatalogue.MIN_VIEWS, summary.skippedUnreadable, summary.layout)
+        }
+    }
+
+    /**
+     * Downloads the dump from the site, imports it and deletes the zip. A download that breaks off
+     * or is stopped continues where it stopped the next time.
+     */
+    fun downloadCatalogue() {
+        settingsOpen = false
+        runJob("Downloading the catalogue") { update ->
+            val job = currentCoroutineContext()[CoroutineJob]
+            val zip = File(catalogueFile.parentFile, "pornhub.com-db.zip")
+            var shown = -1L
+            try {
+                DumpDownload.download(zip, progress = { done, total ->
+                    val mb = done / 10_000_000
+                    if (mb != shown) {
+                        shown = mb
+                        update("%.1f of %s GB".format(done / 1e9, total?.let { "%.1f".format(it / 1e9) } ?: "?"))
+                    }
+                }, cancelled = { job?.isActive == false })
+            } catch (e: SourceException) {
+                return@runJob e.message ?: "The download failed"
+            }
+            var percent = -1
+            val summary = try {
+                PornhubCatalogue.import(zip, catalogueFile, progress = { share ->
+                    val p = (share * 100).toInt()
+                    if (p != percent) {
+                        percent = p
+                        update("Importing: $p %")
+                    }
+                }, cancelled = { job?.isActive == false }, beforeReplace = ::closeCatalogue)
+            } catch (e: PornhubCatalogue.LayoutException) {
+                return@runJob "${e.message}. Its layout: ${e.layout}"
+            }
+            zip.delete()
+            describeCatalogue()
+            "Downloaded and imported %,d videos into the catalogue.".format(summary.videos)
         }
     }
 
