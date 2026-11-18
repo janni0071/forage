@@ -28,6 +28,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -157,16 +161,19 @@ private sealed interface ThumbnailState {
  */
 @Composable
 fun BoxScope.ThumbnailImage(model: DesktopModel, id: PlatformId, large: Boolean = false, zoom: Float = 1f, compact: Boolean = false) {
-    val start = model.thumbnails.cached(id, large)?.let { ThumbnailState.Shown(it) } ?: ThumbnailState.Loading
-    val state by produceState<ThumbnailState>(start, id, large) {
-        if (value != ThumbnailState.Loading) return@produceState
+    // Keyed by the video: a card that shows another video after a new batch must not keep the old image.
+    var state by remember(id, large) {
+        mutableStateOf(model.thumbnails.cached(id, large)?.let { ThumbnailState.Shown(it) } ?: ThumbnailState.Loading)
+    }
+    LaunchedEffect(id, large) {
+        if (state != ThumbnailState.Loading) return@LaunchedEffect
         // A refused image often loads on a later try, with links on another server; try again
         // a few times while the card is on screen.
         repeat(REFUSED_RETRIES + 1) { attempt ->
             if (attempt > 0) delay(model.thumbnails.retryAfter.toMillis() + 500)
             val image = model.thumbnails.load(id, large)
-            value = image?.let { ThumbnailState.Shown(it) } ?: ThumbnailState.Missing(model.thumbnails.refused(id))
-            if (image != null || !model.thumbnails.refused(id)) return@produceState
+            state = image?.let { ThumbnailState.Shown(it) } ?: ThumbnailState.Missing(model.thumbnails.refused(id))
+            if (image != null || !model.thumbnails.refused(id)) return@LaunchedEffect
         }
     }
     when (val s = state) {
