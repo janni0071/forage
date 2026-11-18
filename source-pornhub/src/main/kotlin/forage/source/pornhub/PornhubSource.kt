@@ -44,7 +44,7 @@ class PornhubSource(
 ) : ExtractorSource {
     override val platform = PLATFORM
     override val displayName = "Pornhub"
-    override val capabilities = setOf(Capability.SEARCH)
+    override val capabilities = setOf(Capability.SEARCH, Capability.DESCRIPTIVE_TAGS)
 
     /** A GET that returns the status and body; replaceable for tests. */
     fun interface Http {
@@ -94,7 +94,7 @@ class PornhubSource(
             throw apiError(json, "search '$query'", notFoundIsGone = false)
         }
         return videos.mapNotNull { (it as? JsonObject)?.let(::parse) }.map {
-            VideoStub(it.id, it.title, channel = null, channelName = null, it.durationSeconds, isShort = false, it.uploadedAt)
+            VideoStub(it.id, it.title, channel = null, it.channelName, it.durationSeconds, isShort = false, it.uploadedAt)
         }
     }
 
@@ -110,7 +110,17 @@ class PornhubSource(
     override fun thumbnailUrl(id: PlatformId, large: Boolean): String? {
         if (id.platform != platform || large) return null
         thumbs[id.id]?.takeIf { it.at > clock() - THUMB_MAX_AGE }?.let { return it.url }
-        return runCatching { video(id).metadata.thumbnailUrl }.getOrNull()
+        // A long list asks for many at once, and the site may ask Forage to slow down; one more try after a pause.
+        repeat(2) { attempt ->
+            try {
+                return video(id).metadata.thumbnailUrl
+            } catch (e: SourceException.Blocked) {
+                if (attempt == 0) sleep(Duration.ofSeconds(3))
+            } catch (e: SourceException) {
+                return null
+            }
+        }
+        return null
     }
 
     override fun parseLink(text: String): PlatformId? = Companion.parseLink(text)
@@ -126,11 +136,12 @@ class PornhubSource(
             id = PlatformId(platform, key),
             title = unescape(video.string("title").orEmpty()).ifBlank { "(no title)" },
             description = "",
-            // Categories and performers describe a video as much as its tags do; one list keeps them all in the profile.
-            tags = (categories + tags + performers).distinctBy { it.lowercase() },
+            // Categories describe a video as much as its tags do.
+            tags = (categories + tags).distinctBy { it.lowercase() },
             durationSeconds = video.string("duration")?.let(::parseDuration),
+            // The API names no uploader; the performers are the closest thing to a creator.
             channel = null,
-            channelName = null,
+            channelName = performers.take(MAX_NAMED_PERFORMERS).joinToString(", ").ifEmpty { null },
             language = null,
             thumbnailUrl = thumb,
             uploadedAt = video.string("publish_date")?.let(::parseDate),
@@ -199,6 +210,7 @@ class PornhubSource(
         const val PLATFORM = "pornhub"
         private const val SITE = "https://www.pornhub.com"
         private val THUMB_MAX_AGE = Duration.ofHours(6)
+        private const val MAX_NAMED_PERFORMERS = 2
         private val VIEWKEY = Regex("[A-Za-z0-9]{6,40}")
         private val NOT_FOUND = listOf("no video", "not found", "no such", "removed", "deleted", "inactive")
         private val DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")

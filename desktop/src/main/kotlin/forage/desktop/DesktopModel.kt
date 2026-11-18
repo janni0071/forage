@@ -27,6 +27,7 @@ import forage.core.recommend.RankingConfig
 import forage.core.recommend.TopicPreference
 import forage.core.recommend.TopicStore
 import forage.core.source.ExtractorSource
+import forage.core.source.Capability
 import forage.embedding.onnx.ModelFiles
 import forage.embedding.onnx.ModelSpec
 import forage.embedding.onnx.OnnxEmbedder
@@ -164,6 +165,12 @@ class DesktopModel(
 
     private val source by lazy(sourceFactory)
     val thumbnails = Thumbnails(storage.thumbnailsDir) { id, large -> source.thumbnailUrl(id, large) }
+
+    /** Platforms whose topics are grouped by their tags. */
+    private val tagPlatforms by lazy {
+        ((source as? Sources)?.members ?: listOf(source))
+            .filter { Capability.DESCRIPTIVE_TAGS in it.capabilities }.mapTo(HashSet()) { it.platform }
+    }
     private val searchCache = SearchCache(db)
     private val topicStore = TopicStore(db)
     private fun embedder(update: (String) -> Unit = {}): OnnxEmbedder = models.embedder(update)
@@ -499,6 +506,7 @@ class DesktopModel(
     private fun discoverer(embedder: OnnxEmbedder, withSearch: Boolean = false) = Discover(
         cache, library, profiles, EmbeddingStore(db, embedder), detector(),
         source.takeIf { withSearch }, RankingConfig(showShorts = settings.showShorts), searchCache, topicStore,
+        tagPlatforms = tagPlatforms,
     )
 
     /** Groups the profile into topics without running a whole Discover. */
@@ -661,7 +669,7 @@ class DesktopModel(
             LibraryRow(
                 id = v.video,
                 title = m?.title ?: v.title ?: known?.title,
-                channelName = m?.channelName ?: v.channelName ?: known?.channelName,
+                channelName = m?.channelName ?: v.channelName ?: known?.channelName ?: m?.extra?.get("performers"),
                 watchCount = v.watchCount,
                 lastSeen = v.lastWatched,
                 durationSeconds = m?.durationSeconds,

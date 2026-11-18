@@ -56,6 +56,8 @@ class Discover(
     private val topics: TopicStore? = null,
     private val seed: Long = 1,
     private val now: () -> Instant = Instant::now,
+    /** Platforms whose tags describe their videos (Capability.DESCRIPTIVE_TAGS): their topics are grouped by tags too. */
+    private val tagPlatforms: Set<String> = emptySet(),
 ) {
     /** The profile as topics, with the user's pins and mutes applied. Needs metadata for the profile's videos. */
     fun topics(profile: ProfileRef): List<Cluster> = taste(profile).clusters
@@ -96,7 +98,8 @@ class Discover(
         val clusters = Clusters.of(
             taste,
             known.associate { (_, v) -> v.id to EmbeddingText.keywordsSource(v) },
-            channelNames = known.mapNotNull { it.second.channelName },
+            channelNames = known.flatMap { (_, v) -> listOfNotNull(v.channelName) + performers(v) },
+            tagTerms = known.filter { (_, v) -> v.id.platform in tagPlatforms }.associate { (_, v) -> v.id to tagTerms(v) },
         )
         return Taste(
             entries, included.size, rejected.size, known.map { it.second }, knownRejected.size, taste,
@@ -176,4 +179,14 @@ class Discover(
         is CandidateSource.RelatedTo -> "related to \"${source.video.title}\""
         is CandidateSource.Search -> "search \"${source.query}\""
     }
+}
+
+/** Performer names, which some platforms list apart from the creator. */
+private fun performers(v: VideoMetadata): List<String> =
+    v.extra["performers"]?.split(", ")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+
+/** A video's tags as whole terms, without names: who is in a video says nothing about its topic. */
+private fun tagTerms(v: VideoMetadata): List<String> {
+    val names = (performers(v) + listOfNotNull(v.channelName)).map { it.lowercase() }.toSet()
+    return v.tags.map { it.trim().lowercase() }.filter { it.isNotEmpty() && it !in names }.distinct()
 }

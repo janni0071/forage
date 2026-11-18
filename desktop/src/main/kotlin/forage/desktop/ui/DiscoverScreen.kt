@@ -198,7 +198,7 @@ private fun PickCard(model: DesktopModel, view: PickView) {
             modifier = Modifier.padding(top = 10.dp).clickable { model.open(pick.video) },
         )
         Text(
-            listOfNotNull(pick.channelName ?: "Unknown channel", formatAge(pick.uploadedAt)).joinToString("  ·  "),
+            listOfNotNull(pick.channelName, formatAge(pick.uploadedAt)).joinToString("  ·  "),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,

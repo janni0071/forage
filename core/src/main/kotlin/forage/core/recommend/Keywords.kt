@@ -26,10 +26,17 @@ object Keywords {
      * Returns up to [count] keywords per cluster, most characteristic first. Words in [ignore]
      * are never keywords: channel names say who made a video, not what it is about.
      */
-    fun top(groups: List<List<String>>, count: Int = 5, ignore: Set<String> = emptySet()): List<List<String>> {
-        // Count each word once per video, so one keyword-stuffed description can't dominate.
-        val frequencies = groups.map { texts ->
-            texts.flatMap { tokens(it).distinct() }.groupingBy { it }.eachCount()
+    fun top(groups: List<List<String>>, count: Int = 5, ignore: Set<String> = emptySet()): List<List<String>> =
+        topTerms(groups.map { texts -> texts.map(::tokens) }, count, ignore)
+
+    /**
+     * Like [top], for texts already split into terms: one list of terms per video. Lets whole
+     * tags ("tag one") be keywords instead of the words in them.
+     */
+    fun topTerms(groups: List<List<List<String>>>, count: Int = 5, ignore: Set<String> = emptySet()): List<List<String>> {
+        // Count each term once per video, so one keyword-stuffed description can't dominate.
+        val frequencies = groups.map { videos ->
+            videos.flatMap { it.distinct() }.groupingBy { it }.eachCount()
         }
         val groupsContaining = HashMap<String, Int>()
         frequencies.forEach { f -> f.keys.forEach { groupsContaining.merge(it, 1, Int::plus) } }

@@ -100,24 +100,54 @@ class CandidateGenerator(
             val query = words.map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
             if (query.isNotEmpty()) planned.putIfAbsent(source.platform to query, PlannedSearch(source, query, cluster))
         }
+        // How many profile videos carry each tag, per platform, to find each video's telling tags.
+        val tagsOf = HashMap<PlatformId, List<String>>()
+        val tagCounts = HashMap<String, HashMap<String, Int>>()
+        for (video in clusters.flatMap { it.videos }.distinctBy { it.id }) {
+            val tags = cache.video(video.id)?.metadata?.tags.orEmpty().map { it.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
+            tagsOf[video.id] = tags
+            val counts = tagCounts.getOrPut(video.id.platform) { HashMap() }
+            tags.forEach { counts.merge(it, 1, Int::plus) }
+        }
         for (cluster in clusters) {
             val platform = cluster.videos.groupingBy { it.id.platform }.eachCount().maxByOrNull { it.value }?.key ?: continue
             val source = source?.forPlatform(platform)?.takeIf { Capability.SEARCH in it.capabilities } ?: continue
             val withoutRelated = Capability.RELATED_VIDEOS !in source.capabilities
+            // Keywords that are whole tags make long queries; two at a time still find enough.
+            val perQuery = if (Capability.DESCRIPTIVE_TAGS in source.capabilities) 2 else keywordsPerSearch
             // The varied cluster has no common subject to search for.
             if (!cluster.isVaried) {
-                cluster.keywords.chunked(keywordsPerSearch).take(if (withoutRelated) 2 else 1)
+                cluster.keywords.chunked(perQuery).take(if (withoutRelated) 2 else 1)
                     .forEach { plan(source, it, cluster.index) }
             }
             if (withoutRelated) {
                 val sample = if (cluster.isVaried) tagSearchesVaried else tagSearchesPerCluster
+                val counts = tagCounts[platform].orEmpty()
+                val tagged = tagsOf.count { (id, tags) -> id.platform == platform && tags.isNotEmpty() }
                 cluster.videos.filter { it.id.platform == platform }.shuffled(random).take(sample).forEach { video ->
-                    val tags = cache.video(video.id)?.metadata?.tags.orEmpty()
-                    plan(source, tags.take(keywordsPerSearch), cluster.index)
+                    plan(source, tellingTags(tagsOf[video.id].orEmpty(), counts, tagged).take(2), cluster.index)
                 }
             }
         }
         return planned.values.toList()
+    }
+
+    /**
+     * A video's tags that say most about the user's taste: ones it shares with a few other profile
+     * videos, rarest first, then its own unique ones. Tags on most of the profile come last, since
+     * a search for them finds the site's generic fare.
+     */
+    private fun tellingTags(tags: List<String>, counts: Map<String, Int>, tagged: Int): List<String> {
+        fun rank(tag: String): Pair<Int, Int> {
+            val n = counts[tag] ?: 1
+            return when {
+                n * 2 > tagged && tagged >= 4 -> 2 to n
+                n >= 2 -> 0 to n
+                else -> 1 to n
+            }
+        }
+        return tags.withIndex().sortedWith(compareBy<IndexedValue<String>>({ rank(it.value).first }, { rank(it.value).second }, { it.index }))
+            .map { it.value }
     }
 
     private fun search(queries: List<Pair<ExtractorSource, String>>): List<List<VideoStub>> {

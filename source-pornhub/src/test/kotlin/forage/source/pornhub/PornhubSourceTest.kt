@@ -43,6 +43,7 @@ class PornhubSourceTest {
         assertEquals("A & B", stubs[1].title)
         assertEquals(630L, stubs[0].durationSeconds)
         assertEquals(Instant.parse("2025-11-03T08:24:34Z"), stubs[0].uploadedAt)
+        assertEquals("Performer A", stubs[0].channelName)
         assertEquals("/webmasters/search", http.asked.single().path)
         assertEquals("search=tag+one+category", http.asked.single().rawQuery)
     }
@@ -54,11 +55,12 @@ class PornhubSourceTest {
     }
 
     @Test
-    fun `video lookup keeps categories, tags and performers once each`() {
+    fun `video lookup keeps categories and tags once each, and names the performers as creators`() {
         val http = FakeHttp { ok("""{"video":${video("ph1111aaaa")}}""") }
         val details = source(http).video(PlatformId("pornhub", "ph1111aaaa"))
         val m = details.metadata
-        assertEquals(listOf("Category X", "tag one", "Tag Two", "Performer A"), m.tags)
+        assertEquals(listOf("Category X", "tag one", "Tag Two"), m.tags)
+        assertEquals("Performer A", m.channelName)
         assertEquals("Performer A", m.extra["performers"])
         assertTrue(details.related.isEmpty())
         assertEquals("id=ph1111aaaa", http.asked.single().rawQuery)

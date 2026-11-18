@@ -118,7 +118,7 @@ class CandidateGeneratorTest {
         val o = { s: String -> PlatformId("other", s) }
         val cache = MetadataCache(memoryDatabase()).apply {
             put(details("x").let { it.copy(metadata = it.metadata.copy(id = o("x"), tags = listOf("t1", "t2", "t3", "t4")), related = emptyList()) })
-            put(details("y").let { it.copy(metadata = it.metadata.copy(id = o("y"), tags = listOf("t5")), related = emptyList()) })
+            put(details("y").let { it.copy(metadata = it.metadata.copy(id = o("y"), tags = listOf("t2", "t5")), related = emptyList()) })
         }
         val topic = Cluster(
             0, listOf(ProfileVideo(o("x"), "X", null, floatArrayOf(1f)), ProfileVideo(o("y"), "Y", null, floatArrayOf(1f))),
@@ -129,8 +129,9 @@ class CandidateGeneratorTest {
         val youtube = SearchOnly(0)
         val found = CandidateGenerator(cache, forage.core.source.Sources(youtube, other), sleep = {})
             .generate(listOf(topic, varied), emptySet())
-        // Two keyword searches for the topic, and tag searches for its videos; the varied group repeats them, so they run once.
-        assertEquals(setOf("k1 k2 k3", "k4 k5 k6", "t1 t2 t3", "t5"), other.queries.toSet())
+        // Two keyword searches for the topic, and searches for its videos by their shared tags first;
+        // the varied group repeats them, so they run once.
+        assertEquals(setOf("k1 k2 k3", "k4 k5 k6", "t2 t1", "t2 t5"), other.queries.toSet())
         assertEquals(4, other.queries.size)
         assertEquals(emptyList(), youtube.queries)
         assertTrue(found.all { it.stub.id.platform == "other" })

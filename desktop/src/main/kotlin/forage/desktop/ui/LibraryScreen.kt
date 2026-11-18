@@ -436,10 +436,11 @@ private fun Title(row: LibraryRow, maxLines: Int, modifier: Modifier = Modifier)
 
 private fun details(row: LibraryRow): String = listOfNotNull(
     row.channelName,
+    row.durationSeconds?.takeIf { row.channelName == null }?.let(::formatDuration),
     row.watchCount.takeIf { it > 1 }?.let { "watched $it×" },
     formatDate(row.lastSeen),
     "Short".takeIf { row.isShort },
-).joinToString("  ·  ").ifEmpty { row.id.id }
+).joinToString("  ·  ").ifEmpty { if (row.hasMetadata) "" else "No details yet" }
 
 @Composable
 private fun LibraryThumbnail(model: DesktopModel, row: LibraryRow, modifier: Modifier, playOnHover: Boolean = false) {

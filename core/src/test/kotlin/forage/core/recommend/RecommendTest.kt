@@ -156,4 +156,33 @@ class RecommendTest {
         assertEquals(listOf("dovetails"), top[0])
         assertEquals(listOf("bread"), top[1])
     }
+
+    @Test
+    fun `videos with descriptive tags are grouped by their rarer tags and topics named after whole tags`() {
+        // Alike to the text model, as on a site where every video shares the same generic tags.
+        val alike = v(1f, 0.1f, 0f)
+        val groups = listOf("garden pond", "night sky", "old trains")
+        val videos = groups.flatMapIndexed { g, _ -> (0 until 3).map { i -> ProfileVideo(PlatformId("other", "v$g$i"), "Video $g$i", null, alike) } }
+        val tags = videos.associate { video ->
+            val g = video.id.id[1].digitToInt()
+            video.id to listOf("generic tag", "everywhere", groups[g], "${groups[g]} extra", "only ${video.id.id}")
+        }
+        val profile = Profile(videos)
+        assertEquals(1, Clusters.of(profile).count { !it.isVaried }, "embeddings alone put everything together")
+
+        val topics = Clusters.of(profile, tagTerms = tags)
+        assertEquals(3, topics.size)
+        assertTrue(topics.none { it.isVaried })
+        assertEquals(groups.toSet(), topics.map { it.keywords.first() }.toSet())
+        assertTrue(topics.none { "generic tag" in it.keywords })
+    }
+
+    @Test
+    fun `names are never topic keywords`() {
+        val alike = v(1f, 0f, 0f)
+        val videos = (0 until 3).map { ProfileVideo(PlatformId("other", "n$it"), "Clip $it", null, alike) }
+        val tags = videos.associate { it.id to listOf("shared subject", "some name") }
+        val topic = Clusters.of(Profile(videos), tagTerms = tags, channelNames = listOf("Some Name")).single()
+        assertEquals(listOf("shared subject"), topic.keywords)
+    }
 }

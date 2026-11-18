@@ -46,7 +46,16 @@ interface ExtractorSource {
     fun forPlatform(platform: String): ExtractorSource? = takeIf { it.platform == platform }
 }
 
-enum class Capability { RELATED_VIDEOS, SEARCH }
+enum class Capability {
+    RELATED_VIDEOS,
+    SEARCH,
+
+    /**
+     * The platform's tags describe what a video is about better than its title does, so topics
+     * are grouped by shared tags and named after them.
+     */
+    DESCRIPTIVE_TAGS,
+}
 
 /** Platform-neutral video model. Platform-specific odds and ends go into [extra]. */
 data class VideoMetadata(
