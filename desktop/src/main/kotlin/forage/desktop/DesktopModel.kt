@@ -210,6 +210,20 @@ class DesktopModel(
     var theme by mutableStateOf(settings.theme)
         private set
 
+    /** The interface size the user chose; null means automatic. */
+    var uiScale by mutableStateOf(settings.uiScale)
+        private set
+
+    fun changeUiScale(value: Float?) {
+        settings.uiScale = value
+        uiScale = value
+    }
+
+    /** The size actually used: the user's choice, or the automatic one. */
+    val effectiveUiScale: Float get() = uiScale ?: autoUiScale
+
+    private val autoUiScale by lazy { Zoom.auto() }
+
     fun changeTheme(value: Theme) {
         settings.theme = value
         theme = value

@@ -220,6 +220,16 @@ class DesktopModelTest {
     }
 
     @Test
+    fun `the interface size is remembered, and automatic when unset`() {
+        assertEquals(null, model.uiScale)
+        model.changeUiScale(1.5f)
+        assertEquals(1.5f, model.effectiveUiScale)
+        assertEquals(1.5f, Settings(dir.resolve("settings.properties")).uiScale)
+        model.changeUiScale(null)
+        assertEquals(null, Settings(dir.resolve("settings.properties")).uiScale)
+    }
+
+    @Test
     fun `discover on an empty profile explains what to do`() {
         model.discover()
         assertTrue("no videos yet" in model.message!!, model.message)

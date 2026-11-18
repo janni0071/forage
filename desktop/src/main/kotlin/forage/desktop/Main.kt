@@ -14,6 +14,17 @@ import androidx.compose.ui.window.rememberWindowState
 import forage.desktop.ui.App
 import forage.desktop.ui.ForageTheme
 import java.io.File
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.DpSize
+import java.awt.GraphicsEnvironment
 import kotlinx.coroutines.runBlocking
 import javax.swing.JFileChooser
 
@@ -32,6 +43,8 @@ fun dataDir(args: Array<String>): File {
 
 fun main(args: Array<String>) {
     val dir = dataDir(args)
+    // The window opens at a size that fits the interface size, read before anything is shown.
+    val startScale = Settings(File(dir, "settings.properties")).uiScale ?: Zoom.auto()
     application {
         val scope = rememberCoroutineScope()
         val model = remember { DesktopModel(dir, scope) }
@@ -49,7 +62,17 @@ fun main(args: Array<String>) {
             },
             title = "Forage",
             icon = remember { BitmapPainter(useResource("forage.png", ::loadImageBitmap)) },
-            state = rememberWindowState(width = 1280.dp, height = 860.dp),
+            state = rememberWindowState(size = startSize(startScale)),
+            onKeyEvent = { event ->
+                // Ctrl + Plus / Minus / 0, as in browsers.
+                if (event.type != KeyEventType.KeyDown || !(event.isCtrlPressed || event.isMetaPressed)) return@Window false
+                when (event.key) {
+                    Key.Equals, Key.Plus, Key.NumPadAdd -> { active.changeUiScale(Zoom.step(active.effectiveUiScale, up = true)); true }
+                    Key.Minus, Key.NumPadSubtract -> { active.changeUiScale(Zoom.step(active.effectiveUiScale, up = false)); true }
+                    Key.Zero, Key.NumPad0 -> { active.changeUiScale(null); true }
+                    else -> false
+                }
+            },
         ) {
             val systemDark = isSystemInDarkTheme()
             val linuxDark = remember { if ("linux" in System.getProperty("os.name").lowercase()) Theme.linuxPrefersDark() else null }
@@ -58,6 +81,8 @@ fun main(args: Array<String>) {
                 Theme.DARK -> true
                 Theme.SYSTEM -> linuxDark ?: systemDark
             }
+            val base = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(base.density * active.effectiveUiScale, base.fontScale)) {
             ForageTheme(dark = dark) {
                 App(active, onImport = {
                     val chooser = JFileChooser().apply {
@@ -67,6 +92,17 @@ fun main(args: Array<String>) {
                     if (chooser.showOpenDialog(window) == JFileChooser.APPROVE_OPTION) model.importTakeout(chooser.selectedFile)
                 })
             }
+            }
         }
     }
+}
+
+/** 1280×860 at the given interface size, but never larger than 90% of the screen. */
+private fun startSize(scale: Float): DpSize {
+    val screen = runCatching { GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds }.getOrNull()
+    val width = 1280f * scale
+    val height = 860f * scale
+    if (screen == null) return DpSize(width.dp, height.dp)
+    // Window sizes are in the system's units, which are pixels when Java isn't scaled.
+    return DpSize(minOf(width, screen.width * 0.9f).dp, minOf(height, screen.height * 0.9f).dp)
 }

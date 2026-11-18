@@ -44,6 +44,18 @@ class Settings(private val file: File?, copyOf: Settings? = null) {
     /** Whether preferences are kept between starts. */
     val persistent get() = file != null
 
+    /** Interface size chosen by the user; null picks one automatically. */
+    var uiScale: Float?
+        get() = properties.getProperty("ui.scale")?.toFloatOrNull()
+        set(value) = if (value == null) Unit.also { remove("ui.scale") } else set("ui.scale", value.toString())
+
+    private fun remove(key: String) {
+        properties.remove(key)
+        if (file == null) return
+        file.parentFile?.mkdirs()
+        file.outputStream().use { properties.store(it, "Forage settings") }
+    }
+
     var theme: Theme
         get() = properties.getProperty("theme")?.let { runCatching { Theme.valueOf(it) }.getOrNull() } ?: Theme.SYSTEM
         set(value) = set("theme", value.name)

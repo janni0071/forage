@@ -92,6 +92,15 @@ fun SettingsDialog(model: DesktopModel) {
                     onSelect = model::changeTheme,
                 )
 
+                Section("Interface size", "Also Ctrl + Plus, Ctrl + Minus, and Ctrl + 0 for automatic.")
+                Segmented(
+                    options = listOf<Triple<Float?, String, androidx.compose.ui.graphics.vector.ImageVector?>>(
+                        Triple(null, "Auto", null),
+                    ) + forage.desktop.Zoom.choices.map { Triple(it, forage.desktop.Zoom.label(it), null) },
+                    selected = model.uiScale,
+                    onSelect = model::changeUiScale,
+                )
+
                 Section("Thumbnails", null)
                 SwitchRow(
                     title = "Show thumbnails",
@@ -203,7 +212,7 @@ private fun PlayerCard(player: Player, problem: String?, selected: Boolean, modi
 }
 
 @Composable
-private fun <T> Segmented(options: List<Triple<T, String, ImageVector>>, selected: T, onSelect: (T) -> Unit) {
+private fun <T> Segmented(options: List<Triple<T, String, ImageVector?>>, selected: T, onSelect: (T) -> Unit) {
     val c = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(4.dp)) {
         for ((value, label, icon) in options) {
@@ -219,8 +228,10 @@ private fun <T> Segmented(options: List<Triple<T, String, ImageVector>>, selecte
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(icon, contentDescription = null, tint = if (on) c.primary else c.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, tint = if (on) c.primary else c.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
                 Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium, color = if (on) c.onSurface else c.onSurfaceVariant)
             }
         }

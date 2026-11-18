@@ -42,7 +42,7 @@ compose.desktop {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.Dmg, TargetFormat.Msi)
             // The name people see; Debian's package name below must be lowercase.
             packageName = "Forage"
-            packageVersion = "0.1.3"
+            packageVersion = "0.1.4"
             description = "Local-first video recommendations you control"
             vendor = "Forage"
             licenseFile.set(rootProject.file("LICENSE"))
