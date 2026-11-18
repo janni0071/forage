@@ -1,6 +1,7 @@
 package forage.desktop.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,30 +57,39 @@ import forage.desktop.DesktopModel
 import forage.desktop.Screen
 
 @Composable
-fun App(model: DesktopModel, onImport: () -> Unit) {
+fun App(model: DesktopModel, onImport: () -> Unit, frame: WindowFrame? = null) {
+    val outline = if (frame != null && !frame.maximized) Modifier.border(1.dp, frameBorderColor()) else Modifier
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
-        Row {
-            Sidebar(model, onImport)
-            Box(Modifier.weight(1f).fillMaxHeight()) {
-                when (model.screen) {
-                    Screen.LIBRARY -> LibraryScreen(model, onImport)
-                    Screen.TOPICS -> TopicsScreen(model)
-                    Screen.DISCOVER -> DiscoverScreen(model)
-                    Screen.LATER -> LaterScreen(model)
+        Box(Modifier.fillMaxSize().then(outline)) {
+            Row {
+                Sidebar(model, onImport, frame)
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    frame?.let { TitleBar(it) }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        when (model.screen) {
+                            Screen.LIBRARY -> LibraryScreen(model, onImport)
+                            Screen.TOPICS -> TopicsScreen(model)
+                            Screen.DISCOVER -> DiscoverScreen(model)
+                            Screen.LATER -> LaterScreen(model)
+                        }
+                        StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp))
+                    }
                 }
-                StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp))
             }
+            frame?.let { ResizeEdges(it) }
         }
     }
 }
 
 @Composable
-private fun Sidebar(model: DesktopModel, onImport: () -> Unit) {
+private fun Sidebar(model: DesktopModel, onImport: () -> Unit, frame: WindowFrame?) {
     val c = MaterialTheme.colorScheme
     Column(
         Modifier.width(236.dp).fillMaxHeight().background(c.surfaceContainerLow).padding(horizontal = 14.dp, vertical = 22.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, bottom = 30.dp)) {
+        // Without the system title bar, the logo is somewhere to move the window by too.
+        val move = frame?.let { Modifier.moveWindow(it) } ?: Modifier
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, bottom = 30.dp).then(move)) {
             Box(
                 Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).background(Brush.linearGradient(listOf(Accent.pastelPink, Accent.lavender))),
                 contentAlignment = Alignment.Center,

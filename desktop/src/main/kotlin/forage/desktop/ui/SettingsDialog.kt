@@ -93,6 +93,16 @@ fun SettingsDialog(model: DesktopModel) {
                     onSelect = model::changeTheme,
                 )
 
+                if (!model.isPrivate) {
+                    SwitchRow(
+                        title = "Forage's own title bar",
+                        text = "Window buttons in the top corner instead of the system's title bar. Turn off if moving or resizing " +
+                            "the window misbehaves on your desktop. Takes effect when Forage starts next.",
+                        checked = !model.systemTitleBar,
+                        onChange = { model.useSystemTitleBar(!it) },
+                    )
+                }
+
                 Section("Interface size", "Also Ctrl + Plus, Ctrl + Minus, and Ctrl + 0 for automatic.")
                 Segmented(
                     options = listOf<Triple<Float?, String, androidx.compose.ui.graphics.vector.ImageVector?>>(

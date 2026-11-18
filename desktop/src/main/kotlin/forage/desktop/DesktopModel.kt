@@ -146,6 +146,15 @@ class DesktopModel(
 
     var settingsOpen by mutableStateOf(false)
 
+    /** Takes effect at the next start: the window is created with or without the system frame. */
+    var systemTitleBar by mutableStateOf(settings.systemTitleBar)
+        private set
+
+    fun useSystemTitleBar(on: Boolean) {
+        settings.systemTitleBar = on
+        systemTitleBar = on
+    }
+
     var player by mutableStateOf(settings.player)
         private set
 

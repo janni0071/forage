@@ -41,6 +41,11 @@ class Settings(private val file: File?, copyOf: Settings? = null) {
         get() = properties.getProperty("profile")
         set(value) = if (value == null) Unit.also { properties.remove("profile") } else set("profile", value)
 
+    /** True to keep the system's title bar instead of Forage's own; read at start. */
+    var systemTitleBar: Boolean
+        get() = properties.getProperty("window.systemTitleBar", "false").toBoolean()
+        set(value) = set("window.systemTitleBar", value.toString())
+
     /** Whether preferences are kept between starts. */
     val persistent get() = file != null
 

@@ -12,6 +12,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import forage.desktop.ui.App
+import forage.desktop.ui.WindowFrame
 import forage.desktop.ui.ForageTheme
 import java.io.File
 import androidx.compose.runtime.CompositionLocalProvider
@@ -44,7 +45,10 @@ fun dataDir(args: Array<String>): File {
 fun main(args: Array<String>) {
     val dir = dataDir(args)
     // The window opens at a size that fits the interface size, read before anything is shown.
-    val startScale = Settings(File(dir, "settings.properties")).uiScale ?: Zoom.auto()
+    val startSettings = Settings(File(dir, "settings.properties"))
+    val startScale = startSettings.uiScale ?: Zoom.auto()
+    // Forage draws its own title bar unless asked not to; a window's frame can only be chosen before it opens.
+    val ownFrame = !startSettings.systemTitleBar
     application {
         val scope = rememberCoroutineScope()
         val model = remember { DesktopModel(dir, scope) }
@@ -54,15 +58,18 @@ fun main(args: Array<String>) {
         }
         // While the private vault is unlocked, it replaces the normal one on screen.
         val active = model.privateModel ?: model
+        val windowState = rememberWindowState(size = startSize(startScale))
+        val close = {
+            runBlocking { model.privateModel?.shutdown() }
+            model.close()
+            exitApplication()
+        }
         Window(
-            onCloseRequest = {
-                runBlocking { model.privateModel?.shutdown() }
-                model.close()
-                exitApplication()
-            },
+            onCloseRequest = close,
             title = "Forage",
             icon = remember { BitmapPainter(useResource("forage.png", ::loadImageBitmap)) },
-            state = rememberWindowState(size = startSize(startScale)),
+            state = windowState,
+            undecorated = ownFrame,
             onKeyEvent = { event ->
                 // Ctrl + Plus / Minus / 0, as in browsers.
                 if (event.type != KeyEventType.KeyDown || !(event.isCtrlPressed || event.isMetaPressed)) return@Window false
@@ -74,6 +81,23 @@ fun main(args: Array<String>) {
                 }
             },
         ) {
+            val frame = if (ownFrame) remember(window, windowState) { WindowFrame(window, windowState, close) } else null
+            LaunchedEffect(Unit) {
+                window.minimumSize = java.awt.Dimension(860, 540)
+                // Some Linux desktops report the system frame's size only after the window appears, and
+                // the content keeps the size measured before; laying it out again once fixes that.
+                if (!ownFrame) {
+                    kotlinx.coroutines.delay(600)
+                    window.invalidate()
+                    window.validate()
+                    if (windowState.placement == androidx.compose.ui.window.WindowPlacement.Floating) {
+                        val size = windowState.size
+                        windowState.size = DpSize(size.width + 1.dp, size.height)
+                        kotlinx.coroutines.delay(100)
+                        windowState.size = size
+                    }
+                }
+            }
             val systemDark = isSystemInDarkTheme()
             val linuxDark = remember { if ("linux" in System.getProperty("os.name").lowercase()) Theme.linuxPrefersDark() else null }
             val dark = when (active.theme) {
@@ -84,7 +108,7 @@ fun main(args: Array<String>) {
             val base = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(base.density * active.effectiveUiScale, base.fontScale)) {
             ForageTheme(dark = dark) {
-                App(active, onImport = {
+                App(active, frame = frame, onImport = {
                     val chooser = JFileChooser().apply {
                         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
                         dialogTitle = "Choose the extracted Takeout folder"
