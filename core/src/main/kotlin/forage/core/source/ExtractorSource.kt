@@ -92,6 +92,8 @@ data class VideoStub(
     val isShort: Boolean,
     /** Often only approximate: list results say "3 months ago". */
     val uploadedAt: Instant? = null,
+    /** Platforms whose list results carry tags (see [Capability.DESCRIPTIVE_TAGS]). */
+    val tags: List<String> = emptyList(),
 )
 
 data class VideoDetails(val metadata: VideoMetadata, val related: List<VideoStub>)

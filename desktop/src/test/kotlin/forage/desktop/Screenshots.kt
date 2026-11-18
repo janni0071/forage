@@ -122,7 +122,11 @@ fun main(args: Array<String>) {
         runBlocking { unlockPrivate("screenshot vault passphrase".toCharArray(), create = true)?.join() }
         privateModel?.screen = Screen.LIBRARY
     }
+    shot("16-private-settings") {
+        privateModel?.settingsOpen = true
+    }
     shot("3-library-history") {
+        privateModel?.settingsOpen = false
         runBlocking { lockPrivate()?.join() }
         settingsOpen = false
         showLibraryAsGrid(false)

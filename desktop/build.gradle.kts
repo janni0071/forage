@@ -32,8 +32,8 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "forage.desktop.MainKt"
-        // The language detector's models need more than the JVM's default heap.
-        jvmArgs += listOf("-Xmx2g")
+        // The language detector's models need more than the JVM's default heap, and so does importing a catalogue.
+        jvmArgs += listOf("-Xmx3g")
         buildTypes.release.proguard {
             configurationFiles.from(project.file("rules.pro"))
             obfuscate.set(false)
@@ -43,7 +43,7 @@ compose.desktop {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.Dmg, TargetFormat.Msi)
             // The name people see; Debian's package name below must be lowercase.
             packageName = "Forage"
-            packageVersion = "0.1.10"
+            packageVersion = "0.2.0"
             description = "Local-first video recommendations you control"
             vendor = "Forage"
             licenseFile.set(rootProject.file("LICENSE"))

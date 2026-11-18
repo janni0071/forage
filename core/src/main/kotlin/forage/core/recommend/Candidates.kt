@@ -6,6 +6,7 @@ import forage.core.source.Capability
 import forage.core.source.ExtractorSource
 import forage.core.source.SourceException
 import forage.core.source.VideoStub
+import forage.core.source.VideoCatalogue
 import java.time.Duration
 import kotlin.random.Random
 import java.util.concurrent.Executors
@@ -15,6 +16,9 @@ import forage.core.metadata.SearchCache
 sealed interface CandidateSource {
     data class RelatedTo(val video: ProfileVideo) : CandidateSource
     data class Search(val query: String, val cluster: Int) : CandidateSource
+
+    /** Matched against the platform's catalogue by the tags it shares with the topic. */
+    data class Catalogue(val sharedTags: List<String>, val cluster: Int) : CandidateSource
 }
 
 data class CandidateStub(val stub: VideoStub, val sources: List<CandidateSource>)
@@ -44,6 +48,14 @@ class CandidateGenerator(
     /** On platforms without related videos: profile videos per topic searched for by their tags. */
     private val tagSearchesPerCluster: Int = 3,
     private val tagSearchesVaried: Int = 6,
+    /**
+     * Catalogues by platform. A topic on a platform with one gets its best tag matches from it,
+     * and the per-video tag searches are left out, since the catalogue does their job better.
+     */
+    private val catalogues: Map<String, VideoCatalogue> = emptyMap(),
+    /** Catalogue matches per topic (twice as many for pinned ones), and per sampled video of the varied group. */
+    private val cataloguePerTopic: Int = 80,
+    private val cataloguePerVideo: Int = 20,
 ) {
     /** What went wrong with searches, for the caller to report. Candidate generation itself never fails on them. */
     val searchFailures: MutableList<String> = java.util.Collections.synchronizedList(ArrayList())
@@ -84,8 +96,34 @@ class CandidateGenerator(
                 results.forEach { add(it, CandidateSource.Search(searches[i].query, searches[i].cluster)) }
             }
         }
+
+        if (catalogues.isNotEmpty()) {
+            for (cluster in active) {
+                val platform = mainPlatform(cluster) ?: continue
+                val catalogue = catalogues[platform] ?: continue
+                val videos = cluster.videos.filter { it.id.platform == platform }
+                // A topic is matched as a whole; the varied group has no common subject, so a few of its videos are matched one by one.
+                val queries = if (cluster.isVaried) {
+                    videos.shuffled(random).take(tagSearchesVaried).map { listOf(it) to cataloguePerVideo }
+                } else {
+                    listOf(videos to if (cluster.preference == TopicPreference.PINNED) cataloguePerTopic * 2 else cataloguePerTopic)
+                }
+                for ((members, limit) in queries) {
+                    val counts = HashMap<String, Double>()
+                    for (video in members) {
+                        cache.video(video.id)?.metadata?.tags.orEmpty().map { it.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
+                            .forEach { counts.merge(it, video.weight.toDouble(), Double::plus) }
+                    }
+                    if (counts.isEmpty()) continue
+                    catalogue.matching(counts, limit, exclude).forEach { add(it.stub, CandidateSource.Catalogue(it.sharedTags, cluster.index)) }
+                }
+            }
+        }
         return found.values.toList()
     }
+
+    private fun mainPlatform(cluster: Cluster): String? =
+        cluster.videos.groupingBy { it.id.platform }.eachCount().maxByOrNull { it.value }?.key
 
     private data class PlannedSearch(val source: ExtractorSource, val query: String, val cluster: Int)
 
@@ -120,7 +158,7 @@ class CandidateGenerator(
                 cluster.keywords.chunked(perQuery).take(if (withoutRelated) 2 else 1)
                     .forEach { plan(source, it, cluster.index) }
             }
-            if (withoutRelated) {
+            if (withoutRelated && platform !in catalogues) {
                 val sample = if (cluster.isVaried) tagSearchesVaried else tagSearchesPerCluster
                 val counts = tagCounts[platform].orEmpty()
                 val tagged = tagsOf.count { (id, tags) -> id.platform == platform && tags.isNotEmpty() }

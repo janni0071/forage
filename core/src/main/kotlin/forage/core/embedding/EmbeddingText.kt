@@ -24,8 +24,12 @@ object EmbeddingText {
         cleanDescription(video.description).takeIf { it.isNotEmpty() }?.let(::add)
     }.joinToString("\n")
 
-    /** For videos known only from a list result: there is nothing but title and channel to go on. */
-    fun of(stub: VideoStub): String = listOfNotNull(stub.title, stub.channelName).joinToString("\n")
+    /** For videos known only from a list result: title and channel, and tags where the platform lists them. */
+    fun of(stub: VideoStub): String = buildList {
+        add(stub.title)
+        stub.channelName?.let(::add)
+        if (stub.tags.isNotEmpty()) add(stub.tags.joinToString(", "))
+    }.joinToString("\n")
 
     /** What cluster keywords are drawn from. */
     fun keywordsSource(video: VideoMetadata): String = (listOf(video.title) + video.tags).joinToString(" ")

@@ -38,6 +38,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -117,6 +118,41 @@ fun SettingsDialog(model: DesktopModel) {
                         "Some didn't load since Forage started: " +
                             thumbnailProblems.joinToString("; ") { (reason, n) -> "$n × $reason" } + ".",
                     )
+                }
+
+                if (model.offersCatalogue) {
+                    Section(
+                        "Catalogue",
+                        "The site's embed dump, imported once: Discover then matches your topics against all its videos " +
+                            "instead of a few searches, and previews load from it. Kept unencrypted in Forage's data folder; " +
+                            "it holds only the site's public catalogue, nothing about you.",
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(model.catalogueInfo ?: "Not imported yet", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (model.catalogueInfo == null) "Download pornhub.com-db.zip from the site's webmasters page, then choose it here. Importing takes a few minutes."
+                                else "Import a newer dump to update it.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = c.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        if (model.catalogueInfo != null) {
+                            TextButton(onClick = model::removeCatalogue) { Text("Remove") }
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        OutlinedButton(
+                            onClick = { chooseZip()?.let(model::importCatalogue) },
+                            enabled = model.job == null,
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text(if (model.catalogueInfo == null) "Import…" else "Update…")
+                        }
+                    }
                 }
 
                 if (model.isPrivate) {
@@ -271,4 +307,14 @@ private fun Hint(text: String) {
         modifier = Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.errorContainer).padding(12.dp),
     )
+}
+
+/** Asks for the downloaded dump; null when cancelled. */
+private fun chooseZip(): java.io.File? {
+    val chooser = javax.swing.JFileChooser().apply {
+        dialogTitle = "Choose the downloaded embed dump (pornhub.com-db.zip)"
+        fileFilter = javax.swing.filechooser.FileNameExtensionFilter("Zip files", "zip")
+        currentDirectory = java.io.File(System.getProperty("user.home"), "Downloads").takeIf { it.isDirectory }
+    }
+    return if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
 }

@@ -10,6 +10,7 @@ import forage.core.metadata.SearchCache
 import forage.core.profile.ProfileEntry
 import forage.core.profile.ProfileRef
 import forage.core.source.VideoMetadata
+import forage.core.source.VideoCatalogue
 import forage.core.profile.ProfileStore
 import forage.core.profile.StoredPick
 import forage.core.profile.VideoState
@@ -32,6 +33,8 @@ data class DiscoverResult(
     val searchFailures: List<String>,
     /** Milliseconds spent in each stage, in order, to see what makes a visit slow. */
     val timings: Map<String, Long> = emptyMap(),
+    /** Candidates that came from a local catalogue. */
+    val fromCatalogue: Int = 0,
 )
 
 class EmptyProfileException(message: String) : Exception(message)
@@ -58,6 +61,8 @@ class Discover(
     private val now: () -> Instant = Instant::now,
     /** Platforms whose tags describe their videos (Capability.DESCRIPTIVE_TAGS): their topics are grouped by tags too. */
     private val tagPlatforms: Set<String> = emptySet(),
+    /** Local catalogues by platform, matched by tags for candidates. */
+    private val catalogues: Map<String, VideoCatalogue> = emptyMap(),
 ) {
     /** The profile as topics, with the user's pins and mutes applied. Needs metadata for the profile's videos. */
     fun topics(profile: ProfileRef): List<Cluster> = taste(profile).clusters
@@ -124,7 +129,7 @@ class Discover(
 
         // Never suggest what is watched, saved, or already decided on in this profile.
         val exclude = library.knownVideoIds() + entries.map { it.video }
-        val generator = CandidateGenerator(cache, source, Random(seed), searchCache)
+        val generator = CandidateGenerator(cache, source, Random(seed), searchCache, catalogues = catalogues)
         val stubs = generator.generate(clusters, exclude)
         lap("candidates")
 
@@ -171,6 +176,7 @@ class Discover(
             profileLanguages = languages?.profileLanguages.orEmpty(),
             withoutMetadata = (t.included - known.size) + (t.rejected - t.knownRejected),
             searchFailures = generator.searchFailures,
+            fromCatalogue = candidates.count { c -> c.sources.any { it is CandidateSource.Catalogue } },
             timings = timings.also { lap("ranking") },
         )
     }
@@ -178,6 +184,7 @@ class Discover(
     private fun describe(source: CandidateSource): String = when (source) {
         is CandidateSource.RelatedTo -> "related to \"${source.video.title}\""
         is CandidateSource.Search -> "search \"${source.query}\""
+        is CandidateSource.Catalogue -> "shares " + source.sharedTags.take(3).joinToString(", ") { "\"$it\"" }
     }
 }
 

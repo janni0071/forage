@@ -136,4 +136,39 @@ class CandidateGeneratorTest {
         assertEquals(emptyList(), youtube.queries)
         assertTrue(found.all { it.stub.id.platform == "other" })
     }
+
+    @Test
+    fun `a topic on a platform with a catalogue gets its tag matches, and no per-video tag searches`() {
+        val o = { s: String -> PlatformId("other", s) }
+        val cache = MetadataCache(memoryDatabase()).apply {
+            for ((id, tags) in listOf("x" to listOf("T1", "t2"), "y" to listOf("t2", "t3"), "z" to listOf("t9"))) {
+                put(details(id).let { it.copy(metadata = it.metadata.copy(id = o(id), tags = tags), related = emptyList()) })
+            }
+        }
+        val topic = Cluster(
+            0, listOf(ProfileVideo(o("x"), "X", null, floatArrayOf(1f)), ProfileVideo(o("y"), "Y", null, floatArrayOf(1f), weight = 0.5f)),
+            floatArrayOf(1f), listOf("k1", "k2", "k3"),
+        )
+        val varied = Cluster(1, listOf(ProfileVideo(o("z"), "Z", null, floatArrayOf(1f))), floatArrayOf(1f), emptyList(), isVaried = true)
+        val asked = ArrayList<Pair<Map<String, Double>, Int>>()
+        val catalogue = object : forage.core.source.VideoCatalogue {
+            override val platform = "other"
+            override val size = 100
+            override fun matching(tagCounts: Map<String, Double>, limit: Int, exclude: Set<PlatformId>): List<forage.core.source.CatalogueMatch> {
+                asked += tagCounts to limit
+                return listOf(o("m${asked.size}"), o("x")).filter { it !in exclude }
+                    .map { forage.core.source.CatalogueMatch(VideoStub(it, "Match", null, null, null, false), listOf("t2")) }
+            }
+        }
+        val other = OtherPlatform()
+        val found = CandidateGenerator(
+            cache, forage.core.source.Sources(SearchOnly(0), other), sleep = {},
+            catalogues = mapOf("other" to catalogue), cataloguePerTopic = 50, cataloguePerVideo = 10,
+        ).generate(listOf(topic, varied), exclude = setOf(o("x")))
+        // The topic as a whole, its videos' tags weighted by how much they count; the varied group's video on its own.
+        assertEquals(listOf(mapOf("t1" to 1.0, "t2" to 1.5, "t3" to 0.5) to 50, mapOf("t9" to 1.0) to 10), asked)
+        assertEquals(setOf("m1", "m2"), found.filter { c -> c.sources.any { it is CandidateSource.Catalogue } }.map { it.stub.id.id }.toSet())
+        // Keyword searches stay (the catalogue is a snapshot); tag searches are left to the catalogue.
+        assertEquals(listOf("k1 k2 k3"), other.queries.toList())
+    }
 }

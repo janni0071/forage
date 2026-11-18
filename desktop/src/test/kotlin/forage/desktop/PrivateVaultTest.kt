@@ -91,6 +91,33 @@ class PrivateVaultTest {
     }
 
     @Test
+    fun `the private vault imports a catalogue and can remove it`() {
+        val zip = java.io.File(dir, "dump.zip")
+        java.util.zip.ZipOutputStream(zip.outputStream()).use { z ->
+            z.putNextEntry(java.util.zip.ZipEntry("db.csv"))
+            val lines = (1..5).map { i ->
+                """<iframe src="https://www.pornhub.com/embed/key$i"></iframe>|https://img.example/$i.jpg|https://img.example/$i-1.jpg|Video $i|tag a;tag b|Cat|""" +
+                    "|600|5000|9|1|https://img.example/$i-big.jpg"
+            }
+            z.write(lines.joinToString("\n").toByteArray())
+            z.closeEntry()
+        }
+        assertEquals(false, model.offersCatalogue)
+        unlock("quiet harbour lantern", create = true)
+        val vault = assertNotNull(model.privateModel, model.privateError)
+        assertTrue(vault.offersCatalogue)
+        assertNull(vault.catalogueInfo)
+        vault.importCatalogue(zip)
+        runBlocking { withTimeout(20_000) { while (vault.job != null) kotlinx.coroutines.delay(20) } }
+        assertTrue(vault.catalogueInfo.orEmpty().startsWith("5 videos, imported"), "${vault.catalogueInfo} / ${vault.message}")
+        assertTrue(java.io.File(dir, "catalogues/pornhub.db").isFile)
+        vault.removeCatalogue()
+        runBlocking { withTimeout(10_000) { while (vault.catalogueInfo != null) kotlinx.coroutines.delay(20) } }
+        assertTrue(!java.io.File(dir, "catalogues/pornhub.db").exists())
+        lock()
+    }
+
+    @Test
     fun `a wrong PIN and no vault get the same answer`() {
         unlock("nothing here yet")
         assertEquals("Nothing unlocks with that PIN", model.privateError)

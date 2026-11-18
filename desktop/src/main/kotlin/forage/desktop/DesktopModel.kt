@@ -35,6 +35,7 @@ import forage.embedding.onnx.ModelSpec
 import forage.embedding.onnx.OnnxEmbedder
 import forage.language.lingua.LinguaDetector
 import forage.core.source.Sources
+import forage.source.pornhub.PornhubCatalogue
 import forage.source.pornhub.PornhubSource
 import forage.source.youtube.YouTubeSource
 import forage.core.vault.PrivateVaults
@@ -166,7 +167,11 @@ class DesktopModel(
     var profileDialog by mutableStateOf<ProfileDialog?>(null)
 
     private val source by lazy(sourceFactory)
-    val thumbnails = Thumbnails(storage.thumbnailsDir) { id, large, fresh -> source.thumbnailUrls(id, large, fresh) }
+    val thumbnails = Thumbnails(storage.thumbnailsDir) { id, large, fresh ->
+        // The catalogue's links are stable; the platform is asked only when they're refused.
+        val fromCatalogue = if (!large && !fresh && isPrivate && id.platform == PornhubSource.PLATFORM) openCatalogue()?.thumbnailUrl(id) else null
+        fromCatalogue?.let { listOf(it) } ?: source.thumbnailUrls(id, large, fresh)
+    }
 
     /** Platforms whose topics are grouped by their tags. */
     private val tagPlatforms by lazy {
@@ -319,6 +324,7 @@ class DesktopModel(
         loadRows()
         loadPicks()
         loadLater()
+        if (isPrivate) describeCatalogue()
     }
 
     fun selectSource(source: LibrarySource) {
@@ -503,6 +509,71 @@ class DesktopModel(
         return null
     }
 
+    // The private platform's catalogue (SPEC, "Sensitive platforms"): its embed dump, imported into an
+    // index file of its own. It holds only the site's public catalogue, so it isn't encrypted.
+
+    private val catalogueFile = File(dataDir, "catalogues/${PornhubSource.PLATFORM}.db")
+    private var catalogue: PornhubCatalogue? = null
+    private val catalogueLock = Any()
+
+    /** Whether this vault can use a catalogue: the private one, which offers the platform. */
+    val offersCatalogue: Boolean get() = isPrivate && searchPlatforms.any { it.first == PornhubSource.PLATFORM }
+
+    /** What the catalogue holds, e.g. "4.6 million videos, imported 18 Nov 2026"; null when there is none. */
+    var catalogueInfo by mutableStateOf<String?>(null)
+        private set
+
+    private fun openCatalogue(): PornhubCatalogue? = synchronized(catalogueLock) {
+        if (!isPrivate) return null
+        if (catalogue == null && catalogueFile.isFile) catalogue = runCatching { PornhubCatalogue.open(catalogueFile) }.getOrNull()
+        catalogue
+    }
+
+    private fun closeCatalogue() = synchronized(catalogueLock) {
+        catalogue?.close()
+        catalogue = null
+    }
+
+    private fun describeCatalogue() {
+        val c = openCatalogue()
+        catalogueInfo = c?.let {
+            val count = if (it.size >= 1_000_000) "%.1f million".format(it.size / 1e6) else "%,d".format(it.size)
+            val date = java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy")
+                .format(java.time.Instant.ofEpochSecond(it.importedAt).atZone(java.time.ZoneId.systemDefault()))
+            "$count videos, imported $date"
+        }
+    }
+
+    /** Imports the site's embed dump (the downloaded zip) as the catalogue, replacing any earlier one when done. */
+    fun importCatalogue(zip: File) {
+        settingsOpen = false
+        runJob("Importing the catalogue") { update ->
+            val job = currentCoroutineContext()[CoroutineJob]
+            var shown = -1
+            val summary = try {
+                PornhubCatalogue.import(zip, catalogueFile, progress = { share ->
+                    val percent = (share * 100).toInt()
+                    if (percent != shown) {
+                        shown = percent
+                        update("$percent % of ${zip.name} read")
+                    }
+                }, cancelled = { job?.isActive == false }, beforeReplace = ::closeCatalogue)
+            } catch (e: PornhubCatalogue.LayoutException) {
+                return@runJob "${e.message}. Its layout: ${e.layout}"
+            }
+            describeCatalogue()
+            "Imported %,d videos into the catalogue (%,d left out with under %,d views, %,d lines unreadable). The zip can go now."
+                .format(summary.videos, summary.skippedFewViews, PornhubCatalogue.MIN_VIEWS, summary.skippedUnreadable)
+        }
+    }
+
+    fun removeCatalogue() = launchQuiet {
+        closeCatalogue()
+        catalogueFile.delete()
+        catalogueInfo = null
+        message = "Removed the catalogue; Discover uses searches only again"
+    }
+
     // Search (SPEC, Manual add): find videos to add without leaving Forage for their links.
 
     /** The platforms this vault can search, as (platform, name). */
@@ -589,6 +660,7 @@ class DesktopModel(
         cache, library, profiles, EmbeddingStore(db, embedder), detector(),
         source.takeIf { withSearch }, RankingConfig(showShorts = settings.showShorts), searchCache, topicStore,
         tagPlatforms = tagPlatforms,
+        catalogues = openCatalogue()?.let { mapOf(it.platform to it) }.orEmpty(),
     )
 
     /** Groups the profile into topics without running a whole Discover. */
@@ -660,6 +732,7 @@ class DesktopModel(
                 add("${result.picks.size} picks from ${result.candidates} candidates in %.0f s".format(seconds))
                 if (result.foreignLanguage > 0) add("${result.foreignLanguage} dropped for their language")
                 if (result.withoutMetadata > 0) add("${result.withoutMetadata} profile videos still need details")
+                if (result.fromCatalogue > 0) add("${result.fromCatalogue} from the catalogue")
                 if (result.searchFailures.isNotEmpty()) add("${result.searchFailures.size} searches failed")
             }.joinToString(" · ")
             loadPicks()
@@ -858,7 +931,10 @@ class DesktopModel(
     suspend fun shutdown() {
         saver?.cancel()
         ownScope.coroutineContext[CoroutineJob]?.cancel()
-        withContext(io + NonCancellable) { storage.encrypted?.close() }
+        withContext(io + NonCancellable) {
+            storage.encrypted?.close()
+            closeCatalogue()
+        }
     }
 
     // The private vault, opened from the normal vault's model.

@@ -9,6 +9,8 @@ kotlin {
 dependencies {
     api(project(":core"))
     implementation(libs.serialization.json)
+    // The catalogue index is a plain SQLite file of its own.
+    implementation(libs.sqlite.jdbc)
     testImplementation(libs.kotlin.test)
 }
 

@@ -95,7 +95,7 @@ class PornhubSource(
             throw apiError(json, "search '$query'", notFoundIsGone = false)
         }
         return videos.mapNotNull { (it as? JsonObject)?.let(::parse) }.map {
-            VideoStub(it.id, it.title, channel = null, it.channelName, it.durationSeconds, isShort = false, it.uploadedAt)
+            VideoStub(it.id, it.title, channel = null, it.channelName, it.durationSeconds, isShort = false, it.uploadedAt, it.tags)
         }
     }
 

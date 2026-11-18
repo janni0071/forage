@@ -35,14 +35,15 @@ class SearchCache(
         val durationSeconds: Long? = null,
         val isShort: Boolean = false,
         val uploadedAt: Long? = null,
+        val tags: List<String> = emptyList(),
     ) {
         constructor(s: VideoStub) : this(
-            s.id.toString(), s.title, s.channel?.toString(), s.channelName, s.durationSeconds, s.isShort, s.uploadedAt?.epochSecond,
+            s.id.toString(), s.title, s.channel?.toString(), s.channelName, s.durationSeconds, s.isShort, s.uploadedAt?.epochSecond, s.tags,
         )
 
         fun toStub() = VideoStub(
             PlatformId.parse(id), title, channel?.let(PlatformId::parse), channelName, durationSeconds, isShort,
-            uploadedAt?.let(Instant::ofEpochSecond),
+            uploadedAt?.let(Instant::ofEpochSecond), tags,
         )
     }
 }
