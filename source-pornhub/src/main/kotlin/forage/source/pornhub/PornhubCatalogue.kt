@@ -96,6 +96,8 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
                     channelName = r.performers.take(2).joinToString(", ").ifEmpty { null },
                     durationSeconds = r.duration,
                     isShort = false,
+                    // The dump has no upload date; the thumbnail's address holds the day the video was processed.
+                    uploadedAt = r.thumb?.let(PornhubSource::uploadDateFromImage),
                     tags = r.tagIds.mapNotNull { names[it] },
                 ),
                 sharedTags = tags.map { it.first.id }.filter { it in r.tagIds }.mapNotNull { queryIds[it] },
@@ -115,7 +117,9 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
 
     private data class Tag(val id: Int, val name: String, val df: Int)
 
-    private class Row(val key: String, val title: String, val duration: Long?, val performers: List<String>, val tagIds: Set<Int>)
+    private class Row(
+        val key: String, val title: String, val duration: Long?, val performers: List<String>, val tagIds: Set<Int>, val thumb: String?,
+    )
 
     private fun tag(name: String): Tag? = connection.prepareStatement("SELECT id, df FROM tag WHERE name = ?").use { st ->
         st.setString(1, name)
@@ -134,7 +138,7 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
 
     private fun rows(ids: List<Int>): Map<Int, Row> {
         if (ids.isEmpty()) return emptyMap()
-        val sql = "SELECT id, key, title, duration, performers, tags FROM video WHERE id IN (${ids.joinToString(",")})"
+        val sql = "SELECT id, key, title, duration, performers, tags, thumb FROM video WHERE id IN (${ids.joinToString(",")})"
         return connection.createStatement().use { st ->
             st.executeQuery(sql).use { rs ->
                 buildMap {
@@ -146,6 +150,7 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
                             Row(
                                 rs.getString(2), rs.getString(3), rs.getLong(4).takeIf { it > 0 },
                                 rs.getString(5).orEmpty().split(';').map { it.trim() }.filter { it.isNotEmpty() }, tagIds,
+                                rs.getString(7),
                             ),
                         )
                     }

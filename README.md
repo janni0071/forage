@@ -17,7 +17,7 @@ Build the package (needs JDK 21 and `fakeroot`):
 Then install it; `apt` also pulls in the one dependency (`xdg-utils`):
 
 ```bash
-sudo apt install ./desktop/build/compose/binaries/main-release/deb/forage_0.2.1_amd64.deb
+sudo apt install ./desktop/build/compose/binaries/main-release/deb/forage_0.2.2_amd64.deb
 ```
 
 Forage then appears in the app menu. Its data lives in `~/.local/share/forage` (see Settings → Your

@@ -153,7 +153,7 @@ class PornhubSource(
             channelName = performers.take(MAX_NAMED_PERFORMERS).joinToString(", ").ifEmpty { null },
             language = null,
             thumbnailUrl = thumb,
-            uploadedAt = video.string("publish_date")?.let(::parseDate),
+            uploadedAt = video.string("publish_date")?.let(::parseDate) ?: thumb?.let(::uploadDateFromImage),
             isShort = false,
             extra = buildMap {
                 if (performers.isNotEmpty()) put("performers", performers.joinToString(", "))
@@ -253,6 +253,18 @@ class PornhubSource(
             val parts = text.trim().split(':').map { it.toLongOrNull() ?: return null }
             if (parts.isEmpty() || parts.size > 3) return null
             return parts.fold(0L) { total, part -> total * 60 + part }.takeIf { it > 0 }
+        }
+
+        private val IMAGE_DATE = Regex("""/videos/(\d{4})(\d{2})/(\d{2})/""")
+
+        /**
+         * The day a video was processed, from its image address (`…/videos/202510/05/…`): the upload
+         * date, give or take a day, for sources that don't state one (the embed dump).
+         */
+        fun uploadDateFromImage(url: String): Instant? {
+            val (year, month, day) = IMAGE_DATE.find(url)?.destructured ?: return null
+            return runCatching { java.time.LocalDate.of(year.toInt(), month.toInt(), day.toInt()).atStartOfDay(ZoneOffset.UTC).toInstant() }
+                .getOrNull()?.takeIf { it.atZone(ZoneOffset.UTC).year >= 2005 }
         }
 
         /** "2025-11-03 08:24:34"; the API doesn't say which time zone, so it's read as UTC. */

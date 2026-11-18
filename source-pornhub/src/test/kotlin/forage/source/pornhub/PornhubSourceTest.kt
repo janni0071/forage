@@ -121,6 +121,20 @@ class PornhubSourceTest {
     }
 
     @Test
+    fun `upload dates come from image addresses when nothing states them`() {
+        assertEquals(
+            Instant.parse("2025-10-05T00:00:00Z"),
+            PornhubSource.uploadDateFromImage("https://pix-fl.phncdn.com/c6371/videos/202510/05/25069335/original/x.jpg?hdnea=1"),
+        )
+        assertEquals(
+            Instant.parse("2019-01-31T00:00:00Z"),
+            PornhubSource.uploadDateFromImage("https://ei.phncdn.com/videos/201901/31/123456/original/(m=eaAaGwObaaaa)(mh=abc)1.jpg"),
+        )
+        assertNull(PornhubSource.uploadDateFromImage("https://ei.phncdn.com/videos/201913/45/1/x.jpg"))
+        assertNull(PornhubSource.uploadDateFromImage("https://img.example/a.jpg"))
+    }
+
+    @Test
     fun `durations and dates`() {
         assertEquals(3723L, PornhubSource.parseDuration("1:02:03"))
         assertEquals(45L, PornhubSource.parseDuration("0:45"))

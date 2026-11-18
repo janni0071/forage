@@ -27,7 +27,7 @@ class PornhubCatalogueTest {
         key: String, title: String = "Video $key", tags: String = "tag a;tag b", categories: String = "Cat X",
         performers: String = "", duration: String = "630", views: String = "5000", extra: String = "",
     ) = """<iframe src="https://www.pornhub.com/embed/$key" frameborder="0" width="560" height="315" scrolling="no" allowfullscreen></iframe>""" +
-        "|https://img.example/$key.jpg|https://img.example/$key-1.jpg;https://img.example/$key-2.jpg|$title|$tags|$categories|$performers" +
+        "|https://img.example/videos/202403/15/$key/original/(m=a)(mh=b)1.jpg|https://img.example/$key-1.jpg;https://img.example/$key-2.jpg|$title|$tags|$categories|$performers" +
         "|$duration|$views|90|10|https://img.example/$key-big.jpg;https://img.example/$key-big2.jpg$extra"
 
     private fun zip(lines: List<String>): File {
@@ -63,7 +63,7 @@ class PornhubCatalogueTest {
         PornhubCatalogue.open(target).use { c ->
             assertEquals(15, c.size)
             assertEquals(1_700_000_000, c.importedAt)
-            assertEquals("https://img.example/special1.jpg", c.thumbnailUrl(PlatformId("pornhub", "special1")))
+            assertEquals("https://img.example/videos/202403/15/special1/original/(m=a)(mh=b)1.jpg", c.thumbnailUrl(PlatformId("pornhub", "special1")))
             assertNull(c.thumbnailUrl(PlatformId("pornhub", "few")))
 
             // "rare one" (any spelling) is on three videos, "tag a" on most: the rare tag decides.
@@ -73,6 +73,7 @@ class PornhubCatalogueTest {
             assertEquals("A | B", first.stub.title)
             assertEquals("Perf One, Perf Two", first.stub.channelName)
             assertEquals(630L, first.stub.durationSeconds)
+            assertEquals(java.time.Instant.parse("2024-03-15T00:00:00Z"), first.stub.uploadedAt)
             assertEquals(listOf("rare one", "tag a"), first.sharedTags)
             assertTrue("rare one" in first.stub.tags.map(PornhubCatalogue::normalize))
 
