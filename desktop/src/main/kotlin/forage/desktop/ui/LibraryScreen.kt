@@ -83,7 +83,7 @@ import forage.desktop.StateFilter
 
 @Composable
 fun LibraryScreen(model: DesktopModel, onImport: () -> Unit) {
-    if (model.addDialogOpen) AddLinkDialog(model)
+    if (model.addDialogOpen) AddVideosDialog(model)
     if (model.libraryEmpty) {
         EmptyLibrary(model, onImport)
         return
@@ -102,9 +102,9 @@ fun LibraryScreen(model: DesktopModel, onImport: () -> Unit) {
             )
             ViewToggle(model)
             OutlinedButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Add by link")
+                Text("Add videos")
             }
             OutlinedButton(onClick = model::fetchDetails, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
                 Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -180,44 +180,10 @@ private fun EmptyLibrary(model: DesktopModel, onImport: () -> Unit) {
         )
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (!model.isPrivate) AccentButton("Import Takeout folder", Icons.Outlined.CloudDownload, onClick = onImport)
-            if (model.isPrivate) AccentButton("Add a video by link", Icons.Outlined.Link) { model.addDialogOpen = true }
-            else OutlinedButton(onClick = { model.addDialogOpen = true }, shape = RoundedCornerShape(12.dp)) { Text("Add a video by link") }
+            if (model.isPrivate) AccentButton("Add videos", Icons.Outlined.Add) { model.addDialogOpen = true }
+            else OutlinedButton(onClick = { model.addDialogOpen = true }, shape = RoundedCornerShape(12.dp)) { Text("Search or add by link") }
         }
     }
-}
-
-@Composable
-private fun AddLinkDialog(model: DesktopModel) {
-    var link by remember { mutableStateOf("") }
-    var problem by remember { mutableStateOf<String?>(null) }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = { model.addDialogOpen = false },
-        icon = { Icon(Icons.Outlined.Link, contentDescription = null) },
-        title = { Text("Add a video") },
-        text = {
-            Column {
-                Text(
-                    "Paste a link from ${model.linkPlatforms}, or several, one per line. The videos go straight into this profile.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 16.dp),
-                )
-                OutlinedTextField(
-                    value = link,
-                    onValueChange = { link = it; problem = null },
-                    label = { Text("Links") },
-                    placeholder = { Text("https://www.youtube.com/watch?v=…") },
-                    minLines = 1,
-                    maxLines = 6,
-                    isError = problem != null,
-                    supportingText = problem?.let { { Text(it) } },
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.width(440.dp),
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = { problem = model.addByLink(link) }) { Text("Add") } },
-        dismissButton = { TextButton(onClick = { model.addDialogOpen = false }) { Text("Cancel") } },
-    )
 }
 
 /** List or grid, as a two-part switch. */

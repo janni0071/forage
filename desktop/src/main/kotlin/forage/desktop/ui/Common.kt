@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import forage.core.PlatformId
+import kotlinx.coroutines.delay
 import forage.desktop.DesktopModel
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -142,6 +143,8 @@ fun Thumbnail(model: DesktopModel, id: PlatformId, width: Dp, modifier: Modifier
     Box(box) { ThumbnailImage(model, id, compact = true) }
 }
 
+private const val REFUSED_RETRIES = 3
+
 private sealed interface ThumbnailState {
     data object Loading : ThumbnailState
     data class Shown(val image: ImageBitmap) : ThumbnailState
@@ -156,9 +159,14 @@ private sealed interface ThumbnailState {
 fun BoxScope.ThumbnailImage(model: DesktopModel, id: PlatformId, large: Boolean = false, zoom: Float = 1f, compact: Boolean = false) {
     val start = model.thumbnails.cached(id, large)?.let { ThumbnailState.Shown(it) } ?: ThumbnailState.Loading
     val state by produceState<ThumbnailState>(start, id, large) {
-        if (value == ThumbnailState.Loading) {
-            value = model.thumbnails.load(id, large)?.let { ThumbnailState.Shown(it) }
-                ?: ThumbnailState.Missing(model.thumbnails.refused(id))
+        if (value != ThumbnailState.Loading) return@produceState
+        // A refused image often loads on a later try, with links on another server; try again
+        // a few times while the card is on screen.
+        repeat(REFUSED_RETRIES + 1) { attempt ->
+            if (attempt > 0) delay(model.thumbnails.retryAfter.toMillis() + 500)
+            val image = model.thumbnails.load(id, large)
+            value = image?.let { ThumbnailState.Shown(it) } ?: ThumbnailState.Missing(model.thumbnails.refused(id))
+            if (image != null || !model.thumbnails.refused(id)) return@produceState
         }
     }
     when (val s = state) {

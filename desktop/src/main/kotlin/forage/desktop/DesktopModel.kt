@@ -27,6 +27,8 @@ import forage.core.recommend.RankingConfig
 import forage.core.recommend.TopicPreference
 import forage.core.recommend.TopicStore
 import forage.core.source.ExtractorSource
+import forage.core.source.SourceException
+import forage.core.source.VideoStub
 import forage.core.source.Capability
 import forage.embedding.onnx.ModelFiles
 import forage.embedding.onnx.ModelSpec
@@ -467,7 +469,7 @@ class DesktopModel(
             else "${unknown.size} of these aren't video links Forage knows, e.g. ${unknown.first().take(60)}"
         }
         val found = ids.filterNotNull().distinct()
-        addDialogOpen = false
+        closeAddDialog()
         runJob(if (found.size == 1) "Adding a video" else "Adding ${found.size} videos", found.size) { update ->
             val titles = ArrayList<String>()
             val reached = HashSet<PlatformId>()
@@ -499,6 +501,86 @@ class DesktopModel(
             }
         }
         return null
+    }
+
+    // Search (SPEC, Manual add): find videos to add without leaving Forage for their links.
+
+    /** The platforms this vault can search, as (platform, name). */
+    val searchPlatforms: List<Pair<String, String>> by lazy {
+        ((source as? Sources)?.members ?: listOf(source))
+            .filter { Capability.SEARCH in it.capabilities }.map { it.platform to it.displayName }
+    }
+
+    /** The platform searched; the first one until the user picks another. */
+    var searchPlatform by mutableStateOf<String?>(null)
+    var searchResults by mutableStateOf<List<VideoStub>>(emptyList())
+        private set
+    var searching by mutableStateOf(false)
+        private set
+    var searchProblem by mutableStateOf<String?>(null)
+        private set
+    /** Videos from the results that are in the profile, added just now or before. */
+    var searchInProfile by mutableStateOf<Set<PlatformId>>(emptySet())
+        private set
+    private var searchJob: CoroutineJob? = null
+
+    fun searchVideos(query: String) {
+        val q = query.trim()
+        if (q.isEmpty()) return
+        val platform = searchPlatform ?: searchPlatforms.firstOrNull()?.first ?: return
+        val target = source.forPlatform(platform) ?: return
+        searchJob?.cancel()
+        searching = true
+        searchProblem = null
+        searchJob = ownScope.launch {
+            try {
+                val (results, included) = withContext(io) {
+                    target.search(q) to profiles.entries(profile, VideoState.INCLUDED).mapTo(HashSet()) { it.video }
+                }
+                searchResults = results.filter { settings.showShorts || !it.isShort }
+                searchInProfile = included
+                if (results.isEmpty()) searchProblem = "Nothing found for \"$q\""
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: SourceException) {
+                searchProblem = e.message ?: "The search failed"
+            } catch (e: Throwable) {
+                searchProblem = "The search failed: ${e.message ?: e}"
+            } finally {
+                searching = false
+            }
+        }
+    }
+
+    /** Puts a search result into the profile, then fetches its details in the background so it counts. */
+    fun addFromSearch(stub: VideoStub) {
+        if (stub.id in searchInProfile) return
+        searchInProfile = searchInProfile + stub.id
+        launchQuiet {
+            library.remember(stub.id, stub.title, stub.channel, stub.channelName, stub.isShort, stub.durationSeconds, stub.uploadedAt)
+            profiles.mark(profile, listOf(stub.id), VideoState.INCLUDED)
+            topicsCurrent = false
+            loadRows()
+            message = "Added \"${stub.title}\" to the profile"
+            if (cache.video(stub.id) == null) {
+                inBackground("Fetching details of \"${stub.title}\"") {
+                    val outcome = MetadataFetcher(source, cache).fetch(stub.id)
+                    loadRows()
+                    if (outcome is FetchOutcome.Failed) {
+                        message = "Couldn't fetch details of \"${stub.title}\"; it will count after the next \"Fetch profile details\""
+                    }
+                }
+            }
+        }
+    }
+
+    /** Clears the last search when the dialog closes, so it doesn't greet the next visit. */
+    fun closeAddDialog() {
+        addDialogOpen = false
+        searchJob?.cancel()
+        searchResults = emptyList()
+        searchProblem = null
+        searching = false
     }
 
     // Topics

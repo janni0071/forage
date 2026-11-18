@@ -69,6 +69,33 @@ class DesktopModelTest {
     }
 
     @Test
+    fun `search results can be added to the profile`() {
+        val searchable = object : ExtractorSource by offline {
+            override val capabilities = setOf(Capability.SEARCH)
+            override fun forPlatform(platform: String) = takeIf { platform == "youtube" }
+            override fun search(query: String) = listOf(
+                VideoStub(id("sssssssss01"), "Found $query", null, "Someone", 600, false),
+                VideoStub(id("a"), "Already watched", null, null, null, false),
+            )
+        }
+        val m = DesktopModel(Files.createTempDirectory("forage-search").toFile(), CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined) { searchable }
+        try {
+            assertEquals(listOf("youtube" to "youtube"), m.searchPlatforms)
+            m.searchVideos("  dovetails ")
+            assertEquals(listOf("Found dovetails", "Already watched"), m.searchResults.map { it.title })
+            assertEquals(emptySet(), m.searchInProfile)
+            m.addFromSearch(m.searchResults.first())
+            assertEquals(setOf(id("sssssssss01")), m.searchInProfile)
+            assertEquals(listOf(id("sssssssss01")), m.profiles.entries(m.profile, VideoState.INCLUDED).map { it.video })
+            assertEquals("Found dovetails", m.library.video(id("sssssssss01"))?.title)
+            m.closeAddDialog()
+            assertEquals(emptyList(), m.searchResults)
+        } finally {
+            m.close()
+        }
+    }
+
+    @Test
     fun `several links can be added at once, and anything else is refused`() {
         assertEquals("That doesn't look like a link to a video on youtube", model.addByLink("https://example.com/x"))
         val refused = model.addByLink("https://www.youtube.com/watch?v=aaaaaaaaaa1\nnot-a-link")

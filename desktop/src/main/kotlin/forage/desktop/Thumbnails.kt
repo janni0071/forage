@@ -19,13 +19,14 @@ import java.util.Collections
 
 /**
  * Loads video thumbnails: from memory, then from a folder on disk, then from the network.
- * Each image is downloaded once; failures are remembered for a few minutes so a missing image
- * isn't requested on every scroll, but one that failed for a passing reason comes back later. Large images fall back to small ones where they don't exist.
+ * Each image is downloaded once; failures rest for [retryAfter] so a missing image isn't
+ * requested on every scroll, but one that failed for a passing reason comes back soon. Large images fall back to small ones where they don't exist.
  */
 class Thumbnails(
     /** Null keeps images in memory only, for the private vault. */
     private val dir: File?,
-    private val retryAfter: Duration = Duration.ofMinutes(5),
+    /** How long a failed image rests before it may be tried again. */
+    val retryAfter: Duration = Duration.ofSeconds(20),
     private val clock: () -> Long = System::nanoTime,
     /**
      * The video's preview images, best first: (video, large, fresh), where fresh asks for newly

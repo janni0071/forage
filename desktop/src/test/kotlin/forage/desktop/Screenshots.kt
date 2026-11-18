@@ -131,4 +131,9 @@ fun main(args: Array<String>) {
         stateFilter = StateFilter.ALL
         selectSource(LibrarySource.History)
     }
+    shot("15-add-search") {
+        addDialogOpen = true
+        searchVideos("hand cut dovetail joint")
+        runBlocking { searchResults.take(5).forEach { thumbnails.load(it.id) } }
+    }
 }
