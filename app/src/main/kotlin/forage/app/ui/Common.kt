@@ -7,7 +7,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.IconButton
@@ -306,9 +308,8 @@ private fun BoxScope.RefusedPreview(compact: Boolean) {
 fun StateTag(state: VideoState?) {
     val c = MaterialTheme.colorScheme
     when (state) {
-        VideoState.INCLUDED -> Tag("In profile", c.primaryContainer, c.onPrimaryContainer)
-        VideoState.EXCLUDED -> Tag("Excluded", c.surfaceVariant, c.onSurfaceVariant)
-        VideoState.NEGATIVE -> Tag("Not for me", c.errorContainer, c.onErrorContainer)
+        VideoState.LIKED -> Tag("Liked", c.primaryContainer, c.onPrimaryContainer)
+        VideoState.NOT_INTERESTED -> Tag("Not interested", c.errorContainer, c.onErrorContainer)
         null -> {}
     }
 }
@@ -374,17 +375,32 @@ fun SearchField(
 fun Modifier.tapOrHold(mobile: Boolean, onTap: () -> Unit, holding: (Boolean) -> Unit): Modifier {
     if (!mobile) return clickable(onClick = onTap)
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    // The system's long press waits about half a second, which feels slow for a preview; this
+    // starts it sooner. A drag (the list scrolling) cancels it, as with a normal long press.
     return pointerInput(onTap) {
-        detectTapGestures(
-            onTap = { onTap() },
-            onLongPress = {
-                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                holding(true)
-            },
-            onPress = {
-                tryAwaitRelease()
-                holding(false)
-            },
-        )
+        awaitEachGesture {
+            awaitFirstDown()
+            var cancelled = false
+            val up = withTimeoutOrNull(HOLD_MILLIS) { waitForUpOrCancellation().also { if (it == null) cancelled = true } }
+            when {
+                up != null -> {
+                    up.consume()
+                    onTap()
+                }
+                cancelled -> {}
+                else -> {
+                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                    holding(true)
+                    try {
+                        waitForUpOrCancellation()?.consume()
+                    } finally {
+                        holding(false)
+                    }
+                }
+            }
+        }
     }
 }
+
+/** How long a finger rests on a thumbnail before its preview starts. */
+private const val HOLD_MILLIS = 250L

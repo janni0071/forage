@@ -32,6 +32,11 @@ class Settings(private val file: File?, copyOf: Settings? = null) {
         get() = properties.getProperty("thumbnails", "true").toBoolean()
         set(value) = set("thumbnails", value.toString())
 
+    /** False while the history is paused. */
+    var recordHistory: Boolean
+        get() = properties.getProperty("history.record", "true").toBoolean()
+        set(value) = set("history.record", value.toString())
+
     var libraryGrid: Boolean
         get() = properties.getProperty("library.grid", "false").toBoolean()
         set(value) = set("library.grid", value.toString())

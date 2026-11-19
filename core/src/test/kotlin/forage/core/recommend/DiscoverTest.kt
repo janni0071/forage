@@ -35,8 +35,8 @@ class DiscoverTest {
     @Test
     fun `recommends related videos of the profile and stores the batch`() {
         cache.put(details("a", related = listOf("rel1", "rel2", "seen", "rejected")))
-        profiles.mark(main, listOf(id("a"), id("unfetched")), VideoState.INCLUDED)
-        profiles.notForMe(main, id("rejected"))
+        profiles.mark(main, listOf(id("a"), id("unfetched")), VideoState.LIKED)
+        profiles.notInterested(main, id("rejected"))
         library.saveForLater(id("seen"))
 
         val result = discover.run(main)
@@ -53,7 +53,7 @@ class DiscoverTest {
     @Test
     fun `an empty or unfetched profile is reported, not recommended from`() {
         assertTrue("no videos" in assertFailsWith<EmptyProfileException> { discover.run(main) }.message!!)
-        profiles.mark(main, listOf(id("unfetched")), VideoState.INCLUDED)
+        profiles.mark(main, listOf(id("unfetched")), VideoState.LIKED)
         assertTrue("metadata" in assertFailsWith<EmptyProfileException> { discover.run(main) }.message!!)
     }
 
@@ -62,8 +62,8 @@ class DiscoverTest {
         cache.put(details("a", related = listOf("rel1")))
         cache.put(details("b", related = listOf("rel3")))
         val other = profiles.profile("Evening")
-        profiles.mark(main, listOf(id("a")), VideoState.INCLUDED)
-        profiles.mark(other, listOf(id("b")), VideoState.INCLUDED)
+        profiles.mark(main, listOf(id("a")), VideoState.LIKED)
+        profiles.mark(other, listOf(id("b")), VideoState.LIKED)
         assertEquals(listOf("rel1"), discover.run(main).picks.map { it.candidate.id.id })
         assertEquals(listOf("rel3"), discover.run(other).picks.map { it.candidate.id.id })
         assertEquals(listOf(id("rel1")), profiles.picks(main).map { it.video })

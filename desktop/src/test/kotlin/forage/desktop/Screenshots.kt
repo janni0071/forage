@@ -53,7 +53,7 @@ fun main(args: Array<String>) {
     shot("1-library-watch-later") {
         screen = Screen.LIBRARY
         selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })
-        stateFilter = StateFilter.INCLUDED
+        stateFilter = StateFilter.LIKED
         listOf(1, 3, 4).mapNotNull { visibleRows.getOrNull(it)?.id }.forEach(::toggle)
     }
     shot("2-discover") {
@@ -62,10 +62,10 @@ fun main(args: Array<String>) {
         loadTopics()
         message = null
         screen = Screen.DISCOVER
-        // Show the feedback states: pick 2 saved, pick 3 marked "more like this".
+        // Show the feedback states: pick 2 saved, pick 3 liked.
         if (picks.size >= 3 && picks[1].feedback.isEmpty()) {
             feedback(picks[1], Feedback.SAVED)
-            feedback(picks[2], Feedback.MORE)
+            feedback(picks[2], Feedback.LIKE)
         }
     }
     shot("4-later") {
@@ -89,7 +89,7 @@ fun main(args: Array<String>) {
     shot("6-library-dark", dark = true) {
         screen = Screen.LIBRARY
         selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })
-        stateFilter = StateFilter.INCLUDED
+        stateFilter = StateFilter.LIKED
         listOf(1, 3).mapNotNull { visibleRows.getOrNull(it)?.id }.forEach(::toggle)
     }
     shot("8-library-grid") {

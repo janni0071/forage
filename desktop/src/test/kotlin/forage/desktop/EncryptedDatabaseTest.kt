@@ -31,7 +31,7 @@ class EncryptedDatabaseTest {
         EncryptedDatabase(vaults, vaults.create(pin)).use { encrypted ->
             LibraryStore(encrypted.db).remember(video, "A very private title")
             val profile = ProfileStore(encrypted.db).profile("Private")
-            ProfileStore(encrypted.db).mark(profile, listOf(video), VideoState.INCLUDED)
+            ProfileStore(encrypted.db).mark(profile, listOf(video), VideoState.LIKED)
         }
         val files = dir.walkTopDown().filter { it.isFile }.toList()
         assertTrue(files.none { "very private" in it.readBytes().decodeToString(throwOnInvalidSequence = false) }, files.toString())

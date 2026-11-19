@@ -76,6 +76,38 @@ class LibraryStoreTest {
         store.removeFromWatchLater(id("x"))
         assertEquals(emptyList(), store.watchLater())
     }
+
+    @Test
+    fun `playlists can be made, filled, renamed and deleted`() {
+        store.importTakeout(takeout)
+        assertEquals(true, store.createPlaylist("Woodwork"))
+        assertEquals(false, store.createPlaylist("Woodwork"))
+        assertEquals(0L, store.playlists()["Woodwork"])
+        assertEquals(2, store.addToPlaylist("Woodwork", listOf(id("a"), id("d"))))
+        assertEquals(0, store.addToPlaylist("Woodwork", listOf(id("a"))))
+        assertEquals(false, store.renamePlaylist("Woodwork", "Watch later"))
+        assertEquals(true, store.renamePlaylist("Woodwork", "Joinery"))
+        assertEquals(listOf(id("a"), id("d")), store.events("Joinery").map { it.video })
+        store.removeFromPlaylist("Joinery", listOf(id("a")))
+        assertEquals(mapOf("Joinery" to 1L, "Watch later" to 2L), store.playlists())
+        store.deletePlaylist("Joinery")
+        assertEquals(mapOf("Watch later" to 2L), store.playlists())
+        // The videos stay in the library.
+        assertEquals("Dovetails", store.video(id("a"))?.title)
+    }
+
+    @Test
+    fun `the history records opened videos, and forgets them on request`() {
+        store.importTakeout(takeout)
+        store.recordWatch(id("e"))
+        assertEquals(setOf(id("a"), id("b"), id("e")), store.events().map { it.video }.toSet())
+        store.forget(listOf(id("a")))
+        assertEquals(setOf(id("b"), id("e")), store.events().map { it.video }.toSet())
+        store.clearHistory()
+        assertEquals(emptyList(), store.events())
+        // Playlists are not history.
+        assertEquals(2, store.events("Watch later").size)
+    }
 }
 
 class WatchLaterTest {

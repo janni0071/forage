@@ -62,15 +62,15 @@ import forage.app.AppModel
 @Composable
 fun TopicsScreen(model: AppModel) {
     Column(Modifier.fillMaxSize().padding(screenPadding())) {
-        ScreenHeader("Topics", "How your profile groups itself. Pin a topic to get picks from it in every batch; mute one to get none.") {
+        ScreenHeader("Topics", "What your likes are about. Pin a topic to get picks from it in every batch; mute one to get none.") {
             AccentButton(
-                if (model.topics.isEmpty()) "Show topics" else if (model.topicsCurrent) "Refresh" else "Refresh (profile changed)",
+                if (model.topics.isEmpty()) "Show topics" else if (model.topicsCurrent) "Refresh" else "Refresh (likes changed)",
                 Icons.Outlined.Refresh, enabled = model.job == null, onClick = model::loadTopics,
             )
         }
         if (model.topics.isEmpty()) {
             Text(
-                "Press \"Show topics\" to group your profile. This also happens with every Discover batch.",
+                "Press \"Show topics\" to group your likes. This also happens with every Discover batch.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 24.dp),
             )

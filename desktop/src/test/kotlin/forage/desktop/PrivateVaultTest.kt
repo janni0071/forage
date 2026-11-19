@@ -61,7 +61,7 @@ class PrivateVaultTest {
         assertTrue(vault.libraryEmpty)
 
         vault.library.remember(video, "A very private title")
-        vault.profiles.mark(vault.profile, listOf(video), VideoState.INCLUDED)
+        vault.profiles.mark(vault.profile, listOf(video), VideoState.LIKED)
         vault.settings.lastProfile = "Private"
         lock()
         assertNull(model.privateModel)

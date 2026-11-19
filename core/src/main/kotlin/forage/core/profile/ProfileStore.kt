@@ -5,16 +5,17 @@ import forage.core.db.ForageDatabase
 import forage.core.db.Pick as PickRow
 import java.time.Instant
 
-/** A profile's decision about a video. Videos without a decision are simply undecided. */
-enum class VideoState {
-    /** Counts towards the taste profile. */
-    INCLUDED,
+/** A profile's decision about a video. Videos without one are neither liked nor rejected. */
+enum class VideoState(val stored: String) {
+    /** Liked: part of the profile's taste, which recommendations come from. */
+    LIKED("liked"),
 
-    /** Left out of the profile and never suggested; says nothing about taste. */
-    EXCLUDED,
+    /** "Not interested": never suggested, and steers recommendations away from similar videos. */
+    NOT_INTERESTED("not_interested");
 
-    /** "Not for me": never suggested, and steers recommendations away from similar videos. */
-    NEGATIVE,
+    companion object {
+        fun of(stored: String): VideoState? = entries.firstOrNull { it.stored == stored }
+    }
 }
 
 data class ProfileRef(val id: Long, val name: String)
@@ -71,25 +72,25 @@ class ProfileStore(private val db: ForageDatabase, private val clock: () -> Inst
         queries.transaction {
             for (video in videos) {
                 if (state == null) queries.deleteProfileVideo(profile.id, video.toString())
-                else queries.upsertProfileVideo(profile.id, video.toString(), state.name.lowercase(), weight.toDouble(), source, now)
+                else queries.upsertProfileVideo(profile.id, video.toString(), state.stored, weight.toDouble(), source, now)
             }
         }
     }
 
     fun entries(profile: ProfileRef, state: VideoState? = null): List<ProfileEntry> =
         queries.selectProfileVideos(profile.id).executeAsList()
-            .map { ProfileEntry(PlatformId.parse(it.video_id), VideoState.valueOf(it.state.uppercase()), it.weight.toFloat(), it.source) }
+            .mapNotNull { row -> VideoState.of(row.state)?.let { ProfileEntry(PlatformId.parse(row.video_id), it, row.weight.toFloat(), row.source) } }
             .filter { state == null || it.state == state }
 
     // Feedback on a recommendation (SPEC, Feedback).
 
-    /** "More like this": joins the profile at reduced weight. */
-    fun moreLikeThis(profile: ProfileRef, video: PlatformId) =
-        mark(profile, listOf(video), VideoState.INCLUDED, MORE_LIKE_THIS_WEIGHT, "more_like_this")
+    /** Like on a recommendation: the same as a like anywhere else. */
+    fun like(profile: ProfileRef, video: PlatformId) =
+        mark(profile, listOf(video), VideoState.LIKED, source = DISCOVER)
 
-    /** "Not for me": becomes a negative example. */
-    fun notForMe(profile: ProfileRef, video: PlatformId) =
-        mark(profile, listOf(video), VideoState.NEGATIVE, source = "not_for_me")
+    /** "Not interested": becomes a negative example. */
+    fun notInterested(profile: ProfileRef, video: PlatformId) =
+        mark(profile, listOf(video), VideoState.NOT_INTERESTED, source = DISCOVER)
 
     /** Replaces the stored Discover batch of [profile]. */
     fun savePicks(profile: ProfileRef, picks: List<StoredPick>) {
@@ -119,6 +120,6 @@ class ProfileStore(private val db: ForageDatabase, private val clock: () -> Inst
     companion object {
         const val DEFAULT = "Default"
         const val MANUAL = "manual"
-        const val MORE_LIKE_THIS_WEIGHT = 0.5f
+        const val DISCOVER = "discover"
     }
 }

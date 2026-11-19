@@ -143,6 +143,16 @@ fun SettingsDialog(model: AppModel) {
                     )
                 }
 
+                Section("History", null)
+                SwitchRow(
+                    title = "Record history",
+                    text = "Videos you open from Forage go into the history in your library, and aren't recommended again. " +
+                        "Remove single videos or clear it all there." +
+                        (if (model.isPrivate) " This vault's history stays in the vault, encrypted." else ""),
+                    checked = model.recordHistory,
+                    onChange = model::changeRecordHistory,
+                )
+
                 if (model.offersCatalogue) {
                     Section(
                         "Catalogue",

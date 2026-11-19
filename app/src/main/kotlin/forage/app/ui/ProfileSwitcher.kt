@@ -71,7 +71,7 @@ fun ProfileSwitcher(model: AppModel) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(model.profile.name, style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                Text("${model.profileSize} videos", style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1)
+                Text("${model.profileSize} liked", style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1)
             }
             Icon(Icons.Outlined.UnfoldMore, contentDescription = "Switch profile", tint = c.onSurfaceVariant, modifier = Modifier.size(20.dp))
         }
@@ -150,7 +150,7 @@ private fun ProfileDialogs(model: AppModel) {
             title = { Text("Delete \"${model.profile.name}\"?") },
             text = {
                 Text(
-                    "Its ${model.profileSize} profile videos, topics, pins and recommendations go. " +
+                    "Its ${model.profileSize} likes, topics, pins and recommendations go. " +
                         "Your library, watch history and watch later queue are shared and stay as they are."
                 )
             },
@@ -174,7 +174,7 @@ private fun NewProfileDialog(model: AppModel) {
         text = {
             Column {
                 Text(
-                    "A profile is a separate taste: its own videos, topics and recommendations, like \"Learning\" or \"Evening\". " +
+                    "A profile is a separate taste: its own likes, topics and recommendations, like \"Learning\" or \"Evening\". " +
                         "It shares your library and watch later queue.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 16.dp),

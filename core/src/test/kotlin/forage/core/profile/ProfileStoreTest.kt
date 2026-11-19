@@ -22,10 +22,10 @@ class ProfileStoreTest {
 
     @Test
     fun `marking sets, changes and clears a video's state`() {
-        store.mark(main, listOf(id("a"), id("b")), VideoState.INCLUDED)
-        store.mark(main, listOf(id("b")), VideoState.EXCLUDED)
-        assertEquals(listOf(id("a")), store.entries(main, VideoState.INCLUDED).map { it.video })
-        assertEquals(listOf(id("b")), store.entries(main, VideoState.EXCLUDED).map { it.video })
+        store.mark(main, listOf(id("a"), id("b")), VideoState.LIKED)
+        store.mark(main, listOf(id("b")), VideoState.NOT_INTERESTED)
+        assertEquals(listOf(id("a")), store.entries(main, VideoState.LIKED).map { it.video })
+        assertEquals(listOf(id("b")), store.entries(main, VideoState.NOT_INTERESTED).map { it.video })
         store.mark(main, listOf(id("a")), null)
         assertEquals(listOf(id("b")), store.entries(main).map { it.video })
     }
@@ -33,10 +33,10 @@ class ProfileStoreTest {
     @Test
     fun `profiles never see each other's decisions`() {
         val evening = store.profile("Evening")
-        store.mark(main, listOf(id("a")), VideoState.INCLUDED)
-        store.notForMe(evening, id("a"))
-        assertEquals(VideoState.INCLUDED, store.entries(main).single().state)
-        assertEquals(VideoState.NEGATIVE, store.entries(evening).single().state)
+        store.mark(main, listOf(id("a")), VideoState.LIKED)
+        store.notInterested(evening, id("a"))
+        assertEquals(VideoState.LIKED, store.entries(main).single().state)
+        assertEquals(VideoState.NOT_INTERESTED, store.entries(evening).single().state)
     }
 
     @Test
@@ -47,11 +47,11 @@ class ProfileStoreTest {
 
     @Test
     fun `feedback maps to the states the spec describes`() {
-        store.moreLikeThis(main, id("a"))
-        store.notForMe(main, id("b"))
+        store.like(main, id("a"))
+        store.notInterested(main, id("b"))
         val entries = store.entries(main).associateBy { it.video }
-        assertEquals(ProfileEntry(id("a"), VideoState.INCLUDED, 0.5f, "more_like_this"), entries.getValue(id("a")))
-        assertEquals(VideoState.NEGATIVE, entries.getValue(id("b")).state)
+        assertEquals(ProfileEntry(id("a"), VideoState.LIKED, 1f, "discover"), entries.getValue(id("a")))
+        assertEquals(VideoState.NOT_INTERESTED, entries.getValue(id("b")).state)
     }
 
     @Test
@@ -75,8 +75,8 @@ class ProfileDeleteTest {
         val store = ProfileStore(db)
         val main = store.profile()
         val evening = store.profile("Evening")
-        store.mark(main, listOf(id("a")), VideoState.INCLUDED)
-        store.mark(evening, listOf(id("b")), VideoState.INCLUDED)
+        store.mark(main, listOf(id("a")), VideoState.LIKED)
+        store.mark(evening, listOf(id("b")), VideoState.LIKED)
         store.savePicks(evening, listOf(StoredPick(1, id("p"), "P", null, null, 0.5f, "r", "f", false)))
         LibraryStore(db).saveForLater(id("q"))
 

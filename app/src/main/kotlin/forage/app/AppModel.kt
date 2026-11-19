@@ -9,10 +9,10 @@ import forage.core.embedding.Embedder
 import forage.core.embedding.EmbeddingStore
 import forage.core.importer.TakeoutData
 import forage.core.importer.TakeoutFolder
-import forage.core.importer.WatchEvent
 import forage.core.language.LanguageDetector
 import forage.core.library.LibraryStore
 import forage.core.library.WatchHistory
+import forage.core.library.WatchedVideo
 import forage.core.metadata.FetchOutcome
 import forage.core.metadata.MetadataCache
 import forage.core.metadata.MetadataFetcher
@@ -55,24 +55,37 @@ enum class Screen { LIBRARY, TOPICS, DISCOVER, LATER }
 
 enum class ProfileDialog { NEW, DELETE, PRIVATE }
 
+/** The lists the library shows: the profile's likes, the history, each playlist, and what was turned down. */
 sealed interface LibrarySource {
     val label: String
 
-    data object History : LibrarySource { override val label = "Watch history" }
-    data object InProfile : LibrarySource { override val label = "Decided in this profile" }
-    data class Playlist(val name: String, val size: Long) : LibrarySource { override val label = "Playlist: $name" }
+    data object Liked : LibrarySource { override val label = "Liked" }
+    data object History : LibrarySource { override val label = "History" }
+    data class Playlist(val name: String, val size: Long) : LibrarySource { override val label = name }
+    data object NotInterested : LibrarySource { override val label = "Not interested" }
 }
 
+/** Narrows the history or a playlist by what the profile thinks of each video. */
 enum class StateFilter(val label: String) {
-    ALL("All"), UNDECIDED("Undecided"), INCLUDED("In profile"), EXCLUDED("Excluded"), NEGATIVE("Not for me");
+    ALL("All"), LIKED("Liked"), NEITHER("Not liked"), NOT_INTERESTED("Not interested");
 
     fun matches(state: VideoState?) = when (this) {
         ALL -> true
-        UNDECIDED -> state == null
-        INCLUDED -> state == VideoState.INCLUDED
-        EXCLUDED -> state == VideoState.EXCLUDED
-        NEGATIVE -> state == VideoState.NEGATIVE
+        LIKED -> state == VideoState.LIKED
+        NEITHER -> state == null
+        NOT_INTERESTED -> state == VideoState.NOT_INTERESTED
     }
+}
+
+enum class HistorySort(val label: String) { RECENT("Recent"), MOST_WATCHED("Most watched") }
+
+/** The library's dialogs for playlists and the history. */
+sealed interface LibraryDialog {
+    data class AddToPlaylist(val videos: List<PlatformId>) : LibraryDialog
+    data object NewPlaylist : LibraryDialog
+    data class RenamePlaylist(val name: String) : LibraryDialog
+    data class DeletePlaylist(val name: String) : LibraryDialog
+    data object ClearHistory : LibraryDialog
 }
 
 data class LibraryRow(
@@ -87,7 +100,7 @@ data class LibraryRow(
     val hasMetadata: Boolean,
 )
 
-enum class Feedback { MORE, NOT_FOR_ME, SAVED }
+enum class Feedback { LIKE, NOT_INTERESTED, SAVED }
 
 /** A video in the watch-later queue, with what the queue shows about it. */
 data class LaterItem(
@@ -273,17 +286,38 @@ class AppModel(
     }
 
     // Library
-    var sources by mutableStateOf<List<LibrarySource>>(listOf(LibrarySource.History))
+    var sources by mutableStateOf<List<LibrarySource>>(listOf(LibrarySource.Liked, LibrarySource.History))
         private set
-    var currentSource by mutableStateOf<LibrarySource>(LibrarySource.History)
+    var currentSource by mutableStateOf<LibrarySource>(LibrarySource.Liked)
         private set
     var query by mutableStateOf("")
     var stateFilter by mutableStateOf(StateFilter.ALL)
+    var historySort by mutableStateOf(HistorySort.RECENT)
+        private set
+    var libraryDialog by mutableStateOf<LibraryDialog?>(null)
+
+    /** Whether videos opened from Forage go into the history; the "Pause history" switch. */
+    var recordHistory by mutableStateOf(settings.recordHistory)
+        private set
+
+    fun changeRecordHistory(on: Boolean) {
+        settings.recordHistory = on
+        recordHistory = on
+        message = if (on) "History is on again" else "History paused: videos you open aren't recorded"
+    }
+
+    fun sortHistory(sort: HistorySort) {
+        historySort = sort
+        launchQuiet { loadRows() }
+    }
     var rows by mutableStateOf<List<LibraryRow>>(emptyList())
         private set
     var selection by mutableStateOf<Set<PlatformId>>(emptySet())
         private set
+    /** How many videos the profile likes. */
     var profileSize by mutableStateOf(0)
+        private set
+    var notInterestedSize by mutableStateOf(0)
         private set
     /** True while the vault has no videos at all, so the library can say how to start. */
     var libraryEmpty by mutableStateOf(false)
@@ -327,24 +361,32 @@ class AppModel(
     val visibleRows: List<LibraryRow>
         get() {
             val q = query.trim()
+            // The state filter only applies where states are mixed: the history and playlists.
+            val filter = if (currentSource is LibrarySource.History || currentSource is LibrarySource.Playlist) stateFilter else StateFilter.ALL
             return rows.filter { row ->
-                stateFilter.matches(row.state) && (q.isEmpty() ||
+                filter.matches(row.state) && (q.isEmpty() ||
                     row.title?.contains(q, ignoreCase = true) == true || row.channelName?.contains(q, ignoreCase = true) == true)
             }
         }
 
     /** Loads everything shown on screen. */
     suspend fun reload() = withContext(io) {
-        val playlists = library.playlists().map { (name, size) -> LibrarySource.Playlist(name, size) }
-        // Watch later first: it's the biggest list of videos chosen on purpose.
-            .sortedByDescending { it.size }
-        sources = listOf(LibrarySource.History) + playlists + LibrarySource.InProfile
-        if (currentSource !in sources) currentSource = sources.first()
+        loadSources()
         loadProfiles()
         loadRows()
         loadPicks()
         loadLater()
         if (isPrivate) describeCatalogue()
+    }
+
+    private fun loadSources() {
+        val playlists = library.playlists().map { (name, size) -> LibrarySource.Playlist(name, size) }
+        sources = listOf(LibrarySource.Liked, LibrarySource.History) + playlists + LibrarySource.NotInterested
+        if (currentSource !in sources) {
+            // A playlist whose size changed is still the same playlist.
+            val name = (currentSource as? LibrarySource.Playlist)?.name
+            currentSource = playlists.firstOrNull { it.name == name } ?: LibrarySource.Liked
+        }
     }
 
     fun selectSource(source: LibrarySource) {
@@ -364,36 +406,138 @@ class AppModel(
     /** Sets the profile state of the selected videos; null clears it. */
     fun markSelected(state: VideoState?) = mark(selection.toList(), state)
 
-    /** Sets the profile state of [ids]; null clears it. Clears the selection afterwards. */
+    /** Likes, rejects or (null) clears [ids]. Clears the selection afterwards. */
     fun mark(ids: List<PlatformId>, state: VideoState?) {
         if (ids.isEmpty()) return
         topicsCurrent = false
         launchQuiet {
             ids.forEach { library.remember(it) }
             profiles.mark(profile, ids, state)
-            message = (if (ids.size == 1) "1 video " else "${ids.size} videos ") + when (state) {
-                VideoState.INCLUDED -> "added to the profile"
-                VideoState.EXCLUDED -> "excluded"
-                VideoState.NEGATIVE -> "marked not for me"
-                null -> "cleared"
-            } + if (state == VideoState.INCLUDED || state == VideoState.NEGATIVE) needsFetchHint(ids) else ""
+            val count = if (ids.size == 1) "1 video" else "${ids.size} videos"
+            message = when (state) {
+                VideoState.LIKED -> "Liked $count"
+                VideoState.NOT_INTERESTED -> "Marked $count not interested"
+                null -> if (ids.size == 1) "Removed your choice for 1 video" else "Removed your choice for ${ids.size} videos"
+            }
             selection = emptySet()
             loadRows()
+            loadProfiles()
+            if (state != null) fetchMissingDetails(ids)
         }
     }
 
-    private fun needsFetchHint(ids: List<PlatformId>): String {
-        val missing = ids.count { cache.video(it) == null }
-        return if (missing == 0) "" else "; $missing need details before they count (Fetch details)"
+    /**
+     * A like counts right away, and its video's details follow in the background, since
+     * recommendations need them. Big selections are left to "Fetch details", which shows progress.
+     */
+    private suspend fun fetchMissingDetails(ids: List<PlatformId>) {
+        val missing = ids.filter { cache.video(it) == null }
+        if (missing.isEmpty()) return
+        if (missing.size > BACKGROUND_FETCH_LIMIT) {
+            message = "${message.orEmpty()}. ${missing.size} still need details for recommendations: use \"Fetch details\""
+            return
+        }
+        inBackground(if (missing.size == 1) "Fetching the video's details" else "Fetching details of ${missing.size} videos") {
+            val summary = MetadataFetcher(source, cache).fetchAll(missing) { _, _ -> }
+            loadRows()
+            if (summary.failed > 0) message = "Couldn't fetch details of ${summary.failed} videos; \"Fetch details\" tries again"
+        }
     }
+
+    // Playlists and the history
+
+    fun openAddToPlaylist(ids: List<PlatformId>) {
+        if (ids.isNotEmpty()) libraryDialog = LibraryDialog.AddToPlaylist(ids)
+    }
+
+    /** Adds [ids] to a playlist, making it if it's new. Returns why it couldn't, or null. */
+    fun addToPlaylist(name: String, ids: List<PlatformId>): String? {
+        val clean = playlistName(name) ?: return "Give the playlist a name"
+        libraryDialog = null
+        launchQuiet {
+            val added = library.addToPlaylist(clean, ids)
+            selection = emptySet()
+            loadSources()
+            loadRows()
+            message = when {
+                added == 0 -> "Already in \"$clean\""
+                added == 1 -> "Added 1 video to \"$clean\""
+                else -> "Added $added videos to \"$clean\""
+            }
+        }
+        return null
+    }
+
+    /** Makes an empty playlist and shows it. Returns why it couldn't, or null. */
+    fun createPlaylist(name: String): String? {
+        val clean = playlistName(name) ?: return "Give the playlist a name"
+        if (!library.createPlaylist(clean)) return "There's already a playlist called \"$clean\""
+        libraryDialog = null
+        loadSources()
+        selectSource(sources.first { it is LibrarySource.Playlist && it.name == clean })
+        message = "Made \"$clean\". Add videos to it from the history, your likes or Discover."
+        return null
+    }
+
+    fun renamePlaylist(old: String, new: String): String? {
+        val clean = playlistName(new) ?: return "Give the playlist a name"
+        if (!library.renamePlaylist(old, clean)) return "There's already a playlist called \"$clean\""
+        libraryDialog = null
+        val wasOpen = (currentSource as? LibrarySource.Playlist)?.name == old
+        loadSources()
+        if (wasOpen) currentSource = sources.first { it is LibrarySource.Playlist && it.name == clean }
+        message = "Renamed to \"$clean\""
+        return null
+    }
+
+    fun deletePlaylist(name: String) {
+        libraryDialog = null
+        launchQuiet {
+            library.deletePlaylist(name)
+            loadSources()
+            loadRows()
+            message = "Deleted \"$name\". Its videos are still in your library."
+        }
+    }
+
+    /** Takes [ids] out of the playlist on screen. */
+    fun removeFromPlaylist(ids: List<PlatformId>) {
+        val playlist = (currentSource as? LibrarySource.Playlist)?.name ?: return
+        launchQuiet {
+            library.removeFromPlaylist(playlist, ids)
+            selection = emptySet()
+            loadSources()
+            loadRows()
+            message = if (ids.size == 1) "Removed 1 video from \"$playlist\"" else "Removed ${ids.size} videos from \"$playlist\""
+        }
+    }
+
+    /** Takes [ids] out of the history. */
+    fun forget(ids: List<PlatformId>) = launchQuiet {
+        library.forget(ids)
+        selection = emptySet()
+        loadRows()
+        message = if (ids.size == 1) "Removed 1 video from the history" else "Removed ${ids.size} videos from the history"
+    }
+
+    fun clearHistory() {
+        libraryDialog = null
+        launchQuiet {
+            library.clearHistory()
+            loadRows()
+            message = "Cleared the history. Your likes, playlists and watch later are unchanged."
+        }
+    }
+
+    private fun playlistName(name: String) = name.trim().take(MAX_PLAYLIST_NAME).takeIf { it.isNotEmpty() }
 
     /** Fetches metadata for the selection, or for every undecided-but-relevant profile video when nothing is selected. */
     fun fetchDetails() {
         val ids = selection.toList().ifEmpty {
-            profiles.entries(profile).filter { it.state != VideoState.EXCLUDED }.map { it.video }.filter { cache.video(it) == null }
+            profiles.entries(profile).map { it.video }.filter { cache.video(it) == null }
         }
         if (ids.isEmpty()) {
-            message = "Every profile video already has its details"
+            message = "Every video you liked or turned down already has its details"
             return
         }
         runJob("Fetching details from ${source.displayName}", ids.size) { update ->
@@ -430,7 +574,7 @@ class AppModel(
         val summary = library.importTakeout(read())
         reload()
         "Imported ${summary.watchEvents} watch events, ${summary.playlists.size} playlists and " +
-            "${summary.subscriptions} subscriptions. Nothing was added to the profile."
+            "${summary.subscriptions} subscriptions. Nothing was liked; that's up to you."
     }
 
     // Profiles
@@ -463,7 +607,7 @@ class AppModel(
         val created = profiles.profile(clean)
         profileDialog = null
         switchProfile(created)
-        message = "Created \"$clean\". Add videos to it in the library."
+        message = "Created \"$clean\". Like videos to give it a taste."
         return null
     }
 
@@ -481,7 +625,7 @@ class AppModel(
     }
 
     private fun loadProfiles() {
-        profileList = profiles.profiles().map { it to profiles.entries(it, VideoState.INCLUDED).size }
+        profileList = profiles.profiles().map { it to profiles.entries(it, VideoState.LIKED).size }
     }
 
     /** The platforms links can be added from in this vault, for the add dialog. */
@@ -489,7 +633,7 @@ class AppModel(
 
     /**
      * Adds videos by their links (SPEC, Manual add), one or several separated by spaces or lines:
-     * fetches their details and puts them in the profile. Returns why the text wasn't accepted, or null.
+     * fetches their details and likes them. Returns why the text wasn't accepted, or null.
      */
     fun addByLink(text: String): String? {
         val words = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
@@ -520,16 +664,17 @@ class AppModel(
             }
             // Videos the fetch never reached (it stops after repeated failures) still go in, without details.
             found.filter { it !in reached }.forEach { library.remember(it, null, null, null, false, null, null); missing++ }
-            profiles.mark(profile, found, VideoState.INCLUDED)
+            profiles.mark(profile, found, VideoState.LIKED)
             topicsCurrent = false
             // Show them where they now are.
-            currentSource = LibrarySource.InProfile
+            currentSource = LibrarySource.Liked
             loadRows()
+            loadProfiles()
             when {
-                found.size == 1 && titles.size == 1 -> "Added \"${titles.single()}\" to the profile"
-                found.size == 1 -> "Added the video; its details couldn't be fetched yet (Fetch profile details)"
-                missing == 0 -> "Added ${found.size} videos to the profile"
-                else -> "Added ${found.size} videos; $missing still need details (Fetch profile details)"
+                found.size == 1 && titles.size == 1 -> "Liked \"${titles.single()}\""
+                found.size == 1 -> "Liked the video; its details couldn't be fetched yet (Fetch details)"
+                missing == 0 -> "Liked ${found.size} videos"
+                else -> "Liked ${found.size} videos; $missing still need details (Fetch details)"
             }
         }
         return null
@@ -689,8 +834,8 @@ class AppModel(
         private set
     var searchProblem by mutableStateOf<String?>(null)
         private set
-    /** Videos from the results that are in the profile, added just now or before. */
-    var searchInProfile by mutableStateOf<Set<PlatformId>>(emptySet())
+    /** Videos from the results the profile likes, from just now or before. */
+    var searchLiked by mutableStateOf<Set<PlatformId>>(emptySet())
         private set
     private var searchJob: CoroutineJob? = null
 
@@ -705,10 +850,10 @@ class AppModel(
         searchJob = ownScope.launch {
             try {
                 val (results, included) = withContext(io) {
-                    target.search(q) to profiles.entries(profile, VideoState.INCLUDED).mapTo(HashSet()) { it.video }
+                    target.search(q) to profiles.entries(profile, VideoState.LIKED).mapTo(HashSet()) { it.video }
                 }
                 searchResults = results.filter { settings.showShorts || !it.isShort }
-                searchInProfile = included
+                searchLiked = included
                 if (results.isEmpty()) searchProblem = "Nothing found for \"$q\""
             } catch (e: CancellationException) {
                 throw e
@@ -722,25 +867,27 @@ class AppModel(
         }
     }
 
-    /** Puts a search result into the profile, then fetches its details in the background so it counts. */
-    fun addFromSearch(stub: VideoStub) {
-        if (stub.id in searchInProfile) return
-        searchInProfile = searchInProfile + stub.id
+    /** Likes a search result, or takes the like back; its details follow in the background. */
+    fun likeFromSearch(stub: VideoStub) {
+        if (stub.id in searchLiked) {
+            searchLiked = searchLiked - stub.id
+            launchQuiet {
+                profiles.mark(profile, listOf(stub.id), null)
+                topicsCurrent = false
+                loadRows()
+                loadProfiles()
+            }
+            return
+        }
+        searchLiked = searchLiked + stub.id
         launchQuiet {
             library.remember(stub.id, stub.title, stub.channel, stub.channelName, stub.isShort, stub.durationSeconds, stub.uploadedAt)
-            profiles.mark(profile, listOf(stub.id), VideoState.INCLUDED)
+            profiles.mark(profile, listOf(stub.id), VideoState.LIKED)
             topicsCurrent = false
             loadRows()
-            message = "Added \"${stub.title}\" to the profile"
-            if (cache.video(stub.id) == null) {
-                inBackground("Fetching details of \"${stub.title}\"") {
-                    val outcome = MetadataFetcher(source, cache).fetch(stub.id)
-                    loadRows()
-                    if (outcome is FetchOutcome.Failed) {
-                        message = "Couldn't fetch details of \"${stub.title}\"; it will count after the next \"Fetch profile details\""
-                    }
-                }
-            }
+            loadProfiles()
+            message = "Liked \"${stub.title}\""
+            fetchMissingDetails(listOf(stub.id))
         }
     }
 
@@ -764,18 +911,18 @@ class AppModel(
 
     /** Groups the profile into topics without running a whole Discover. */
     fun loadTopics() {
-        val included = profiles.entries(profile, VideoState.INCLUDED).map { it.video }
-        if (included.none { cache.video(it) != null }) {
-            message = "Add videos to the profile and fetch their details to see its topics"
+        val liked = profiles.entries(profile, VideoState.LIKED).map { it.video }
+        if (liked.none { cache.video(it) != null }) {
+            message = "Like a few videos to see the topics they fall into"
             return
         }
-        runJob("Grouping your profile into topics") { update ->
+        runJob("Grouping your likes into topics") { update ->
             update("Loading the models")
             val embedder = embedder(update)
             update("Grouping")
             topics = discoverer(embedder).topics(profile)
             topicsCurrent = true
-            "Your profile has ${topics.count { !it.isVaried }} topics"
+            "Your likes fall into ${topics.count { !it.isVaried }} topics"
         }
     }
 
@@ -809,10 +956,10 @@ class AppModel(
 
     fun discover() {
         // Check before loading models: that takes seconds, and a download on first use.
-        val included = profiles.entries(profile, VideoState.INCLUDED).map { it.video }
-        if (included.none { cache.video(it) != null }) {
-            message = if (included.isEmpty()) "The profile has no videos yet. Add some in the library first."
-            else "None of the ${included.size} profile videos have details yet. Use \"Fetch profile details\" in the library."
+        val liked = profiles.entries(profile, VideoState.LIKED).map { it.video }
+        if (liked.none { cache.video(it) != null }) {
+            message = if (liked.isEmpty()) "Nothing liked yet. Like a few videos in the library or from a search first."
+            else "None of the ${liked.size} videos you like have details yet. Use \"Fetch details\" in the library."
             return
         }
         runDiscover()
@@ -830,14 +977,14 @@ class AppModel(
             discoverNote = buildList {
                 add("${result.picks.size} picks from ${result.candidates} candidates in %.0f s".format(seconds))
                 if (result.foreignLanguage > 0) add("${result.foreignLanguage} dropped for their language")
-                if (result.withoutMetadata > 0) add("${result.withoutMetadata} profile videos still need details")
+                if (result.withoutMetadata > 0) add("${result.withoutMetadata} liked videos still need details")
                 if (result.fromCatalogue > 0) add("${result.fromCatalogue} from the catalogue")
                 if (result.searchFailures.isNotEmpty()) add("${result.searchFailures.size} searches failed")
             }.joinToString(" · ")
             loadPicks()
             "Found ${result.picks.size} recommendations"
         } catch (e: EmptyProfileException) {
-            "${e.message}. Add videos in the library, then fetch their details."
+            "${e.message}. Like a few videos, then fetch their details."
         }
     }
 
@@ -849,21 +996,15 @@ class AppModel(
         )
         val active = kind in view.feedback
         when (kind) {
-            Feedback.MORE -> if (active) profiles.mark(profile, listOf(id), null) else profiles.moreLikeThis(profile, id)
-            Feedback.NOT_FOR_ME -> if (active) profiles.mark(profile, listOf(id), null) else profiles.notForMe(profile, id)
+            Feedback.LIKE -> if (active) profiles.mark(profile, listOf(id), null) else profiles.like(profile, id)
+            Feedback.NOT_INTERESTED -> if (active) profiles.mark(profile, listOf(id), null) else profiles.notInterested(profile, id)
             Feedback.SAVED -> if (active) library.removeFromWatchLater(id) else library.saveForLater(id)
         }
+        if (kind != Feedback.SAVED) topicsCurrent = false
         loadPicks()
         loadLater()
-        // Profile feedback only counts once the video has metadata; fetch it in the background.
-        if (!active && kind != Feedback.SAVED && cache.video(id) == null) {
-            inBackground("Fetching details of \"${view.pick.title}\" so your feedback counts") {
-                val outcome = MetadataFetcher(source, cache).fetch(id)
-                if (outcome is FetchOutcome.Failed) {
-                    message = "Couldn't fetch details of \"${view.pick.title}\"; it will count after the next \"Fetch profile details\""
-                }
-            }
-        }
+        loadProfiles()
+        if (!active && kind != Feedback.SAVED) fetchMissingDetails(listOf(id))
     }
 
     // Watch later
@@ -882,30 +1023,44 @@ class AppModel(
         message = "Marked \"${item.title ?: item.id}\" as watched"
     }
 
+    /** Hands the video to the player, and notes it in the history unless that's paused. */
     fun open(id: PlatformId) {
         try {
             platform.openVideo(id, source.watchUrl(id), player, storage.playerLog) { problem -> message = problem }
         } catch (e: Exception) {
             message = e.message
+            return
+        }
+        if (recordHistory) launchQuiet {
+            library.recordWatch(id)
+            if (currentSource == LibrarySource.History) loadRows()
         }
     }
 
     // Loading
 
     private fun loadRows() {
-        val states = profiles.entries(profile).associate { it.video to it.state }
+        val entries = profiles.entries(profile)
+        val states = entries.associate { it.video to it.state }
         libraryEmpty = library.counts().first == 0L && states.isEmpty()
-        profileSize = states.values.count { it == VideoState.INCLUDED }
-        val events: List<WatchEvent> = when (val s = currentSource) {
-            LibrarySource.History -> library.events()
-            is LibrarySource.Playlist -> library.events(s.name)
-            LibrarySource.InProfile -> {
-                val seen = library.firstSeen()
-                states.keys.map { WatchEvent(it, null, null, null, seen[it]) }
+        profileSize = states.values.count { it == VideoState.LIKED }
+        notInterestedSize = states.values.count { it == VideoState.NOT_INTERESTED }
+        val videos: List<WatchedVideo> = when (val s = currentSource) {
+            LibrarySource.History -> WatchHistory.select(library.events()).let { watched ->
+                if (historySort == HistorySort.RECENT) watched.sortedByDescending { it.lastWatched ?: Instant.MIN } else watched
+            }
+            is LibrarySource.Playlist -> WatchHistory.select(library.events(s.name))
+            LibrarySource.Liked, LibrarySource.NotInterested -> {
+                val wanted = if (s == LibrarySource.Liked) VideoState.LIKED else VideoState.NOT_INTERESTED
+                val watched = WatchHistory.select(library.events()).associateBy { it.video }
+                // Most recent decision first; entries come oldest first.
+                entries.filter { it.state == wanted }.asReversed().map { e ->
+                    watched[e.video] ?: WatchedVideo(e.video, null, null, null, 0, null, null, false)
+                }
             }
         }
         val meta = cache.allMetadata()
-        rows = WatchHistory.select(events).map { v ->
+        rows = videos.map { v ->
             val m = meta[v.video]
             val known = if (m == null && (v.title == null || v.channelName == null)) library.video(v.video) else null
             LibraryRow(
@@ -930,8 +1085,8 @@ class AppModel(
         val saved = library.watchLater().toSet()
         picks = profiles.picks(profile).map { p ->
             PickView(p, buildSet {
-                if (states[p.video] == VideoState.INCLUDED) add(Feedback.MORE)
-                if (states[p.video] == VideoState.NEGATIVE) add(Feedback.NOT_FOR_ME)
+                if (states[p.video] == VideoState.LIKED) add(Feedback.LIKE)
+                if (states[p.video] == VideoState.NOT_INTERESTED) add(Feedback.NOT_INTERESTED)
                 if (p.video in saved) add(Feedback.SAVED)
             })
         }
@@ -1093,6 +1248,9 @@ class AppModel(
     }
 
     private companion object {
+        /** Likes beyond this many videos without details wait for "Fetch details". */
+        const val BACKGROUND_FETCH_LIMIT = 30
+        const val MAX_PLAYLIST_NAME = 60
         const val OUT_OF_MEMORY = "Not enough memory on this device to import the dump. Import it on a computer instead, " +
             "then copy catalogues/pornhub.db from its Forage folder here and choose it in Settings."
     }

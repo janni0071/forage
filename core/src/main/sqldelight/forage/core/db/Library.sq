@@ -3,8 +3,9 @@
 --
 -- library_video    what an import or the user told us about a video, before any metadata fetch
 -- watch_event      watching alone never changes a profile (SPEC: curated, not tracked)
--- playlist_item    imported playlists, kept to know what is already saved
--- profile_video    a profile's decision about a video; no row means undecided
+-- playlist         the vault's playlists, imported or made in Forage
+-- playlist_item    the videos in each playlist
+-- profile_video    a profile's like or "not interested"; no row means neither
 -- pick             the latest Discover batch per profile, so feedback can refer to it
 
 CREATE TABLE library_video (
@@ -22,6 +23,11 @@ CREATE TABLE watch_event (
     video_id TEXT NOT NULL,
     watched_at INTEGER NOT NULL,     -- 0 when the import carried no time
     PRIMARY KEY (video_id, watched_at)
+);
+
+CREATE TABLE playlist (
+    name TEXT NOT NULL PRIMARY KEY,
+    created_at INTEGER NOT NULL
 );
 
 CREATE TABLE playlist_item (
@@ -51,9 +57,9 @@ CREATE TABLE profile (
 CREATE TABLE profile_video (
     profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
     video_id TEXT NOT NULL,
-    state TEXT NOT NULL,             -- included, excluded or negative
+    state TEXT NOT NULL,             -- liked or not_interested
     weight REAL NOT NULL DEFAULT 1,
-    source TEXT NOT NULL,            -- manual, more_like_this, not_for_me
+    source TEXT NOT NULL,            -- manual, more_like_this, not_for_me, discover
     changed_at INTEGER NOT NULL,
     PRIMARY KEY (profile_id, video_id)
 );
@@ -108,6 +114,12 @@ SELECT * FROM watch_event;
 countWatchEvents:
 SELECT count(*) FROM watch_event;
 
+deleteWatchEventsOfVideo:
+DELETE FROM watch_event WHERE video_id = ?;
+
+deleteWatchEvents:
+DELETE FROM watch_event;
+
 upsertPlaylistItem:
 INSERT OR REPLACE INTO playlist_item VALUES (?, ?, ?);
 
@@ -115,7 +127,30 @@ selectPlaylistItems:
 SELECT * FROM playlist_item WHERE playlist = ?;
 
 selectPlaylists:
-SELECT playlist, count(*) AS videos FROM playlist_item GROUP BY playlist ORDER BY playlist;
+SELECT p.name, count(i.video_id) AS videos
+FROM playlist p LEFT JOIN playlist_item i ON i.playlist = p.name
+GROUP BY p.name ORDER BY p.created_at DESC, p.name;
+
+insertPlaylist:
+INSERT OR IGNORE INTO playlist (name, created_at) VALUES (?, ?);
+
+renamePlaylist:
+UPDATE playlist SET name = :new WHERE name = :old;
+
+renamePlaylistItems:
+UPDATE playlist_item SET playlist = :new WHERE playlist = :old;
+
+deletePlaylist:
+DELETE FROM playlist WHERE name = ?;
+
+deletePlaylistItems:
+DELETE FROM playlist_item WHERE playlist = ?;
+
+deletePlaylistItem:
+DELETE FROM playlist_item WHERE playlist = ? AND video_id = ?;
+
+insertPlaylistItem:
+INSERT OR IGNORE INTO playlist_item VALUES (?, ?, ?);
 
 insertSubscription:
 INSERT OR IGNORE INTO subscription (channel_id, added_at) VALUES (?, ?);

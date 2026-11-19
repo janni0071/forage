@@ -84,7 +84,7 @@ fun DiscoverScreen(model: AppModel) {
             if (!compact || model.picks.isEmpty()) header()
             if (model.picks.isEmpty()) {
                 Text(
-                    "No recommendations yet. Add videos to your profile in the library, fetch their details, " +
+                    "No recommendations yet. Like a few videos in the library or from a search, " +
                         "then press \"Find recommendations\". Nothing is ever recommended unless you ask.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 24.dp),
@@ -127,7 +127,7 @@ private fun Header(model: AppModel) {
     var shorts by remember { mutableStateOf(model.settings.showShorts) }
     ScreenHeader(
         "Discover",
-        model.discoverNote ?: if (model.picks.isEmpty()) "Recommendations from your profile, only when you ask"
+        model.discoverNote ?: if (model.picks.isEmpty()) "Recommendations from what you like, only when you ask"
         else "${model.picks.size} picks in the last batch",
     ) {
         ToggleChip(if (model.isPrivate) "Search online" else "Search YouTube", search) { search = it; model.settings.searchYouTube = it }
@@ -172,7 +172,7 @@ private fun TopicStrip(model: AppModel) {
 @Composable
 private fun PickCard(model: AppModel, view: PickView) {
     val pick = view.pick
-    val rejected = Feedback.NOT_FOR_ME in view.feedback
+    val rejected = Feedback.NOT_INTERESTED in view.feedback
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     val zoom by animateFloatAsState(if (hovered && !rejected) 1.05f else 1f)
@@ -198,7 +198,7 @@ private fun PickCard(model: AppModel, view: PickView) {
             Row(Modifier.align(Alignment.TopStart).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (pick.exploration) Badge("Exploration", background = MaterialTheme.colorScheme.tertiary, content = MaterialTheme.colorScheme.onTertiary)
                 if (Feedback.SAVED in view.feedback) Badge("Saved", background = Accent.pastelPink, content = MaterialTheme.colorScheme.onPrimaryContainer)
-                if (Feedback.MORE in view.feedback) Badge("More like this", background = Accent.pastelPink, content = MaterialTheme.colorScheme.onPrimaryContainer)
+                if (Feedback.LIKE in view.feedback) Badge("Liked", background = Accent.pastelPink, content = MaterialTheme.colorScheme.onPrimaryContainer)
             }
         }
 
@@ -246,8 +246,8 @@ private fun PickCard(model: AppModel, view: PickView) {
         }
         // Wraps to a second line on narrow cards rather than squeezing a button.
         FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Action(Icons.Outlined.ThumbUp, "More like this", Feedback.MORE in view.feedback) { model.feedback(view, Feedback.MORE) }
-            Action(Icons.Outlined.Block, "Not for me", rejected) { model.feedback(view, Feedback.NOT_FOR_ME) }
+            Action(Icons.Outlined.ThumbUp, "Like", Feedback.LIKE in view.feedback) { model.feedback(view, Feedback.LIKE) }
+            Action(Icons.Outlined.Block, "Not interested", rejected) { model.feedback(view, Feedback.NOT_INTERESTED) }
             val saved = Feedback.SAVED in view.feedback
             // A bookmark alone reads as "save" and keeps the three on one line.
             Tooltip(tooltip = { Hint(if (saved) "Saved for later; click to remove" else "Save for later") }, delayMillis = 300) {

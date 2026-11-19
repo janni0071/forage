@@ -40,6 +40,7 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
                 queries.insertWatchEvent(e.video.toString(), e.watchedAt?.epochSecond ?: 0)
             }
             for ((playlist, entries) in data.playlists) {
+                queries.insertPlaylist(playlist, entries.mapNotNull { it.addedAt?.epochSecond }.minOrNull() ?: now)
                 for (entry in entries) {
                     remember(entry.video)
                     queries.upsertPlaylistItem(playlist, entry.video.toString(), entry.addedAt?.epochSecond)
@@ -96,8 +97,68 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
         else queries.selectPlaylistItems(playlist).executeAsList().map { event(it.video_id, it.added_at) }
     }
 
-    /** Playlist names with their number of videos. */
-    fun playlists(): Map<String, Long> = queries.selectPlaylists().executeAsList().associate { it.playlist to it.videos }
+    /** Playlist names with their number of videos, the newest playlist first. */
+    fun playlists(): Map<String, Long> = queries.selectPlaylists().executeAsList().associate { it.name to it.videos }
+
+    /** Makes an empty playlist; false when one by that name exists already. */
+    fun createPlaylist(name: String): Boolean {
+        if (name in playlists()) return false
+        queries.insertPlaylist(name, clock().epochSecond)
+        return true
+    }
+
+    /** Renames a playlist; false when [new] is taken. */
+    fun renamePlaylist(old: String, new: String): Boolean {
+        if (old == new) return true
+        if (new in playlists()) return false
+        queries.transaction {
+            queries.renamePlaylist(new, old)
+            queries.renamePlaylistItems(new, old)
+        }
+        return true
+    }
+
+    /** Deletes a playlist. Its videos stay in the library and keep their likes. */
+    fun deletePlaylist(name: String) = queries.transaction {
+        queries.deletePlaylistItems(name)
+        queries.deletePlaylist(name)
+    }
+
+    /** Adds videos to a playlist, creating it if needed. Returns how many weren't in it yet. */
+    fun addToPlaylist(name: String, videos: Collection<PlatformId>): Int {
+        val now = clock().epochSecond
+        var added = 0
+        queries.transaction {
+            queries.insertPlaylist(name, now)
+            val present = queries.selectPlaylistItems(name).executeAsList().mapTo(HashSet()) { it.video_id }
+            for (v in videos) {
+                remember(v)
+                if (v.toString() !in present) added++
+                queries.insertPlaylistItem(name, v.toString(), now)
+            }
+        }
+        return added
+    }
+
+    fun removeFromPlaylist(name: String, videos: Collection<PlatformId>) = queries.transaction {
+        videos.forEach { queries.deletePlaylistItem(name, it.toString()) }
+    }
+
+    /** Records that a video was opened from Forage, for the history. */
+    fun recordWatch(id: PlatformId) {
+        queries.transaction {
+            remember(id)
+            queries.insertWatchEvent(id.toString(), clock().epochSecond)
+        }
+    }
+
+    /** Takes videos out of the history. They may be recommended again afterwards. */
+    fun forget(videos: Collection<PlatformId>) = queries.transaction {
+        videos.forEach { queries.deleteWatchEventsOfVideo(it.toString()) }
+    }
+
+    /** Empties the history, imported entries included. */
+    fun clearHistory() = queries.deleteWatchEvents()
 
     /** When each video was first watched or saved, where the import said so. */
     fun firstSeen(): Map<PlatformId, Instant> {

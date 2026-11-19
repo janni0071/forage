@@ -78,13 +78,25 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import forage.core.profile.VideoState
 import forage.app.AppModel
+import forage.app.HistorySort
+import forage.app.LibraryDialog
 import forage.app.LibraryRow
 import forage.app.LibrarySource
 import forage.app.StateFilter
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
+import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.ThumbUp
+import androidx.compose.material3.AlertDialog
 
 @Composable
 fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
     if (model.addDialogOpen) AddVideosDialog(model)
+    LibraryDialogs(model)
     if (model.libraryEmpty) {
         EmptyLibrary(model, onImport)
         return
@@ -101,9 +113,9 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
                 Column {
                     if (compact) header()
                     Text(
-                        "Nothing here matches. Try another filter or source.",
+                        emptyListText(model),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 24.dp),
+                        modifier = Modifier.padding(top = 24.dp).widthIn(max = 640.dp),
                     )
                 }
             } else if (model.libraryGrid) {
@@ -134,12 +146,24 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
     }
 }
 
+/** What an empty list says, depending on why it's empty. */
+private fun emptyListText(model: AppModel): String = when {
+    model.rows.isNotEmpty() -> "Nothing here matches. Try another filter or search."
+    model.currentSource == LibrarySource.Liked ->
+        "Nothing liked yet. Like videos from your history, a playlist or a search: recommendations come from what you like."
+    model.currentSource == LibrarySource.History ->
+        if (model.recordHistory) "Your history is empty. Videos you open from Forage show up here."
+        else "Your history is empty, and paused: videos you open aren't recorded."
+    model.currentSource == LibrarySource.NotInterested -> "Nothing turned down. Videos you mark \"Not interested\" show up here."
+    else -> "This playlist is empty. Select videos in your history or likes and choose \"Add to playlist\"."
+}
+
 /** Title, search, buttons, sources, filters and the selection bar. */
 @Composable
 private fun LibraryHeader(model: AppModel, visibleCount: Int) {
     val compact = LocalCompact.current
     Column {
-        ScreenHeader("Library", "Choose what shapes your profile") {
+        ScreenHeader("Library", "Your likes, history and playlists") {
             if (compact) {
                 // A phone: search, the view switch and adding share one row; fetching gets the next.
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -163,15 +187,24 @@ private fun LibraryHeader(model: AppModel, visibleCount: Int) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     when {
-                        compact -> "Fetch details"
-                        model.selection.isEmpty() -> "Fetch profile details"
+                        compact || model.selection.isEmpty() -> "Fetch details"
                         else -> "Fetch details of selection"
                     }
                 )
             }
         }
         SourceTabs(model)
-        Filters(model)
+        when (val source = model.currentSource) {
+            LibrarySource.History -> {
+                HistoryTools(model)
+                Filters(model)
+            }
+            is LibrarySource.Playlist -> {
+                PlaylistTools(model, source.name)
+                Filters(model)
+            }
+            else -> {}
+        }
         ActionBar(model, visibleCount)
     }
 }
@@ -198,11 +231,11 @@ private fun EmptyLibrary(model: AppModel, onImport: () -> Unit) {
         )
         Text(
             if (model.isPrivate) {
-                "Add videos by their link. They go into this vault's profile and stay here, encrypted, " +
+                "Search or add videos by their link and like them. They stay here, encrypted, " +
                     "apart from everything else in Forage."
             } else {
-                "Import a Google Takeout export of your YouTube data, or search for videos and add them. " +
-                    "Imported videos land in the library as watched; nothing enters your profile until you choose it."
+                "Import a Google Takeout export of your YouTube data, or search for videos and like them. " +
+                    "Imported videos land in your history and playlists; recommendations come only from what you like."
             },
             style = MaterialTheme.typography.bodyLarge,
             color = c.onSurfaceVariant,
@@ -245,7 +278,7 @@ private fun ViewToggle(model: AppModel) {
     }
 }
 
-/** Where the videos come from: the watch history, each imported playlist, or this profile's decisions. */
+/** The library's lists: likes, the history, each playlist, what was turned down, and a new playlist. */
 @Composable
 private fun SourceTabs(model: AppModel) {
     val c = MaterialTheme.colorScheme
@@ -256,9 +289,10 @@ private fun SourceTabs(model: AppModel) {
         for (source in model.sources) {
             val selected = source == model.currentSource
             val (name, count) = when (source) {
-                LibrarySource.History -> "Watch history" to null
-                LibrarySource.InProfile -> "Decided in this profile" to null
+                LibrarySource.Liked -> "Liked" to model.profileSize.toLong()
+                LibrarySource.History -> "History" to null
                 is LibrarySource.Playlist -> source.name to source.size
+                LibrarySource.NotInterested -> "Not interested" to model.notInterestedSize.toLong()
             }
             Row(
                 Modifier
@@ -281,7 +315,165 @@ private fun SourceTabs(model: AppModel) {
                 }
             }
         }
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .border(1.dp, c.outlineVariant, RoundedCornerShape(12.dp))
+                .clickable { model.libraryDialog = LibraryDialog.NewPlaylist }
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.Add, contentDescription = null, tint = c.onSurfaceVariant, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("New playlist", style = MaterialTheme.typography.labelLarge, color = c.onSurface)
+        }
     }
+}
+
+/** Sorting, pausing and clearing the history. */
+@Composable
+private fun HistoryTools(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        for (sort in HistorySort.entries) {
+            FilterChip(
+                selected = model.historySort == sort,
+                onClick = { model.sortHistory(sort) },
+                label = { Text(sort.label, maxLines = 1) },
+                shape = RoundedCornerShape(10.dp),
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        if (model.recordHistory) {
+            BarButton(Icons.Outlined.Pause, "Pause history") { model.changeRecordHistory(false) }
+        } else {
+            Text("Paused", style = MaterialTheme.typography.labelLarge, color = c.error)
+            BarButton(Icons.Filled.PlayArrow, "Resume") { model.changeRecordHistory(true) }
+        }
+        BarButton(Icons.Outlined.DeleteOutline, "Clear history") { model.libraryDialog = LibraryDialog.ClearHistory }
+    }
+}
+
+@Composable
+private fun PlaylistTools(model: AppModel, name: String) {
+    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        BarButton(Icons.Outlined.Edit, "Rename") { model.libraryDialog = LibraryDialog.RenamePlaylist(name) }
+        BarButton(Icons.Outlined.DeleteOutline, "Delete playlist") { model.libraryDialog = LibraryDialog.DeletePlaylist(name) }
+    }
+}
+
+/** The library's dialogs: adding to a playlist, making, renaming and deleting one, and clearing the history. */
+@Composable
+private fun LibraryDialogs(model: AppModel) {
+    when (val dialog = model.libraryDialog) {
+        null -> {}
+        is LibraryDialog.AddToPlaylist -> AddToPlaylistDialog(model, dialog.videos)
+        LibraryDialog.NewPlaylist -> NameDialog(
+            title = "New playlist", initial = "", confirm = "Make playlist",
+            onDismiss = { model.libraryDialog = null }, onConfirm = model::createPlaylist,
+        )
+        is LibraryDialog.RenamePlaylist -> NameDialog(
+            title = "Rename \"${dialog.name}\"", initial = dialog.name, confirm = "Rename",
+            onDismiss = { model.libraryDialog = null }, onConfirm = { model.renamePlaylist(dialog.name, it) },
+        )
+        is LibraryDialog.DeletePlaylist -> AlertDialog(
+            onDismissRequest = { model.libraryDialog = null },
+            title = { Text("Delete \"${dialog.name}\"?") },
+            text = { Text("The playlist goes; its videos stay in your library, with their likes.") },
+            confirmButton = { TextButton(onClick = { model.deletePlaylist(dialog.name) }) { Text("Delete playlist", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { model.libraryDialog = null }) { Text("Keep it") } },
+        )
+        LibraryDialog.ClearHistory -> AlertDialog(
+            onDismissRequest = { model.libraryDialog = null },
+            title = { Text("Clear the whole history?") },
+            text = {
+                Text(
+                    "Every video in it goes, imported ones included, and they may be recommended again. " +
+                        "Your likes, playlists and watch later stay as they are."
+                )
+            },
+            confirmButton = { TextButton(onClick = model::clearHistory) { Text("Clear history", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { model.libraryDialog = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** Asks for a name; [onConfirm] returns why it isn't accepted, or null. */
+@Composable
+private fun NameDialog(title: String, initial: String, confirm: String, onDismiss: () -> Unit, onConfirm: (String) -> String?) {
+    var name by remember { mutableStateOf(initial) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                name, { name = it; problem = null },
+                singleLine = true,
+                label = { Text("Name") },
+                isError = problem != null,
+                supportingText = problem?.let { { Text(it) } },
+                shape = RoundedCornerShape(12.dp),
+            )
+        },
+        confirmButton = { TextButton(onClick = { problem = onConfirm(name) }) { Text(confirm) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Picks a playlist for [videos], or names a new one. */
+@Composable
+private fun AddToPlaylistDialog(model: AppModel, videos: List<forage.core.PlatformId>) {
+    val c = MaterialTheme.colorScheme
+    var name by remember { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+    val playlists = model.sources.filterIsInstance<LibrarySource.Playlist>()
+    AlertDialog(
+        onDismissRequest = { model.libraryDialog = null },
+        title = { Text(if (videos.size == 1) "Add to a playlist" else "Add ${videos.size} videos to a playlist") },
+        text = {
+            Column(Modifier.widthIn(min = 280.dp)) {
+                LazyColumn(Modifier.heightIn(max = 280.dp)) {
+                    items(playlists, key = { it.name }) { p ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { model.addToPlaylist(p.name, videos) }
+                                .pointerHoverIcon(PointerIcon.Hand)
+                                .padding(horizontal = 8.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.AutoMirrored.Outlined.PlaylistPlay, contentDescription = null, tint = c.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text(p.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text("%,d".format(p.size), style = MaterialTheme.typography.labelMedium, color = c.onSurfaceVariant)
+                        }
+                    }
+                }
+                Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        name, { name = it; problem = null },
+                        singleLine = true,
+                        placeholder = { Text("New playlist") },
+                        isError = problem != null,
+                        supportingText = problem?.let { { Text(it) } },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { problem = model.addToPlaylist(name, videos) }, enabled = name.isNotBlank()) { Text("Make and add") }
+        },
+        dismissButton = { TextButton(onClick = { model.libraryDialog = null }) { Text("Cancel") } },
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -318,10 +510,22 @@ private fun ActionBar(model: AppModel, visibleCount: Int) {
     val c = MaterialTheme.colorScheme
     val compact = LocalCompact.current
     val actions: @Composable () -> Unit = {
-        AccentButton(if (compact) "Add" else "Add to profile", Icons.Outlined.Add) { model.markSelected(VideoState.INCLUDED) }
-        BarButton(Icons.Outlined.RemoveCircleOutline, "Exclude") { model.markSelected(VideoState.EXCLUDED) }
-        BarButton(Icons.Outlined.Block, "Not for me") { model.markSelected(VideoState.NEGATIVE) }
-        BarButton(Icons.AutoMirrored.Outlined.Undo, "Clear") { model.markSelected(null) }
+        val ids = model.selection.toList()
+        if (model.currentSource != LibrarySource.Liked) AccentButton("Like", Icons.Outlined.ThumbUp) { model.markSelected(VideoState.LIKED) }
+        if (model.currentSource != LibrarySource.NotInterested) BarButton(Icons.Outlined.Block, "Not interested") { model.markSelected(VideoState.NOT_INTERESTED) }
+        BarButton(Icons.AutoMirrored.Outlined.PlaylistAdd, "Add to playlist") { model.openAddToPlaylist(ids) }
+        when (model.currentSource) {
+            LibrarySource.Liked -> BarButton(Icons.AutoMirrored.Outlined.Undo, "Unlike") { model.markSelected(null) }
+            LibrarySource.NotInterested -> BarButton(Icons.AutoMirrored.Outlined.Undo, "Undo") { model.markSelected(null) }
+            LibrarySource.History -> {
+                BarButton(Icons.AutoMirrored.Outlined.Undo, "Clear") { model.markSelected(null) }
+                BarButton(Icons.Outlined.DeleteOutline, if (compact) "Remove from history" else "Remove") { model.forget(ids) }
+            }
+            is LibrarySource.Playlist -> {
+                BarButton(Icons.AutoMirrored.Outlined.Undo, "Clear") { model.markSelected(null) }
+                BarButton(Icons.Outlined.RemoveCircleOutline, if (compact) "Remove from playlist" else "Remove") { model.removeFromPlaylist(ids) }
+            }
+        }
     }
     Column(
         Modifier
@@ -339,11 +543,18 @@ private fun ActionBar(model: AppModel, visibleCount: Int) {
             )
             TextButton(onClick = model::selectVisible, enabled = visibleCount > 0) { Text(if (compact) "Select all" else "Select all shown") }
             if (selected > 0) TextButton(onClick = model::clearSelection) { Text(if (compact) "None" else "Select none") }
-            Spacer(Modifier.weight(1f))
+            if (compact || selected == 0) Spacer(Modifier.weight(1f))
             when {
-                selected > 0 && !compact -> actions()
+                // At the right, scrolling sideways when a narrow window has no room for all of them.
+                selected > 0 && !compact -> Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) { actions() }
+                }
                 selected == 0 && !compact -> Text(
-                    "Select videos to add them to your profile, or use the buttons that appear on hover",
+                    "Select videos to like them or add them to a playlist, or use the buttons that appear on hover",
                     style = MaterialTheme.typography.bodySmall,
                     color = c.onSurfaceVariant,
                 )
@@ -402,7 +613,7 @@ private fun VideoRow(model: AppModel, row: LibraryRow) {
         Column(Modifier.weight(1f).padding(horizontal = if (compact) 12.dp else 16.dp)) {
             Title(row, maxLines = if (compact) 2 else 1)
             Text(details(row), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
-            StatePill(row.state, Modifier.padding(top = 8.dp))
+            if (showsStates(model)) StatePill(row.state, Modifier.padding(top = 8.dp))
         }
         if (hovered) QuickActions(model, row) else Spacer(Modifier.width(1.dp))
     }
@@ -426,7 +637,7 @@ private fun LibraryCard(model: AppModel, row: LibraryRow, anySelected: Boolean) 
         Box {
             LibraryThumbnail(model, row, Modifier.fillMaxWidth(), playOnHover = hovered)
             SelectDot(selected, visible = hovered || anySelected, Modifier.align(Alignment.TopStart).padding(8.dp)) { model.toggle(row.id) }
-            StatePill(row.state, Modifier.align(Alignment.TopEnd).padding(8.dp), solid = true)
+            if (showsStates(model)) StatePill(row.state, Modifier.align(Alignment.TopEnd).padding(8.dp), solid = true)
         }
         Title(row, maxLines = 2, modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp))
         Text(
@@ -515,13 +726,16 @@ private fun SelectDot(selected: Boolean, visible: Boolean, modifier: Modifier = 
     }
 }
 
+/** In the liked and not-interested lists every video has the same state, so it isn't labelled. */
+private fun showsStates(model: AppModel) =
+    model.currentSource is LibrarySource.History || model.currentSource is LibrarySource.Playlist
+
 @Composable
 private fun StatePill(state: VideoState?, modifier: Modifier = Modifier, solid: Boolean = false) {
     val c = MaterialTheme.colorScheme
     val (label, container, content) = when (state) {
-        VideoState.INCLUDED -> Triple("In profile", if (solid) Accent.pastelPink else c.primaryContainer, c.onPrimaryContainer)
-        VideoState.EXCLUDED -> Triple("Excluded", c.surfaceContainerHighest, c.onSurfaceVariant)
-        VideoState.NEGATIVE -> Triple("Not for me", c.errorContainer, c.onErrorContainer)
+        VideoState.LIKED -> Triple("Liked", if (solid) Accent.pastelPink else c.primaryContainer, c.onPrimaryContainer)
+        VideoState.NOT_INTERESTED -> Triple("Not interested", c.errorContainer, c.onErrorContainer)
         null -> return
     }
     Text(
@@ -537,12 +751,13 @@ private fun StatePill(state: VideoState?, modifier: Modifier = Modifier, solid: 
 @Composable
 private fun QuickActions(model: AppModel, row: LibraryRow) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        val inProfile = row.state == VideoState.INCLUDED
+        val liked = row.state == VideoState.LIKED
         QuickButton(Icons.Filled.PlayArrow, "Play") { model.open(row.id) }
-        QuickButton(if (inProfile) Icons.AutoMirrored.Outlined.Undo else Icons.Outlined.Add, if (inProfile) "Take out of profile" else "Add to profile", accent = !inProfile) {
-            model.mark(listOf(row.id), if (inProfile) null else VideoState.INCLUDED)
+        QuickButton(if (liked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp, if (liked) "Liked" else "Like", accent = !liked) {
+            model.mark(listOf(row.id), if (liked) null else VideoState.LIKED)
         }
-        if (row.state != VideoState.NEGATIVE) QuickButton(Icons.Outlined.Block, "Not for me") { model.mark(listOf(row.id), VideoState.NEGATIVE) }
+        if (row.state != VideoState.NOT_INTERESTED) QuickButton(Icons.Outlined.Block, "Not interested") { model.mark(listOf(row.id), VideoState.NOT_INTERESTED) }
+        QuickButton(Icons.AutoMirrored.Outlined.PlaylistAdd, "Playlist") { model.openAddToPlaylist(listOf(row.id)) }
     }
 }
 

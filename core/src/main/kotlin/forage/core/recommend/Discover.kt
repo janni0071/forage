@@ -79,8 +79,8 @@ class Discover(
 
     private fun taste(profile: ProfileRef): Taste {
         val entries = profiles.entries(profile)
-        val included = entries.filter { it.state == VideoState.INCLUDED }
-        val rejected = entries.filter { it.state == VideoState.NEGATIVE }
+        val included = entries.filter { it.state == VideoState.LIKED }
+        val rejected = entries.filter { it.state == VideoState.NOT_INTERESTED }
         val known = included.mapNotNull { e -> cache.video(e.video)?.metadata?.let { e to it } }
         val knownRejected = rejected.mapNotNull { cache.video(it.video)?.metadata }
         if (known.isEmpty()) {

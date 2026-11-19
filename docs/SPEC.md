@@ -2,14 +2,16 @@
 
 Nov 16, 2026 · @Jannis
 
-Forage is a local-first companion app that builds a YouTube taste profile only from videos you choose, and recommends new videos only when you ask. It sits next to whatever account-free client you already use (NewPipe, LibreTube, FreeTube) and does not replace it.
+Forage is your account-free home for YouTube and other platforms: everything an account gives you (likes, history, subscriptions, playlists, recommendations), with the data on your own devices. Recommendations come only from videos you like, and only when you ask. You leave Forage only to play a video, in whichever player you like (NewPipe, LibreTube, FreeTube, mpv or a browser).
+
+Until November 2026 the spec called Forage a companion that "sits next to whatever client you already use and does not replace it". The plan for the broader app, with layout sketches, is the doc "Forage: where we're heading"; its decisions are under [Direction](#direction-an-account-free-home-nov-2026) below.
 
 ## Vision and principles
 
 - **You own the data.** The profile, history and subscriptions live on your devices in open formats you can read, edit, export and delete. No account, no server, no telemetry.
-- **Curated, not tracked.** Watching something does not add it to your profile. Only videos you include count, so autoplay and accidental clicks never shape the profile.
+- **Curated, not tracked.** Watching something does not change your taste. Only videos you like count, so autoplay and accidental clicks never shape the recommendations.
 - **Pull, not push.** There's no recommendation feed on the start screen. Recommendations live on a Discover page you open on purpose.
-- **Explainable.** Every recommendation shows why it was picked ("similar to 3 videos in your profile", "new channel near your woodworking cluster").
+- **Explainable.** Every recommendation shows why it was picked ("similar to 3 videos you like", "new channel near your woodworking cluster").
 - **Works with any player.** The app finds and organizes videos. Playback happens in the client you already use.
 
 ## v1 feature set
@@ -19,10 +21,10 @@ v1 is the smallest version that answers the key question: are the recommendation
 | Area | v1 scope | Later |
 | --- | --- | --- |
 | Import | Google Takeout (history, subscriptions, playlists); NewPipe and FreeTube exports | LibreTube, Invidious, Piped |
-| Library | Every known video with a state: *watched*, *in profile*, *excluded*. Bulk include by channel, watch count or date range | Auto-suggest likely favourites from rewatches |
+| Library | Liked, History, Playlists and Not interested; bulk like by channel, watch count or date range; playlists made, renamed and filled in Forage | Auto-suggest likely favourites from rewatches |
 | Manual add | Paste a URL, search inside the app, Android share target | Browser extension |
-| Taste profile | Toggle videos in or out; view the profile as topic clusters; pin or mute a cluster | Several profiles ("learning", "evening") |
-| Discover | On-demand page: generate a batch, see the reason for each pick, then *more like this*, *not for me* or *save* | Mood or topic slider, "surprise me" mode |
+| Taste profile | Your likes; viewed as topic clusters you can rename, pin or mute | Several profiles ("learning", "evening") |
+| Discover | On-demand page: generate a batch, see the reason for each pick, then *like*, *not interested* or *save* | Mood or topic slider, "surprise me" mode |
 | Subscriptions | Channel RSS feeds, a new-uploads inbox, optional notifications; Shorts hidden by default | Per-channel filters (minimum length, keywords) |
 | Watch later | One queue across devices and players | Smart ordering by length |
 | Notes and tags | Free-text notes and tags per video; tags also feed the profile | Search across notes |
@@ -36,14 +38,14 @@ The profile is a set of video embeddings, not one average, so separate interests
 
 &#91;embedded content: recommendation pipeline · 6 stages, 1 feedback loop\]
 
-- **Profile.** Each included video becomes a vector built from its title, channel name, tags, your notes and the start of its description, in that order (the model reads only the first 128 tokens). Videos you mark "not for me" become negative examples.
+- **Profile.** Each liked video becomes a vector built from its title, channel name, tags, your notes and the start of its description, in that order (the model reads only the first 128 tokens). Videos you mark "not interested" become negative examples.
 - **Topics.** Average-linkage clustering merges videos until no two groups are similar enough (threshold 0.35). Groups of three or more are topics you can see, pin or mute; everything else goes into one "varied interests" group. A real profile is a few strong topics plus many one-off interests, and k-means forced those into mixed clusters. Topic labels come from the words that set a topic apart, never from channel names.
 - **Candidates.** For a sample of profile videos from each topic (more from the varied group): related videos via the extractor, and one search per topic built from its top keywords. Channels that creators feature or collaborate with are planned but not built. A 150-video profile yields about 1,800 candidates. Candidates whose title is clearly in a language the profile doesn't contain are dropped, because the embedding model matches across languages.
 - **Candidate text.** Candidates are scored on title and channel name only, since that is all a list result carries and fetching full metadata for every candidate is too slow. Profile videos use the full text.
-- **Ranking.** Score = mean similarity to the three nearest profile videos, plus a bonus for channels you don't follow, plus a freshness bonus, minus a small penalty for candidates found only by search. Drop watched, saved and excluded videos, then re-rank for diversity (MMR) with at most two picks per channel. Keep 3 of 20 slots for exploration: looser matches from channels you don't know.
-- **Negative examples.** The "not for me" penalty applies only as far as a candidate is closer to a rejected video than to the profile. Subtracting the plain similarity sank whole subjects: rejecting three beginner cube tutorials removed every cube video.
+- **Ranking.** Score = mean similarity to the three nearest profile videos, plus a bonus for channels you don't follow, plus a freshness bonus, minus a small penalty for candidates found only by search. Drop watched, saved, playlisted and rejected videos, then re-rank for diversity (MMR) with at most two picks per channel. Keep 3 of 20 slots for exploration: looser matches from channels you don't know.
+- **Negative examples.** The "not interested" penalty applies only as far as a candidate is closer to a rejected video than to the profile. Subtracting the plain similarity sank whole subjects: rejecting three beginner cube tutorials removed every cube video.
 - **Freshness.** Every recent upload gets a small bonus. It is larger where you save videos soon after release, measured per candidate from its nearest profile videos, so trailers and news favour new uploads while documentaries are left alone.
-- **Feedback.** "More like this" adds the video to the profile at reduced weight, "not for me" adds a negative example, and "save" puts it in watch later.
+- **Feedback.** "Like" adds the video to your likes like anywhere else (until Nov 2026 "more like this" added it at half weight; those likes keep that weight), "not interested" adds a negative example, and "save" puts it in watch later.
 
 ## Tech stack
 
@@ -78,6 +80,31 @@ Every import lands videos as *watched, not in profile*. The user then curates. N
 | Manual | URL, in-app search, share intent | Single videos | Fastest path for "I know I watched this" |
 
 All formats above should be checked against current app versions before writing parsers. Keep a folder of real sample exports as test fixtures.
+
+## Direction: an account-free home (Nov 2026)
+
+Forage grows from a recommendation companion into the place where you find, collect and organize videos across platforms without an account anywhere. The principles above stay. What changes:
+
+- **A simpler model.** Your taste is your likes. Like, Not interested, Watch later, Playlists and History replace the library states *in profile*, *excluded* and *not for me*. Database version 10 migrates them: *in profile* becomes liked, *not for me* becomes not interested, and *excluded* becomes no decision (an excluded video was in the history or a playlist anyway, which keeps it out of recommendations).
+- **Layout.** Four tabs: Home, Discover, Subscriptions, Library (a bottom bar on phones, the sidebar on desktop), and a video page behind every video with Play as the way out. Topics become "Your taste" in Library, with rename, pin and mute.
+- **Search within reach.** On phones the search bar sits just above the tab bar on every tab, slides away while scrolling down and returns when scrolling up; in Library it searches your own videos. On desktop it stays at the top.
+- **Liking without watching:** a like counts right away; the video's details are fetched in the background (up to 30 at once; more wait for "Fetch details") and the taste updates when they arrive.
+- **History:** every video opened from Forage, plus imports. On by default, with "Pause history"; single entries or all of it can be deleted. The private vault keeps its own, encrypted history.
+- **Importing subscriptions:** all of them automatically, then "Imported 143 channels" with a quick unfollow list.
+- **Home without content:** a "Get started" card (import from Takeout, search, like a few videos); each step disappears once done.
+- **Pictures of channels and performers:** YouTube avatars come with the channel pages Subscriptions loads anyway; performer pictures from the site's performer list (to confirm when subscriptions are built); a coloured initial otherwise.
+- **Left out:** playing videos, comments and anything else needing an account, live streams, and an algorithmic home feed.
+- **Name:** Forage stays.
+
+Order of work, each step usable on its own:
+
+1. **The plan.** Done, Nov 19, 2026.
+2. **Likes, playlists and history.** **Done, Nov 19, 2026.** The library shows Liked, History, each playlist and Not interested. Playlists have a table of their own (they can be empty and renamed); videos are added from the history, likes or other playlists. Opened videos go into the history unless it's paused (Settings or the History list), which sorts by most recent or most watched. Search results and Discover picks are liked with one tap. On phones, holding a thumbnail starts its preview after 250 ms instead of the system's half second.
+3. **The video page.**
+4. **New navigation and Home**, with the bottom search bar.
+5. **Subscriptions**, with pictures and a new-uploads inbox (milestone M2's inbox).
+
+Sync (M4) follows after these.
 
 ## Build order
 
@@ -182,7 +209,7 @@ The biggest risk is dependence on unofficial YouTube access. Everything else can
 
 | Question | Decision | Why |
 | --- | --- | --- |
-| Project name | Decided: **Forage** (other candidates were Palate, Glean, Sift) | Forage = you go looking when you want something new, nothing is pushed; not tied to YouTube. Check GitHub, F-Droid and app stores for clashes |
+| Project name | Decided: **Forage** (other candidates were Palate, Glean, Sift); confirmed for the broader app in Nov 2026 | Forage = you go looking when you want something new, nothing is pushed; not tied to YouTube. Check GitHub, F-Droid and app stores for clashes |
 | Transcripts | Not in v1. Test them in M0 on videos with weak picks; add later only if they clearly help | Titles, descriptions, tags and notes are cheap and usually enough; transcripts are slow, often missing and noisy when auto-generated |
 | Shorts | Hidden by default in Discover and the subscriptions inbox, with a setting to show them. Shorts you add to the profile on purpose still count | Little text for the profile; endless swiping goes against the app's purpose. Detect by `/shorts/` URL or extractor flag, not duration (Shorts can be up to 3 minutes). **Open problem:** Takeout lists Shorts with normal watch URLs and the extractor did not flag them either, so Shorts in the history go undetected |
 | Clustering | Average-linkage clustering with a similarity threshold, plus a "varied interests" group | k-means needs the number of clusters up front and produced mixed clusters on a real profile |

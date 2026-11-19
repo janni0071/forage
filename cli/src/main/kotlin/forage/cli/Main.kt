@@ -52,9 +52,9 @@ Library
   status                       Show what the vault and the profile contain.
 
 Profile
-  include [videos] [selection] Put videos into the profile.
-  exclude [videos] [selection] Keep videos out of the profile and out of recommendations.
-  reject  [videos] [selection] Mark videos "not for me": steers recommendations away from them.
+  like    [videos] [selection] Like videos: recommendations come from what you like.
+  not-interested [videos] [selection]
+                               Mark videos "not interested": steers recommendations away from them.
   clear   [videos] [selection] Undo any of the three above.
 
   [videos] are URLs or ids, and/or --file FILE with one per line.
@@ -73,8 +73,8 @@ Recommendations
                                whose cached copy is older than --max-age. Safe to re-run.
   discover [--count N] [--no-search] [--shorts]
                                Recommend videos for the profile, each with its reason.
-  more <n> | no <n> | save <n> Feedback on pick number n of the last discover: more like this,
-                               not for me, or save to watch later.
+  like <n> | no <n> | save <n> Feedback on pick number n of the last discover: like it,
+                               not interested, or save to watch later.
   later [--remove VIDEO]       Show the watch-later queue, or take a video off it.
 
 Tools
@@ -98,13 +98,14 @@ fun main(args: Array<String>) {
             "import" -> import(Args(rest, COMMON))
             "library" -> library(Args(rest, COMMON + SELECTION))
             "status" -> status(Args(rest, COMMON))
-            "include" -> mark(Args(rest, COMMON + SELECTION), VideoState.INCLUDED)
-            "exclude" -> mark(Args(rest, COMMON + SELECTION), VideoState.EXCLUDED)
-            "reject" -> mark(Args(rest, COMMON + SELECTION), VideoState.NEGATIVE)
+            // A number after "like" is a pick of the last discover; anything else selects videos.
+            "like", "include" -> if (rest.firstOrNull()?.toIntOrNull() != null) feedback("like", Args(rest, COMMON))
+                else mark(Args(rest, COMMON + SELECTION), VideoState.LIKED)
+            "not-interested", "reject" -> mark(Args(rest, COMMON + SELECTION), VideoState.NOT_INTERESTED)
             "clear" -> mark(Args(rest, COMMON + SELECTION), null)
             "fetch" -> fetch(Args(rest, COMMON + "--max-age"))
             "discover" -> discover(Args(rest, COMMON + "--count", setOf("--no-search", "--shorts")))
-            "more", "no", "save" -> feedback(command, Args(rest, COMMON))
+            "more", "no", "save" -> feedback(if (command == "more") "like" else command, Args(rest, COMMON))
             "later" -> later(Args(rest, COMMON + "--remove"))
             "similar" -> similar(Args(rest, COMMON + "--top"))
             "search" -> search(Args(rest, emptySet()))
@@ -114,7 +115,7 @@ fun main(args: Array<String>) {
         System.err.println(e.message)
         exitProcess(2)
     } catch (e: EmptyProfileException) {
-        System.err.println("${e.message}. Add videos with 'forage include', then run 'forage fetch'.")
+        System.err.println("${e.message}. Like videos with 'forage like', then run 'forage fetch'.")
         exitProcess(1)
     } catch (e: SourceException) {
         System.err.println(e.message)
@@ -238,8 +239,8 @@ private fun status(args: Args) {
         val entries = vault.profiles.entries(profile)
         val marker = if (profile == vault.profile) "*" else " "
         println(
-            "$marker Profile \"${profile.name}\": ${entries.count { it.state == VideoState.INCLUDED }} included, " +
-                "${entries.count { it.state == VideoState.EXCLUDED }} excluded, ${entries.count { it.state == VideoState.NEGATIVE }} not for me"
+            "$marker Profile \"${profile.name}\": ${entries.count { it.state == VideoState.LIKED }} liked, " +
+                "${entries.count { it.state == VideoState.NOT_INTERESTED }} not interested"
         )
     }
 }
@@ -256,9 +257,8 @@ private fun mark(args: Args, state: VideoState?) {
 }
 
 private fun stateName(state: VideoState) = when (state) {
-    VideoState.INCLUDED -> "in profile"
-    VideoState.EXCLUDED -> "excluded"
-    VideoState.NEGATIVE -> "not for me"
+    VideoState.LIKED -> "liked"
+    VideoState.NOT_INTERESTED -> "not interested"
 }
 
 // Recommendations
@@ -272,7 +272,7 @@ private fun fetch(args: Args) {
     if (args.positional.isNotEmpty()) throw UsageError(USAGE)
 
     // Rejected videos need metadata too: they only steer recommendations once embedded.
-    val wanted = vault.profiles.entries(vault.profile).filter { it.state != VideoState.EXCLUDED }.map { it.video }
+    val wanted = vault.profiles.entries(vault.profile).map { it.video }
     if (wanted.isEmpty()) throw EmptyProfileException("The profile \"${vault.profile.name}\" has no videos yet")
     val total = wanted.size
     var done = 0
@@ -345,7 +345,7 @@ private fun discover(args: Args) {
     )
     println()
     printPicks(vault)
-    println("Feedback: 'forage more <n>', 'forage no <n>' or 'forage save <n>'")
+    println("Feedback: 'forage like <n>', 'forage no <n>' or 'forage save <n>'")
 }
 
 private fun printPicks(vault: Vault) {
@@ -354,8 +354,8 @@ private fun printPicks(vault: Vault) {
     for (pick in vault.profiles.picks(vault.profile)) {
         val done = when {
             pick.video in saved -> "  [saved]"
-            states[pick.video] == VideoState.INCLUDED -> "  [more like this]"
-            states[pick.video] == VideoState.NEGATIVE -> "  [not for me]"
+            states[pick.video] == VideoState.LIKED -> "  [liked]"
+            states[pick.video] == VideoState.NOT_INTERESTED -> "  [not interested]"
             else -> ""
         }
         println("%2d. %s — %s%s".format(pick.position, pick.title, pick.channelName ?: "?", done))
@@ -376,8 +376,8 @@ private fun feedback(kind: String, args: Args) {
         // Keep what the list result told us, so the video has a title before any metadata fetch.
         vault.library.remember(pick.video, pick.title, pick.channel, pick.channelName)
         val done = when (kind) {
-            "more" -> { vault.profiles.moreLikeThis(vault.profile, pick.video); "added to the profile at reduced weight" }
-            "no" -> { vault.profiles.notForMe(vault.profile, pick.video); "marked not for me" }
+            "like" -> { vault.profiles.like(vault.profile, pick.video); "liked" }
+            "no" -> { vault.profiles.notInterested(vault.profile, pick.video); "marked not interested" }
             else -> { vault.library.saveForLater(pick.video); "saved to watch later" }
         }
         println("$n. ${pick.title}: $done")

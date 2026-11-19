@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
@@ -83,7 +85,7 @@ fun AddVideosDialog(model: AppModel) {
                     IconButton(onClick = model::closeAddDialog) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
                 }
                 Text(
-                    "They go straight into the profile \"${model.profile.name}\".",
+                    "Like what you find: recommendations for \"${model.profile.name}\" come from what you like.",
                     color = c.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp, bottom = 16.dp),
                 )
@@ -172,11 +174,11 @@ private fun SearchTab(model: AppModel) {
 @Composable
 private fun SearchRow(model: AppModel, stub: VideoStub) {
     val c = MaterialTheme.colorScheme
-    val added = stub.id in model.searchInProfile
+    val liked = stub.id in model.searchLiked
     val compact = LocalCompact.current
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-            .background(if (added) c.primaryContainer.copy(alpha = 0.35f) else c.surfaceContainerLow)
+            .background(if (liked) c.primaryContainer.copy(alpha = 0.35f) else c.surfaceContainerLow)
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp),
@@ -200,21 +202,21 @@ private fun SearchRow(model: AppModel, stub: VideoStub) {
             val meta = listOfNotNull(stub.channelName, formatAge(stub.uploadedAt), "Short".takeIf { stub.isShort }).joinToString("  ·  ")
             if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        val icon = if (liked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp
         if (compact) {
             // Round buttons on a phone: a label would leave the title no room.
-            if (added) Icon(Icons.Filled.Check, contentDescription = "In profile", tint = c.primary, modifier = Modifier.padding(horizontal = 10.dp).size(22.dp))
-            else FilledTonalIconButton(onClick = { model.addFromSearch(stub) }) { Icon(Icons.Outlined.Add, contentDescription = "Add") }
-        } else if (added) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 12.dp)) {
-                Icon(Icons.Filled.Check, contentDescription = null, tint = c.primary, modifier = Modifier.size(18.dp))
+            FilledTonalIconButton(onClick = { model.likeFromSearch(stub) }) { Icon(icon, contentDescription = if (liked) "Liked" else "Like", tint = if (liked) c.primary else c.onSecondaryContainer) }
+        } else if (liked) {
+            TextButton(onClick = { model.likeFromSearch(stub) }, shape = RoundedCornerShape(12.dp)) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("In profile", style = MaterialTheme.typography.labelLarge, color = c.primary)
+                Text("Liked")
             }
         } else {
-            FilledTonalButton(onClick = { model.addFromSearch(stub) }, shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            FilledTonalButton(onClick = { model.likeFromSearch(stub) }, shape = RoundedCornerShape(12.dp)) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Add")
+                Text("Like")
             }
         }
     }

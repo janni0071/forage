@@ -72,7 +72,7 @@ class DesktopModelTest {
     }
 
     @Test
-    fun `search results can be added to the profile`() {
+    fun `search results can be liked, and unliked again`() {
         val searchable = object : ExtractorSource by offline {
             override val capabilities = setOf(Capability.SEARCH)
             override fun forPlatform(platform: String) = takeIf { platform == "youtube" }
@@ -86,11 +86,14 @@ class DesktopModelTest {
             assertEquals(listOf("youtube" to "youtube"), m.searchPlatforms)
             m.searchVideos("  dovetails ")
             assertEquals(listOf("Found dovetails", "Already watched"), m.searchResults.map { it.title })
-            assertEquals(emptySet(), m.searchInProfile)
-            m.addFromSearch(m.searchResults.first())
-            assertEquals(setOf(id("sssssssss01")), m.searchInProfile)
-            assertEquals(listOf(id("sssssssss01")), m.profiles.entries(m.profile, VideoState.INCLUDED).map { it.video })
+            assertEquals(emptySet(), m.searchLiked)
+            m.likeFromSearch(m.searchResults.first())
+            assertEquals(setOf(id("sssssssss01")), m.searchLiked)
+            assertEquals(listOf(id("sssssssss01")), m.profiles.entries(m.profile, VideoState.LIKED).map { it.video })
             assertEquals("Found dovetails", m.library.video(id("sssssssss01"))?.title)
+            m.likeFromSearch(m.searchResults.first())
+            assertEquals(emptySet(), m.searchLiked)
+            assertEquals(emptyList(), m.profiles.entries(m.profile))
             m.closeAddDialog()
             assertEquals(emptyList(), m.searchResults)
         } finally {
@@ -104,37 +107,93 @@ class DesktopModelTest {
         val refused = model.addByLink("https://www.youtube.com/watch?v=aaaaaaaaaa1\nnot-a-link")
         assertEquals("1 of these aren't video links Forage knows, e.g. not-a-link", refused)
         assertNull(model.addByLink(" https://www.youtube.com/watch?v=aaaaaaaaaa1\n\nhttps://www.youtube.com/watch?v=bbbbbbbbbb2 "))
-        val included = model.profiles.entries(model.profile, VideoState.INCLUDED).map { it.video.id }
-        assertEquals(setOf("aaaaaaaaaa1", "bbbbbbbbbb2"), included.toSet())
-        assertEquals("Added 2 videos; 2 still need details (Fetch profile details)", model.message)
+        val liked = model.profiles.entries(model.profile, VideoState.LIKED).map { it.video.id }
+        assertEquals(setOf("aaaaaaaaaa1", "bbbbbbbbbb2"), liked.toSet())
+        assertEquals("Liked 2 videos; 2 still need details (Fetch details)", model.message)
+        assertEquals(LibrarySource.Liked, model.currentSource)
     }
 
     @Test
     fun `lists the history and filters it by text and state`() {
+        assertEquals(listOf("Liked", "History", "Watch later", "Not interested"), model.sources.map { it.label })
+        assertEquals(LibrarySource.Liked, model.currentSource)
+        assertEquals(emptyList(), model.rows)
+        model.selectSource(LibrarySource.History)
+        // Most recently watched first.
+        assertEquals(listOf("b", "a"), model.rows.map { it.id.id })
+        model.sortHistory(HistorySort.MOST_WATCHED)
         assertEquals(setOf("a", "b"), model.rows.map { it.id.id }.toSet())
-        assertEquals(listOf("Watch history", "Playlist: Watch later", "Decided in this profile"), model.sources.map { it.label })
         model.query = "wren"
         assertEquals(listOf(id("a")), model.visibleRows.map { it.id })
         model.query = ""
-        model.stateFilter = StateFilter.INCLUDED
+        model.stateFilter = StateFilter.LIKED
         assertEquals(emptyList(), model.visibleRows)
+        // The filter is for mixed lists only.
+        model.selectSource(LibrarySource.Liked)
+        model.mark(listOf(id("a")), VideoState.LIKED)
+        model.stateFilter = StateFilter.NOT_INTERESTED
+        assertEquals(listOf(id("a")), model.visibleRows.map { it.id })
     }
 
     @Test
-    fun `bulk actions change the profile and clear the selection`() {
+    fun `bulk actions like videos, fetch their details and clear the selection`() {
+        model.selectSource(LibrarySource.History)
         model.selectVisible()
         assertEquals(setOf(id("a"), id("b")), model.selection)
-        model.markSelected(VideoState.INCLUDED)
+        model.markSelected(VideoState.LIKED)
         assertEquals(emptySet(), model.selection)
         assertEquals(2, model.profileSize)
-        assertTrue(model.rows.all { it.state == VideoState.INCLUDED })
-        assertTrue("need details" in model.message!!)
+        assertTrue(model.rows.all { it.state == VideoState.LIKED })
+        assertEquals("Liked 2 videos", model.message)
+        // A like counts at once; the details follow in the background.
+        assertEquals(listOf<String?>("Fetching details of 2 videos", "Fetching details of 2 videos"), backgroundDuringFetch)
 
         model.toggle(id("b"))
-        model.markSelected(VideoState.NEGATIVE)
-        assertEquals(VideoState.NEGATIVE, model.rows.single { it.id == id("b") }.state)
-        model.selectSource(model.sources.single { it is LibrarySource.InProfile })
+        model.markSelected(VideoState.NOT_INTERESTED)
+        assertEquals(VideoState.NOT_INTERESTED, model.rows.single { it.id == id("b") }.state)
+        model.selectSource(LibrarySource.Liked)
+        assertEquals(listOf(id("a")), model.rows.map { it.id })
+        model.selectSource(LibrarySource.NotInterested)
+        assertEquals(listOf(id("b")), model.rows.map { it.id })
+        assertEquals(1, model.notInterestedSize)
+    }
+
+    @Test
+    fun `playlists are made, filled, renamed, emptied and deleted`() {
+        assertNull(model.createPlaylist("  Bread  "))
+        assertEquals(LibrarySource.Playlist("Bread", 0), model.currentSource)
+        assertTrue("already" in model.createPlaylist("Bread")!!)
+        model.openAddToPlaylist(listOf(id("b"), id("a")))
+        assertEquals(LibraryDialog.AddToPlaylist(listOf(id("b"), id("a"))), model.libraryDialog)
+        assertNull(model.addToPlaylist("Bread", listOf(id("b"), id("a"))))
+        assertNull(model.libraryDialog)
+        assertEquals("Added 2 videos to \"Bread\"", model.message)
+        assertEquals(LibrarySource.Playlist("Bread", 2), model.currentSource)
         assertEquals(setOf(id("a"), id("b")), model.rows.map { it.id }.toSet())
+
+        assertTrue("already" in model.renamePlaylist("Bread", "Watch later")!!)
+        assertNull(model.renamePlaylist("Bread", "Baking"))
+        assertEquals(LibrarySource.Playlist("Baking", 2), model.currentSource)
+        model.removeFromPlaylist(listOf(id("a")))
+        assertEquals(listOf(id("b")), model.rows.map { it.id })
+        model.deletePlaylist("Baking")
+        assertEquals(LibrarySource.Liked, model.currentSource)
+        assertEquals(listOf("Liked", "History", "Watch later", "Not interested"), model.sources.map { it.label })
+        assertEquals("Sourdough basics", model.library.video(id("b"))?.title)
+    }
+
+    @Test
+    fun `the history forgets videos, clears and pauses`() {
+        model.selectSource(LibrarySource.History)
+        model.forget(listOf(id("a")))
+        assertEquals(listOf(id("b")), model.rows.map { it.id })
+        model.clearHistory()
+        assertEquals(emptyList(), model.rows)
+        // The playlist is untouched.
+        assertEquals(1L, model.library.playlists()["Watch later"])
+        assertTrue(model.recordHistory)
+        model.changeRecordHistory(false)
+        assertEquals(false, Settings(dir.resolve("settings.properties")).recordHistory)
     }
 
     @Test
@@ -152,12 +211,13 @@ class DesktopModelTest {
         runBlocking { model.reload() }
         val view = model.picks.single()
         model.feedback(view, Feedback.SAVED)
-        model.feedback(model.picks.single(), Feedback.MORE)
-        assertEquals(setOf(Feedback.SAVED, Feedback.MORE), model.picks.single().feedback)
+        model.feedback(model.picks.single(), Feedback.LIKE)
+        assertEquals(setOf(Feedback.SAVED, Feedback.LIKE), model.picks.single().feedback)
+        assertEquals(1, model.profileSize)
         assertEquals(listOf(id("p")), model.later.map { it.id })
         assertEquals("A pick", model.later.single().title)
 
-        model.feedback(model.picks.single(), Feedback.MORE)
+        model.feedback(model.picks.single(), Feedback.LIKE)
         model.removeFromLater(id("p"))
         assertEquals(emptySet(), model.picks.single().feedback)
     }
@@ -167,8 +227,8 @@ class DesktopModelTest {
         val pick = StoredPick(1, id("p"), "A pick", null, "Channel", 0.5f, "similar to X", "related to X", false)
         model.profiles.savePicks(model.profile, listOf(pick))
         runBlocking { model.reload() }
-        model.feedback(model.picks.single(), Feedback.NOT_FOR_ME)
-        assertEquals(listOf<String?>("Fetching details of \"A pick\" so your feedback counts"), backgroundDuringFetch)
+        model.feedback(model.picks.single(), Feedback.NOT_INTERESTED)
+        assertEquals(listOf<String?>("Fetching the video's details"), backgroundDuringFetch)
         assertNull(model.background)
         // Saving needs no details, so nothing is fetched.
         model.feedback(model.picks.single(), Feedback.SAVED)
@@ -193,8 +253,9 @@ class DesktopModelTest {
 
     @Test
     fun `switching profiles shows each profile's own decisions and remembers the choice`() {
+        model.selectSource(LibrarySource.History)
         model.selectVisible()
-        model.markSelected(VideoState.INCLUDED)
+        model.markSelected(VideoState.LIKED)
         assertEquals("Default", model.profile.name)
         assertTrue("already" in model.createProfile("Default")!!)
         assertTrue(model.createProfile("  ")!!.isNotEmpty())
@@ -212,6 +273,7 @@ class DesktopModelTest {
 
     @Test
     fun `deleting a profile switches to another and keeps the library`() {
+        model.selectSource(LibrarySource.History)
         model.createProfile("Evening")
         model.deleteProfile()
         assertEquals("Default", model.profile.name)
@@ -230,9 +292,9 @@ class DesktopModelTest {
         val other = DesktopModel(dir.resolve("other"), CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined) { broken }
         other.profiles.savePicks(other.profile, listOf(StoredPick(1, id("p"), "A pick", null, null, 0.5f, "r", "f", false)))
         runBlocking { other.reload() }
-        other.feedback(other.picks.single(), Feedback.MORE)
+        other.feedback(other.picks.single(), Feedback.LIKE)
         assertTrue("native library missing" in other.message.orEmpty(), other.message)
-        assertEquals(setOf(Feedback.MORE), other.picks.single().feedback)
+        assertEquals(setOf(Feedback.LIKE), other.picks.single().feedback)
     }
 
     @Test
@@ -275,9 +337,10 @@ class DesktopModelTest {
     @Test
     fun `discover on an empty profile explains what to do`() {
         model.discover()
-        assertTrue("no videos yet" in model.message!!, model.message)
+        assertTrue("Nothing liked yet" in model.message!!, model.message)
+        model.selectSource(LibrarySource.History)
         model.selectVisible()
-        model.markSelected(VideoState.INCLUDED)
+        model.markSelected(VideoState.LIKED)
         model.discover()
         assertTrue("have details yet" in model.message!!, model.message)
         assertEquals(null, model.job)
