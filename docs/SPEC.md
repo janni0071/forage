@@ -92,6 +92,11 @@ Test recommendation quality first, with no UI. Everything after that is packagin
    - Exit: you stop opening your old client's subscription feed.
 4. **M3: Android app.** Same core module, Compose UI, share target, upload notifications, hand-off to NewPipe/LibreTube.
    - Exit: "add to profile" from your phone takes under 3 seconds.
+   - **Moved ahead of M2 (Nov 2026)**, since the user watches mostly on the phone. Stage 1 built: the YouTube side on Android. Stage 2, the private vault and the private platform, comes next.
+   - How it's shared: the model behind the screens (`AppModel`) and the screens live in `app/src/main/kotlin`, compiled by both the desktop and the Android module. What differs goes through a `Platform` interface (images, models, players, storage, files); desktop-only UI (tooltips, scrollbars) comes in through `LocalExtras`. Below 640 dp the app is compact: profile and settings at the top, bottom navigation, tighter margins, wrapped or swipeable rows.
+   - Porting work: the tokenizer is plain Kotlin now (identical to the reference on 2,607 texts); every request uses `HttpURLConnection` instead of `java.net.http`; ONNX Runtime is per app (desktop jar, Android AAR).
+   - Android specifics: the 8-bit model (118 MB, downloaded on first use; 0.994 same-text cosine to the full model, 8.9 of 10 nearest titles the same), Android's on-device text classifier for language detection (untested on titles so far), links opened by the system in the user's default app, "Share → Forage" adding the shared link without opening the app, and a library imported by picking a `forage.db` copied from the desktop. Android 15+ (API 35, for Java 21's library methods), ARM64 only, about 60 MB. Compose on Android is 1.9 (Material 3 1.4), since Compose 1.12 needs Android Gradle plugin 9.1 and with it Gradle 9.
+   - Release builds are signed with a key the user keeps (`FORAGE_KEYSTORE`, `FORAGE_KEYSTORE_PASSWORD`); it's never in the repository, which is public.
 5. **M4: Sync.** Per-device encrypted change logs, merge by replay (see Decisions), Syncthing setup guide.
    - Exit: curate on the phone, see it on the desktop without manual steps.
 6. **M5: Public release.** Onboarding with a Takeout walkthrough, export back to other clients, F-Droid and Flathub packaging.

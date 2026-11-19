@@ -5,8 +5,6 @@ package forage.app.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.TooltipArea
-import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -41,7 +39,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -72,7 +69,7 @@ import forage.app.PickView
 
 @Composable
 fun DiscoverScreen(model: AppModel) {
-    Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 16.dp, top = 24.dp)) {
+    Column(Modifier.fillMaxSize().padding(screenPadding())) {
         Header(model)
         if (model.topics.isNotEmpty()) TopicStrip(model)
         if (model.picks.isEmpty()) {
@@ -95,7 +92,7 @@ fun DiscoverScreen(model: AppModel) {
             ) {
                 items(model.picks, key = { it.pick.position }) { PickCard(model, it) }
             }
-            VerticalScrollbar(rememberScrollbarAdapter(gridState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+            Scrollbar(gridState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
         }
     }
 }
@@ -196,7 +193,7 @@ private fun PickCard(model: AppModel, view: PickView) {
             modifier = Modifier.padding(top = 2.dp),
         )
         // The reason, kept short on the card; the whole of it, and where the pick came from, on hover.
-        TooltipArea(
+        Tooltip(
             tooltip = {
                 Surface(
                     color = MaterialTheme.colorScheme.inverseSurface,
@@ -225,7 +222,7 @@ private fun PickCard(model: AppModel, view: PickView) {
             Action(Icons.Outlined.Block, "Not for me", rejected) { model.feedback(view, Feedback.NOT_FOR_ME) }
             val saved = Feedback.SAVED in view.feedback
             // A bookmark alone reads as "save" and keeps the three on one line.
-            TooltipArea(tooltip = { Hint(if (saved) "Saved for later; click to remove" else "Save for later") }, delayMillis = 300) {
+            Tooltip(tooltip = { Hint(if (saved) "Saved for later; click to remove" else "Save for later") }, delayMillis = 300) {
                 Action(if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, null, saved) { model.feedback(view, Feedback.SAVED) }
             }
         }

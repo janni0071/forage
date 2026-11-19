@@ -174,6 +174,8 @@ fun SettingsDialog(model: AppModel) {
                     )
                     return@Column
                 }
+                // A phone keeps the data inside the app, where no file manager reaches.
+                if (model.platform.isMobile) return@Column
                 Section("Your data", "Everything Forage knows lives in one folder on this computer. Nothing is sent anywhere else.")
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),

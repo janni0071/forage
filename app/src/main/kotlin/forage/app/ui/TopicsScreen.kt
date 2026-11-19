@@ -1,6 +1,5 @@
 package forage.app.ui
 
-import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +41,6 @@ import forage.core.recommend.TopicStore
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -61,7 +59,7 @@ import forage.app.AppModel
 
 @Composable
 fun TopicsScreen(model: AppModel) {
-    Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 16.dp, top = 24.dp)) {
+    Column(Modifier.fillMaxSize().padding(screenPadding())) {
         ScreenHeader("Topics", "How your profile groups itself. Pin a topic to get picks from it in every batch; mute one to get none.") {
             AccentButton(
                 if (model.topics.isEmpty()) "Show topics" else if (model.topicsCurrent) "Refresh" else "Refresh (profile changed)",
@@ -81,7 +79,7 @@ fun TopicsScreen(model: AppModel) {
             LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(end = 14.dp, bottom = 96.dp)) {
                 items(model.topics, key = { it.index }) { TopicCard(model, it) }
             }
-            VerticalScrollbar(rememberScrollbarAdapter(listState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+            Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
         }
     }
 }

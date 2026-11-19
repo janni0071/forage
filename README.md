@@ -46,3 +46,15 @@ cli/build/install/forage/bin/forage
 ## Licence
 
 GPL-3.0, as required by NewPipeExtractor.
+
+## Android
+
+Needs the Android SDK (`sdk.dir` in `local.properties`, or `ANDROID_HOME`). Release builds are
+signed with your own key when these are set; otherwise with the debug key:
+
+```bash
+FORAGE_KEYSTORE=/path/to/forage-release.jks FORAGE_KEYSTORE_PASSWORD=… ./gradlew :android:assembleRelease
+```
+
+The APK lands in `android/build/outputs/apk/release/`. Android 15 or newer, ARM64.
+

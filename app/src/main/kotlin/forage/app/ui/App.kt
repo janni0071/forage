@@ -5,6 +5,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBar
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -68,8 +74,77 @@ class WindowChrome(
     val outlined: Boolean,
 )
 
+/** True when the window is phone-narrow: no sidebar, bottom navigation, tighter margins. */
+val LocalCompact = staticCompositionLocalOf { false }
+
+/** The outer margins of a screen: generous in a window, tight on a phone. */
+@Composable
+fun screenPadding(): PaddingValues =
+    if (LocalCompact.current) PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp) else PaddingValues(start = 32.dp, end = 16.dp, top = 24.dp)
+
 @Composable
 fun App(model: AppModel, onImport: () -> Unit, chrome: WindowChrome? = null) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val compact = maxWidth < 640.dp
+        CompositionLocalProvider(LocalCompact provides compact) {
+            if (compact) PhoneApp(model, onImport) else WideApp(model, onImport, chrome)
+        }
+    }
+}
+
+/** A phone: profile and settings at the top, the four screens in a bottom navigation bar. */
+@Composable
+private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Surface(color = c.background, modifier = Modifier.fillMaxSize()) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().background(c.surfaceContainerLow).padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f)) { ProfileSwitcher(model) }
+                if (model.isPrivate) {
+                    IconButton(onClick = { model.onLock?.invoke() }) { Icon(Icons.Outlined.Lock, contentDescription = "Lock private vault") }
+                }
+                IconButton(onClick = onImport) { Icon(Icons.Outlined.FileUpload, contentDescription = "Import a library") }
+                IconButton(onClick = { model.settingsOpen = true }) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                Screens(model, onImport)
+                StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
+            }
+            NavigationBar(containerColor = c.surfaceContainerLow) {
+                for ((screen, icon, label) in listOf(
+                    Triple(Screen.LIBRARY, Icons.Outlined.VideoLibrary, "Library"),
+                    Triple(Screen.TOPICS, Icons.Outlined.BubbleChart, "Topics"),
+                    Triple(Screen.DISCOVER, Icons.Outlined.AutoAwesome, "Discover"),
+                    Triple(Screen.LATER, Icons.Outlined.WatchLater, "Later"),
+                )) {
+                    NavigationBarItem(
+                        selected = model.screen == screen,
+                        onClick = { model.screen = screen },
+                        icon = { Icon(icon, contentDescription = null) },
+                        label = { Text(label) },
+                    )
+                }
+            }
+        }
+    }
+    if (model.settingsOpen) SettingsDialog(model)
+}
+
+@Composable
+private fun Screens(model: AppModel, onImport: () -> Unit) {
+    when (model.screen) {
+        Screen.LIBRARY -> LibraryScreen(model, onImport)
+        Screen.TOPICS -> TopicsScreen(model)
+        Screen.DISCOVER -> DiscoverScreen(model)
+        Screen.LATER -> LaterScreen(model)
+    }
+}
+
+@Composable
+private fun WideApp(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?) {
     val outline = if (chrome?.outlined == true) Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant) else Modifier
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().then(outline)) {
@@ -78,12 +153,7 @@ fun App(model: AppModel, onImport: () -> Unit, chrome: WindowChrome? = null) {
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     chrome?.titleBar?.invoke()
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        when (model.screen) {
-                            Screen.LIBRARY -> LibraryScreen(model, onImport)
-                            Screen.TOPICS -> TopicsScreen(model)
-                            Screen.DISCOVER -> DiscoverScreen(model)
-                            Screen.LATER -> LaterScreen(model)
-                        }
+                        Screens(model, onImport)
                         StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp))
                     }
                 }

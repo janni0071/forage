@@ -81,6 +81,17 @@ tasks.register<JavaExec>("screenshots") {
     )
 }
 
+// The shared screens at a phone's size: gradle :desktop:phoneScreenshots -Pdata=DIR -Pout=DIR
+tasks.register<JavaExec>("phoneScreenshots") {
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass = "forage.desktop.PhoneScreenshotsKt"
+    jvmArgs("-Djava.awt.headless=true", "-Xmx2g")
+    args(
+        (project.findProperty("data") ?: rootProject.file("data").path).toString(),
+        (project.findProperty("out") ?: layout.buildDirectory.dir("screenshots").get().asFile.path).toString(),
+    )
+}
+
 // Packaging builds for the machine it runs on, so the packaged jars only need that platform's
 // native libraries. Several libraries ship them for every platform; together with language models
 // Forage never loads, that more than doubled the package. This trims the jars after ProGuard.

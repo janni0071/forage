@@ -16,6 +16,8 @@ import forage.app.Settings
 import forage.app.Theme
 import forage.app.Zoom
 import forage.app.ui.App
+import forage.app.ui.LocalExtras
+import forage.desktop.ui.DesktopExtras
 import forage.app.ui.ForageTheme
 import forage.app.ui.WindowChrome
 import forage.desktop.ui.ResizeEdges
@@ -114,7 +116,10 @@ fun main(args: Array<String>) {
                 Theme.SYSTEM -> linuxDark ?: systemDark
             }
             val base = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(base.density * active.effectiveUiScale, base.fontScale)) {
+            CompositionLocalProvider(
+                LocalDensity provides Density(base.density * active.effectiveUiScale, base.fontScale),
+                LocalExtras provides DesktopExtras,
+            ) {
             ForageTheme(dark = dark) {
                 val chrome = frame?.let { f ->
                     WindowChrome(titleBar = { TitleBar(f) }, dragArea = Modifier.moveWindow(f), overlay = { ResizeEdges(f) }, outlined = !f.maximized)

@@ -36,3 +36,6 @@ build/
 
 # Personal exports and local data never belong in the repo
 /data/
+local.properties
+# Heap dumps from a JVM that ran out of memory.
+*.hprof

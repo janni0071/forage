@@ -67,7 +67,7 @@ fun AddVideosDialog(model: AppModel) {
     var tab by remember { mutableStateOf(if (model.searchPlatforms.isEmpty()) Tab.LINKS else Tab.SEARCH) }
     BasicAlertDialog(onDismissRequest = model::closeAddDialog) {
         Surface(shape = RoundedCornerShape(28.dp), color = c.surfaceContainerLow, modifier = Modifier.width(720.dp)) {
-            Column(Modifier.padding(28.dp)) {
+            Column(Modifier.padding(if (LocalCompact.current) 20.dp else 28.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Add videos", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     IconButton(onClick = model::closeAddDialog) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
@@ -132,7 +132,8 @@ private fun SearchTab(model: AppModel) {
                 } else false
             },
         )
-        AccentButton("Search", null, enabled = query.isNotBlank() && !model.searching) { model.searchVideos(query) }
+        // On a phone the keyboard's search key does this, and the field needs the room.
+        if (!LocalCompact.current) AccentButton("Search", null, enabled = query.isNotBlank() && !model.searching) { model.searchVideos(query) }
     }
 
     Box(Modifier.fillMaxWidth().height(440.dp).padding(top = 12.dp)) {

@@ -2,7 +2,6 @@ package forage.app.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,7 +32,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -89,7 +87,7 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
         return
     }
     val visible = model.visibleRows
-    Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 16.dp, top = 24.dp)) {
+    Column(Modifier.fillMaxSize().padding(screenPadding())) {
         ScreenHeader("Library", "Choose what shapes your profile") {
             OutlinedTextField(
                 value = model.query,
@@ -98,7 +96,7 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.width(300.dp),
+                modifier = if (LocalCompact.current) Modifier.fillMaxWidth() else Modifier.width(300.dp),
             )
             ViewToggle(model)
             OutlinedButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
@@ -109,7 +107,13 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
             OutlinedButton(onClick = model::fetchDetails, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
                 Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(if (model.selection.isEmpty()) "Fetch profile details" else "Fetch details of selection")
+                Text(
+                    when {
+                        LocalCompact.current -> "Fetch details"
+                        model.selection.isEmpty() -> "Fetch profile details"
+                        else -> "Fetch details of selection"
+                    }
+                )
             }
         }
         SourceTabs(model)
@@ -135,13 +139,13 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
                         LibraryCard(model, visible[i], anySelected = model.selection.isNotEmpty())
                     }
                 }
-                VerticalScrollbar(rememberScrollbarAdapter(gridState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+                Scrollbar(gridState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             } else {
                 val listState = rememberLazyListState()
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(end = 16.dp), contentPadding = PaddingValues(bottom = 96.dp)) {
                     items(visible, key = { it.id.toString() }) { row -> VideoRow(model, row) }
                 }
-                VerticalScrollbar(rememberScrollbarAdapter(listState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+                Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             }
         }
     }
@@ -253,10 +257,13 @@ private fun Filters(model: AppModel) {
         val byState = model.rows.groupingBy { it.state }.eachCount()
         StateFilter.entries.associateWith { f -> if (f == StateFilter.ALL) model.rows.size else byState.filterKeys(f::matches).values.sum() }
     }
+    // One line on a phone, swiped sideways; wrapped in a window.
+    val compact = LocalCompact.current
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth(),
+        maxLines = if (compact) 1 else Int.MAX_VALUE,
+        modifier = if (compact) Modifier.horizontalScroll(rememberScrollState()) else Modifier.fillMaxWidth(),
     ) {
         for (f in StateFilter.entries) {
             FilterChip(
@@ -275,36 +282,44 @@ private fun Filters(model: AppModel) {
 private fun ActionBar(model: AppModel, visibleCount: Int) {
     val selected = model.selection.size
     val c = MaterialTheme.colorScheme
-    Row(
+    val compact = LocalCompact.current
+    val actions: @Composable () -> Unit = {
+        AccentButton(if (compact) "Add" else "Add to profile", Icons.Outlined.Add) { model.markSelected(VideoState.INCLUDED) }
+        BarButton(Icons.Outlined.RemoveCircleOutline, "Exclude") { model.markSelected(VideoState.EXCLUDED) }
+        BarButton(Icons.Outlined.Block, "Not for me") { model.markSelected(VideoState.NEGATIVE) }
+        BarButton(Icons.AutoMirrored.Outlined.Undo, "Clear") { model.markSelected(null) }
+    }
+    Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp)
+            .padding(vertical = if (compact) 8.dp else 12.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(if (selected > 0) c.primaryContainer.copy(alpha = 0.6f) else Color.Transparent)
-            .padding(horizontal = if (selected > 0) 12.dp else 0.dp, vertical = 4.dp)
-            .height(44.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(horizontal = if (selected > 0) 12.dp else 0.dp, vertical = 4.dp),
     ) {
-        Text(
-            if (selected == 0) "%,d shown".format(visibleCount) else "$selected selected",
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(end = 6.dp),
-        )
-        TextButton(onClick = model::selectVisible, enabled = visibleCount > 0) { Text("Select all shown") }
-        if (selected > 0) TextButton(onClick = model::clearSelection) { Text("Select none") }
-        Spacer(Modifier.weight(1f))
-        if (selected > 0) {
-            AccentButton("Add to profile", Icons.Outlined.Add) { model.markSelected(VideoState.INCLUDED) }
-            BarButton(Icons.Outlined.RemoveCircleOutline, "Exclude") { model.markSelected(VideoState.EXCLUDED) }
-            BarButton(Icons.Outlined.Block, "Not for me") { model.markSelected(VideoState.NEGATIVE) }
-            BarButton(Icons.AutoMirrored.Outlined.Undo, "Clear") { model.markSelected(null) }
-        } else {
+        Row(Modifier.height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                "Select videos to add them to your profile, or use the buttons that appear on hover",
-                style = MaterialTheme.typography.bodySmall,
-                color = c.onSurfaceVariant,
+                if (selected == 0) "%,d shown".format(visibleCount) else "$selected selected",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(end = 6.dp),
             )
+            TextButton(onClick = model::selectVisible, enabled = visibleCount > 0) { Text(if (compact) "Select all" else "Select all shown") }
+            if (selected > 0) TextButton(onClick = model::clearSelection) { Text(if (compact) "None" else "Select none") }
+            Spacer(Modifier.weight(1f))
+            when {
+                selected > 0 && !compact -> actions()
+                selected == 0 && !compact -> Text(
+                    "Select videos to add them to your profile, or use the buttons that appear on hover",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.onSurfaceVariant,
+                )
+            }
+        }
+        // A phone has no room beside the count: the actions get a row of their own.
+        if (selected > 0 && compact) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                actions()
+            }
         }
     }
 }
@@ -341,11 +356,17 @@ private fun VideoRow(model: AppModel, row: LibraryRow) {
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val compact = LocalCompact.current
         SelectDot(selected, visible = true, onImage = false) { model.toggle(row.id) }
-        Spacer(Modifier.width(12.dp))
-        LibraryThumbnail(model, row, Modifier.width(168.dp), compact = true)
-        Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
-            Title(row, maxLines = 1)
+        Spacer(Modifier.width(if (compact) 8.dp else 12.dp))
+        // On a phone, tapping the thumbnail plays the video; tapping the rest of the row selects it.
+        LibraryThumbnail(
+            model, row,
+            if (compact) Modifier.width(120.dp).clip(RoundedCornerShape(12.dp)).clickable { model.open(row.id) } else Modifier.width(168.dp),
+            compact = true,
+        )
+        Column(Modifier.weight(1f).padding(horizontal = if (compact) 12.dp else 16.dp)) {
+            Title(row, maxLines = if (compact) 2 else 1)
             Text(details(row), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
             StatePill(row.state, Modifier.padding(top = 8.dp))
         }

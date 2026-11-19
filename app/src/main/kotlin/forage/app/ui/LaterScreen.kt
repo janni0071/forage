@@ -5,8 +5,6 @@ package forage.app.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.TooltipArea
-import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
@@ -29,7 +27,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -69,7 +66,7 @@ import forage.app.Screen
 @Composable
 fun LaterScreen(model: AppModel) {
     val queue = model.sortedLater
-    Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 16.dp, top = 24.dp)) {
+    Column(Modifier.fillMaxSize().padding(screenPadding())) {
         val total = queue.mapNotNull { it.durationSeconds }.sum()
         val unknown = queue.count { it.durationSeconds == null }
         ScreenHeader(
@@ -99,7 +96,7 @@ fun LaterScreen(model: AppModel) {
                     if (index == 0) UpNext(model, item) else QueueRow(model, item, index + 1)
                 }
             }
-            VerticalScrollbar(rememberScrollbarAdapter(listState), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+            Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
         }
     }
 }
@@ -232,7 +229,7 @@ private fun BigThumbnail(model: AppModel, item: LaterItem, width: Dp, playIcon: 
 @Composable
 private fun RoundAction(icon: ImageVector, hint: String, filled: Boolean = false, onClick: () -> Unit) {
     val c = MaterialTheme.colorScheme
-    TooltipArea(
+    Tooltip(
         tooltip = {
             Surface(color = c.inverseSurface, contentColor = c.inverseOnSurface, shape = RoundedCornerShape(8.dp)) {
                 Text(hint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
