@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 
-package forage.desktop.ui
+package forage.app.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -66,12 +66,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import forage.core.recommend.TopicPreference
-import forage.desktop.DesktopModel
-import forage.desktop.Feedback
-import forage.desktop.PickView
+import forage.app.AppModel
+import forage.app.Feedback
+import forage.app.PickView
 
 @Composable
-fun DiscoverScreen(model: DesktopModel) {
+fun DiscoverScreen(model: AppModel) {
     Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 16.dp, top = 24.dp)) {
         Header(model)
         if (model.topics.isNotEmpty()) TopicStrip(model)
@@ -101,7 +101,7 @@ fun DiscoverScreen(model: DesktopModel) {
 }
 
 @Composable
-private fun Header(model: DesktopModel) {
+private fun Header(model: AppModel) {
     var search by remember { mutableStateOf(model.settings.searchYouTube) }
     var shorts by remember { mutableStateOf(model.settings.showShorts) }
     ScreenHeader(
@@ -118,7 +118,7 @@ private fun Header(model: DesktopModel) {
 
 /** The profile's topics as a row of chips; the full view with pin and mute is on the Topics screen. */
 @Composable
-private fun TopicStrip(model: DesktopModel) {
+private fun TopicStrip(model: AppModel) {
     Row(
         Modifier.fillMaxWidth().padding(end = 16.dp).horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -139,7 +139,7 @@ private fun TopicStrip(model: DesktopModel) {
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(container)
-                    .clickable { model.screen = forage.desktop.Screen.TOPICS }
+                    .clickable { model.screen = forage.app.Screen.TOPICS }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
@@ -147,7 +147,7 @@ private fun TopicStrip(model: DesktopModel) {
 }
 
 @Composable
-private fun PickCard(model: DesktopModel, view: PickView) {
+private fun PickCard(model: AppModel, view: PickView) {
     val pick = view.pick
     val rejected = Feedback.NOT_FOR_ME in view.feedback
     val hover = remember { MutableInteractionSource() }

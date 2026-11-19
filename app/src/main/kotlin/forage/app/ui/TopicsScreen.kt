@@ -1,4 +1,4 @@
-package forage.desktop.ui
+package forage.app.ui
 
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.layout.Arrangement
@@ -57,10 +57,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import forage.core.recommend.Cluster
 import forage.core.recommend.TopicPreference
-import forage.desktop.DesktopModel
+import forage.app.AppModel
 
 @Composable
-fun TopicsScreen(model: DesktopModel) {
+fun TopicsScreen(model: AppModel) {
     Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 16.dp, top = 24.dp)) {
         ScreenHeader("Topics", "How your profile groups itself. Pin a topic to get picks from it in every batch; mute one to get none.") {
             AccentButton(
@@ -87,7 +87,7 @@ fun TopicsScreen(model: DesktopModel) {
 }
 
 @Composable
-private fun TopicCard(model: DesktopModel, topic: Cluster) {
+private fun TopicCard(model: AppModel, topic: Cluster) {
     val muted = topic.preference == TopicPreference.MUTED
     Card(
         colors = CardDefaults.cardColors(
@@ -166,7 +166,7 @@ private fun TopicCard(model: DesktopModel, topic: Cluster) {
 
 /** Edits a topic's name in place. Enter saves, Escape cancels, an empty name restores the automatic one. */
 @Composable
-private fun RenameField(model: DesktopModel, topic: Cluster) {
+private fun RenameField(model: AppModel, topic: Cluster) {
     var name by remember(topic.index) { mutableStateOf(TextFieldValue(topic.customName ?: "", TextRange(0, (topic.customName ?: "").length))) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }

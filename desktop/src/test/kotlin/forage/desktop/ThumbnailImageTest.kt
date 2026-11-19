@@ -1,5 +1,8 @@
 package forage.desktop
 
+import forage.app.*
+import forage.app.ui.*
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.mutableStateOf
@@ -11,7 +14,7 @@ import forage.core.source.Capability
 import forage.core.source.ExtractorSource
 import forage.core.source.VideoDetails
 import forage.core.source.VideoStub
-import forage.desktop.ui.ThumbnailImage
+import forage.app.ui.ThumbnailImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import java.nio.file.Files

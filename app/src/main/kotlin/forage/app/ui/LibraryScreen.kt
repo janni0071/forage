@@ -1,4 +1,4 @@
-package forage.desktop.ui
+package forage.app.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
@@ -76,13 +76,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import forage.core.profile.VideoState
-import forage.desktop.DesktopModel
-import forage.desktop.LibraryRow
-import forage.desktop.LibrarySource
-import forage.desktop.StateFilter
+import forage.app.AppModel
+import forage.app.LibraryRow
+import forage.app.LibrarySource
+import forage.app.StateFilter
 
 @Composable
-fun LibraryScreen(model: DesktopModel, onImport: () -> Unit) {
+fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
     if (model.addDialogOpen) AddVideosDialog(model)
     if (model.libraryEmpty) {
         EmptyLibrary(model, onImport)
@@ -148,7 +148,7 @@ fun LibraryScreen(model: DesktopModel, onImport: () -> Unit) {
 }
 
 @Composable
-private fun EmptyLibrary(model: DesktopModel, onImport: () -> Unit) {
+private fun EmptyLibrary(model: AppModel, onImport: () -> Unit) {
     val c = MaterialTheme.colorScheme
     Column(
         Modifier.fillMaxSize().padding(48.dp),
@@ -188,7 +188,7 @@ private fun EmptyLibrary(model: DesktopModel, onImport: () -> Unit) {
 
 /** List or grid, as a two-part switch. */
 @Composable
-private fun ViewToggle(model: DesktopModel) {
+private fun ViewToggle(model: AppModel) {
     val c = MaterialTheme.colorScheme
     Row(Modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, c.outlineVariant, RoundedCornerShape(12.dp))) {
         for ((grid, icon) in listOf(false to Icons.AutoMirrored.Outlined.ViewList, true to Icons.Outlined.GridView)) {
@@ -209,7 +209,7 @@ private fun ViewToggle(model: DesktopModel) {
 
 /** Where the videos come from: the watch history, each imported playlist, or this profile's decisions. */
 @Composable
-private fun SourceTabs(model: DesktopModel) {
+private fun SourceTabs(model: AppModel) {
     val c = MaterialTheme.colorScheme
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 14.dp),
@@ -248,7 +248,7 @@ private fun SourceTabs(model: DesktopModel) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Filters(model: DesktopModel) {
+private fun Filters(model: AppModel) {
     val counts = remember(model.rows) {
         val byState = model.rows.groupingBy { it.state }.eachCount()
         StateFilter.entries.associateWith { f -> if (f == StateFilter.ALL) model.rows.size else byState.filterKeys(f::matches).values.sum() }
@@ -272,7 +272,7 @@ private fun Filters(model: DesktopModel) {
 
 /** Selection tools: quiet while nothing is selected, a highlighted bar with the bulk actions once something is. */
 @Composable
-private fun ActionBar(model: DesktopModel, visibleCount: Int) {
+private fun ActionBar(model: AppModel, visibleCount: Int) {
     val selected = model.selection.size
     val c = MaterialTheme.colorScheme
     Row(
@@ -319,7 +319,7 @@ private fun BarButton(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun VideoRow(model: DesktopModel, row: LibraryRow) {
+private fun VideoRow(model: AppModel, row: LibraryRow) {
     val c = MaterialTheme.colorScheme
     val selected = row.id in model.selection
     val hover = remember { MutableInteractionSource() }
@@ -355,7 +355,7 @@ private fun VideoRow(model: DesktopModel, row: LibraryRow) {
 
 /** The library as a grid: thumbnails first, which helps with the many videos that have no title yet. */
 @Composable
-private fun LibraryCard(model: DesktopModel, row: LibraryRow, anySelected: Boolean) {
+private fun LibraryCard(model: AppModel, row: LibraryRow, anySelected: Boolean) {
     val c = MaterialTheme.colorScheme
     val selected = row.id in model.selection
     val hover = remember { MutableInteractionSource() }
@@ -409,7 +409,7 @@ private fun details(row: LibraryRow): String = listOfNotNull(
 ).joinToString("  ·  ").ifEmpty { if (row.hasMetadata) "" else "No details yet" }
 
 @Composable
-private fun LibraryThumbnail(model: DesktopModel, row: LibraryRow, modifier: Modifier, playOnHover: Boolean = false, compact: Boolean = false) {
+private fun LibraryThumbnail(model: AppModel, row: LibraryRow, modifier: Modifier, playOnHover: Boolean = false, compact: Boolean = false) {
     val zoom by animateFloatAsState(if (playOnHover) 1.04f else 1f)
     Box(modifier.aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
         if (model.showThumbnails) ThumbnailImage(model, row.id, zoom = zoom, compact = compact, preview = playOnHover)
@@ -480,7 +480,7 @@ private fun StatePill(state: VideoState?, modifier: Modifier = Modifier, solid: 
 
 /** One-click actions for a single video, shown while the mouse is over its row. */
 @Composable
-private fun QuickActions(model: DesktopModel, row: LibraryRow) {
+private fun QuickActions(model: AppModel, row: LibraryRow) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         val inProfile = row.state == VideoState.INCLUDED
         QuickButton(Icons.Filled.PlayArrow, "Play") { model.open(row.id) }

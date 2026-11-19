@@ -1,4 +1,4 @@
-package forage.desktop
+package forage.app
 
 import java.io.File
 import java.util.Properties
@@ -14,10 +14,10 @@ class Settings(private val file: File?, copyOf: Settings? = null) {
         copyOf?.let { putAll(it.properties); remove("profile") }
     }
 
-    var player: Player
+    /** The chosen player; null until the user picks one, and the app picks a default. */
+    var player: Player?
         get() = properties.getProperty("player")?.let { runCatching { Player.valueOf(it) }.getOrNull() }
-            ?: Player.entries.firstOrNull { it != Player.BROWSER && it.problem == null } ?: Player.BROWSER
-        set(value) = set("player", value.name)
+        set(value) = if (value == null) Unit.also { remove("player") } else set("player", value.name)
 
     var searchYouTube: Boolean
         get() = properties.getProperty("discover.search", "true").toBoolean()

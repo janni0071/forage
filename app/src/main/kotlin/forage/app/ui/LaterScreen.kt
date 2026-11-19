@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalFoundationApi::class)
 
-package forage.desktop.ui
+package forage.app.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -61,13 +61,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import forage.desktop.DesktopModel
-import forage.desktop.LaterItem
-import forage.desktop.LaterSort
-import forage.desktop.Screen
+import forage.app.AppModel
+import forage.app.LaterItem
+import forage.app.LaterSort
+import forage.app.Screen
 
 @Composable
-fun LaterScreen(model: DesktopModel) {
+fun LaterScreen(model: AppModel) {
     val queue = model.sortedLater
     Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 16.dp, top = 24.dp)) {
         val total = queue.mapNotNull { it.durationSeconds }.sum()
@@ -106,7 +106,7 @@ fun LaterScreen(model: DesktopModel) {
 
 /** The first video, large: what to watch next. */
 @Composable
-private fun UpNext(model: DesktopModel, item: LaterItem) {
+private fun UpNext(model: AppModel, item: LaterItem) {
     val c = MaterialTheme.colorScheme
     Row(
         Modifier
@@ -152,7 +152,7 @@ private fun UpNext(model: DesktopModel, item: LaterItem) {
 }
 
 @Composable
-private fun QueueRow(model: DesktopModel, item: LaterItem, position: Int) {
+private fun QueueRow(model: AppModel, item: LaterItem, position: Int) {
     val c = MaterialTheme.colorScheme
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
@@ -193,7 +193,7 @@ private fun QueueRow(model: DesktopModel, item: LaterItem, position: Int) {
 
 /** A 16:9 thumbnail that plays on click, zooms a little under the mouse and shows the length. */
 @Composable
-private fun BigThumbnail(model: DesktopModel, item: LaterItem, width: Dp, playIcon: Dp) {
+private fun BigThumbnail(model: AppModel, item: LaterItem, width: Dp, playIcon: Dp) {
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     val zoom by animateFloatAsState(if (hovered) 1.05f else 1f)
@@ -255,7 +255,7 @@ private fun RoundAction(icon: ImageVector, hint: String, filled: Boolean = false
 }
 
 @Composable
-private fun EmptyQueue(model: DesktopModel) {
+private fun EmptyQueue(model: AppModel) {
     val c = MaterialTheme.colorScheme
     Column(Modifier.fillMaxSize().padding(bottom = 80.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Box(Modifier.size(96.dp).clip(CircleShape).background(c.primaryContainer), contentAlignment = Alignment.Center) {

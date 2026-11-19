@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalMaterial3Api::class)
 
-package forage.desktop.ui
+package forage.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,12 +50,12 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import forage.desktop.DesktopModel
-import forage.desktop.Player
-import forage.desktop.Theme
+import forage.app.AppModel
+import forage.app.Player
+import forage.app.Theme
 
 @Composable
-fun SettingsDialog(model: DesktopModel) {
+fun SettingsDialog(model: AppModel) {
     val c = MaterialTheme.colorScheme
     BasicAlertDialog(onDismissRequest = { model.settingsOpen = false }) {
         Surface(shape = RoundedCornerShape(28.dp), color = c.surfaceContainerLow, modifier = Modifier.width(600.dp)) {
@@ -65,21 +65,24 @@ fun SettingsDialog(model: DesktopModel) {
                     IconButton(onClick = { model.settingsOpen = false }) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
                 }
 
-                Section("Playback", "Where videos open. Forage only finds and organizes them.")
-                // Checking for players starts small processes, so do it once per opening.
-                val problems = remember { Player.entries.associateWith { it.problem } }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    for (p in Player.entries) {
-                        PlayerCard(
-                            player = p,
-                            problem = problems[p],
-                            selected = model.player == p,
-                            modifier = Modifier.weight(1f),
-                        ) { model.choosePlayer(p) }
+                // Phones open videos in the app the system has for the link, so there's nothing to choose.
+                if (model.platform.players.isNotEmpty()) {
+                    Section("Playback", "Where videos open. Forage only finds and organizes them.")
+                    // Checking for players starts small processes, so do it once per opening.
+                    val problems = remember { model.platform.players.associateWith { model.platform.playerProblem(it) } }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        for (p in model.platform.players) {
+                            PlayerCard(
+                                player = p,
+                                problem = problems[p],
+                                selected = model.player == p,
+                                modifier = Modifier.weight(1f),
+                            ) { model.choosePlayer(p) }
+                        }
                     }
-                }
-                if (model.player == Player.MPV && problems[Player.MPV] == "needs yt-dlp") {
-                    Hint("mpv needs a current yt-dlp to play YouTube videos. Install it with 'pipx install yt-dlp', or use mpv from Flathub, which includes it.")
+                    if (model.player == Player.MPV && problems[Player.MPV] == "needs yt-dlp") {
+                        Hint("mpv needs a current yt-dlp to play YouTube videos. Install it with 'pipx install yt-dlp', or use mpv from Flathub, which includes it.")
+                    }
                 }
 
                 Section("Appearance", null)
@@ -93,7 +96,7 @@ fun SettingsDialog(model: DesktopModel) {
                     onSelect = model::changeTheme,
                 )
 
-                if (!model.isPrivate) {
+                if (!model.isPrivate && !model.platform.isMobile) {
                     SwitchRow(
                         title = "Forage's own title bar",
                         text = "Window buttons in the top corner instead of the system's title bar. Turn off if moving or resizing " +
@@ -103,14 +106,17 @@ fun SettingsDialog(model: DesktopModel) {
                     )
                 }
 
-                Section("Interface size", "Also Ctrl + Plus, Ctrl + Minus, and Ctrl + 0 for automatic.")
-                Segmented(
-                    options = listOf<Triple<Float?, String, androidx.compose.ui.graphics.vector.ImageVector?>>(
-                        Triple(null, "Auto", null),
-                    ) + forage.desktop.Zoom.choices.map { Triple(it, forage.desktop.Zoom.label(it), null) },
-                    selected = model.uiScale,
-                    onSelect = model::changeUiScale,
-                )
+                // Phones size the interface through the system's display settings.
+                if (!model.platform.isMobile) {
+                    Section("Interface size", "Also Ctrl + Plus, Ctrl + Minus, and Ctrl + 0 for automatic.")
+                    Segmented(
+                        options = listOf<Triple<Float?, String, androidx.compose.ui.graphics.vector.ImageVector?>>(
+                            Triple(null, "Auto", null),
+                        ) + forage.app.Zoom.choices.map { Triple(it, forage.app.Zoom.label(it), null) },
+                        selected = model.uiScale,
+                        onSelect = model::changeUiScale,
+                    )
+                }
 
                 Section("Thumbnails", null)
                 SwitchRow(
@@ -151,7 +157,7 @@ fun SettingsDialog(model: DesktopModel) {
                             AccentButton(if (model.catalogueInfo == null) "Download and import" else "Download again", null, enabled = model.job == null) {
                                 model.downloadCatalogue()
                             }
-                            OutlinedButton(onClick = { chooseZip()?.let(model::importCatalogue) }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
+                            OutlinedButton(onClick = { model.platform.chooseFile("Choose the downloaded embed dump (pornhub.com-db.zip)", "zip")?.let(model::importCatalogue) }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
                                 Text("Choose a downloaded file…")
                             }
                             Spacer(Modifier.weight(1f))
@@ -312,14 +318,4 @@ private fun Hint(text: String) {
         modifier = Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.errorContainer).padding(12.dp),
     )
-}
-
-/** Asks for the downloaded dump; null when cancelled. */
-private fun chooseZip(): java.io.File? {
-    val chooser = javax.swing.JFileChooser().apply {
-        dialogTitle = "Choose the downloaded embed dump (pornhub.com-db.zip)"
-        fileFilter = javax.swing.filechooser.FileNameExtensionFilter("Zip files", "zip")
-        currentDirectory = java.io.File(System.getProperty("user.home"), "Downloads").takeIf { it.isDirectory }
-    }
-    return if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
 }

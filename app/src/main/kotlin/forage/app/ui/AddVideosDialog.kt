@@ -1,4 +1,4 @@
-package forage.desktop.ui
+package forage.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -57,12 +57,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import forage.core.source.VideoStub
-import forage.desktop.DesktopModel
+import forage.app.AppModel
 
 /** Adding videos to the profile: by searching (SPEC, Manual add) or by pasting links. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddVideosDialog(model: DesktopModel) {
+fun AddVideosDialog(model: AppModel) {
     val c = MaterialTheme.colorScheme
     var tab by remember { mutableStateOf(if (model.searchPlatforms.isEmpty()) Tab.LINKS else Tab.SEARCH) }
     BasicAlertDialog(onDismissRequest = model::closeAddDialog) {
@@ -95,7 +95,7 @@ fun AddVideosDialog(model: DesktopModel) {
 private enum class Tab { SEARCH, LINKS }
 
 @Composable
-private fun SearchTab(model: DesktopModel) {
+private fun SearchTab(model: AppModel) {
     val c = MaterialTheme.colorScheme
     var query by remember { mutableStateOf("") }
     val focus = remember { FocusRequester() }
@@ -151,7 +151,7 @@ private fun SearchTab(model: DesktopModel) {
 }
 
 @Composable
-private fun SearchRow(model: DesktopModel, stub: VideoStub) {
+private fun SearchRow(model: AppModel, stub: VideoStub) {
     val c = MaterialTheme.colorScheme
     val added = stub.id in model.searchInProfile
     Row(
@@ -197,7 +197,7 @@ private fun SearchRow(model: DesktopModel, stub: VideoStub) {
 }
 
 @Composable
-private fun LinksTab(model: DesktopModel) {
+private fun LinksTab(model: AppModel) {
     var link by remember { mutableStateOf("") }
     var problem by remember { mutableStateOf<String?>(null) }
     Text(

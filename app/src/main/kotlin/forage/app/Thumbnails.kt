@@ -1,19 +1,13 @@
-package forage.desktop
+package forage.app
 
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import forage.core.PlatformId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import org.jetbrains.skia.Image
 import java.io.File
-import java.net.ProxySelector
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.Collections
 
@@ -28,6 +22,8 @@ class Thumbnails(
     /** How long a failed image rests before it may be tried again. */
     val retryAfter: Duration = Duration.ofSeconds(20),
     private val clock: () -> Long = System::nanoTime,
+    /** Turns downloaded bytes into an image; throws when it can't. Each platform has its own decoder. */
+    private val decodeImage: (ByteArray) -> ImageBitmap,
     /**
      * The video's preview images, best first: (video, large, fresh), where fresh asks for newly
      * looked-up addresses. Last, so callers can pass it as a trailing lambda.
@@ -50,12 +46,21 @@ class Thumbnails(
     }
     // Polite to the image host and to the CPU decoding them.
     private val permits = Semaphore(4)
-    private val client by lazy {
-        HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .connectTimeout(Duration.ofSeconds(10))
-            .proxy(ProxySelector.getDefault())
-            .build()
+
+    /** One GET with HttpURLConnection, which the desktop JVM and Android both have: the status and, for 200, the bytes. */
+    private fun get(address: String, timeoutMillis: Int): Pair<Int, ByteArray?> {
+        val connection = URI(address).toURL().openConnection() as java.net.HttpURLConnection
+        try {
+            connection.connectTimeout = 10_000
+            connection.readTimeout = timeoutMillis
+            connection.instanceFollowRedirects = true
+            // Formats both platforms decode; some image servers would otherwise pick one by guesswork.
+            connection.setRequestProperty("Accept", "image/jpeg,image/png,image/webp;q=0.9,image/gif;q=0.5")
+            val status = connection.responseCode
+            return status to (if (status == 200) connection.inputStream.use { it.readBytes() } else null)
+        } finally {
+            connection.disconnect()
+        }
     }
 
     /** Videos whose images the server refused, so the UI can say the preview is only on the site. */
@@ -75,14 +80,7 @@ class Thumbnails(
         if (url in failedFrames) return null
         val image = permits.withPermit {
             withContext(Dispatchers.IO) {
-                runCatching {
-                    val response = client.send(
-                        HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(15))
-                            .header("Accept", "image/jpeg,image/png,image/webp;q=0.9,image/gif;q=0.5").build(),
-                        HttpResponse.BodyHandlers.ofByteArray(),
-                    )
-                    if (response.statusCode() == 200) Image.makeFromEncoded(response.body()).toComposeImageBitmap() else null
-                }.getOrNull()
+                runCatching { get(url, 15_000).second?.let(decodeImage) }.getOrNull()
             }
         }
         if (image == null) failedFrames += url else frames[url] = image
@@ -167,16 +165,9 @@ class Thumbnails(
             requests++
             val host = host(address) ?: run { last = Failure("unreadable image address"); null } ?: continue
             val status = try {
-                val response = client.send(
-                    HttpRequest.newBuilder(URI(address))
-                        .timeout(Duration.ofSeconds(20))
-                        // Formats Skia decodes; some image servers would otherwise pick one by guesswork.
-                        .header("Accept", "image/jpeg,image/png,image/webp;q=0.9,image/gif;q=0.5")
-                        .build(),
-                    HttpResponse.BodyHandlers.ofByteArray(),
-                )
-                if (response.statusCode() == 200) return response.body()
-                response.statusCode()
+                val (code, body) = get(address, 20_000)
+                if (body != null) return body
+                code
             } catch (e: java.io.IOException) {
                 last = Failure("${e.javaClass.simpleName} from $host")
                 if (!retried) {
@@ -206,7 +197,7 @@ class Thumbnails(
     private fun host(address: String): String? = runCatching { URI(address).host }.getOrNull()
 
     private fun decode(bytes: ByteArray, what: String): ImageBitmap = try {
-        Image.makeFromEncoded(bytes).toComposeImageBitmap()
+        decodeImage(bytes)
     } catch (e: Exception) {
         throw Failure("$what isn't in a format Forage can show (${format(bytes)})")
     }

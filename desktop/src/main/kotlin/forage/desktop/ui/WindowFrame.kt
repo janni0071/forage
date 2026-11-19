@@ -189,7 +189,3 @@ internal fun resized(from: Rectangle, edges: Int, dx: Int, dy: Int, minWidth: In
     }
     return Rectangle(x, y, w, h)
 }
-
-/** A hairline around the window where the system frame used to be, so it stands apart from what's behind it. */
-@Composable
-fun frameBorderColor(): Color = MaterialTheme.colorScheme.outlineVariant

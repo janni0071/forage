@@ -1,11 +1,11 @@
-package forage.desktop
+package forage.app
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import forage.core.PlatformId
 import forage.core.db.ForageDatabase
+import forage.core.embedding.Embedder
 import forage.core.embedding.EmbeddingStore
 import forage.core.importer.TakeoutFolder
 import forage.core.importer.WatchEvent
@@ -30,10 +30,6 @@ import forage.core.source.ExtractorSource
 import forage.core.source.SourceException
 import forage.core.source.VideoStub
 import forage.core.source.Capability
-import forage.embedding.onnx.ModelFiles
-import forage.embedding.onnx.ModelSpec
-import forage.embedding.onnx.OnnxEmbedder
-import forage.language.lingua.LinguaDetector
 import forage.core.source.Sources
 import forage.source.pornhub.DumpDownload
 import forage.source.pornhub.PornhubCatalogue
@@ -54,7 +50,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
-import java.util.Properties
 
 enum class Screen { LIBRARY, TOPICS, DISCOVER, LATER }
 
@@ -115,13 +110,15 @@ data class Job(val label: String, val done: Int = 0, val total: Int? = null, val
  * Everything the desktop UI shows and does, kept free of Compose UI code so it can be tested
  * and driven headlessly. State lives in snapshot state; work runs on [io].
  */
-class DesktopModel(
+class AppModel(
     val dataDir: File,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher = Dispatchers.IO,
-    private val storage: Storage = Storage.plain(dataDir),
+    private val storage: Storage,
     /** Shared with the private vault's model, so the models load only once. */
-    private val models: Models = Models(dataDir),
+    private val models: Models,
+    /** What the desktop and Android apps do differently. */
+    val platform: Platform,
     /** The private vault also offers the sensitive platform (SPEC, "Sensitive platforms"). */
     private val privateSourceFactory: () -> ExtractorSource = { Sources(YouTubeSource(), PornhubSource()) },
     /** Replaceable for tests; created on first use otherwise, since it starts network clients. Last, so tests can pass it as a trailing lambda. */
@@ -156,7 +153,10 @@ class DesktopModel(
         systemTitleBar = on
     }
 
-    var player by mutableStateOf(settings.player)
+    /** Where videos open, on platforms that offer a choice; the first usable one until the user picks. */
+    var player by mutableStateOf(
+        settings.player ?: platform.players.firstOrNull { it != Player.BROWSER && platform.playerProblem(it) == null } ?: Player.BROWSER
+    )
         private set
 
     fun choosePlayer(value: Player) {
@@ -166,18 +166,14 @@ class DesktopModel(
 
     /** Opens the folder the vault lives in, in the system's file manager. */
     fun openDataFolder() {
-        try {
-            java.awt.Desktop.getDesktop().open(dataDir.absoluteFile)
-        } catch (e: Exception) {
-            message = "Couldn't open the folder: ${dataDir.absolutePath}"
-        }
+        if (!platform.openFolder(dataDir.absoluteFile)) message = "Couldn't open the folder: ${dataDir.absolutePath}"
     }
 
     var profileMenuOpen by mutableStateOf(false)
     var profileDialog by mutableStateOf<ProfileDialog?>(null)
 
     private val source by lazy(sourceFactory)
-    val thumbnails = Thumbnails(storage.thumbnailsDir) { id, large, fresh ->
+    val thumbnails = Thumbnails(storage.thumbnailsDir, decodeImage = platform::decodeImage) { id, large, fresh ->
         // The catalogue's links are stable; the platform is asked only when they're refused.
         val fromCatalogue = if (!large && !fresh && isPrivate && id.platform == PornhubSource.PLATFORM) openCatalogue()?.thumbnailUrl(id) else null
         fromCatalogue?.let { listOf(it) } ?: source.thumbnailUrls(id, large, fresh)
@@ -202,9 +198,9 @@ class DesktopModel(
     }
     private val searchCache = SearchCache(db)
     private val topicStore = TopicStore(db)
-    private fun embedder(update: (String) -> Unit = {}): OnnxEmbedder = models.embedder(update)
+    private fun embedder(update: (String) -> Unit = {}): Embedder = models.embedder(update)
 
-    private fun detector(): LanguageDetector = models.detector()
+    private fun detector(): LanguageDetector? = models.detector()
 
     /** Everything this model starts runs here, so locking a private vault can stop all of it. */
     private val ownScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[CoroutineJob]))
@@ -229,7 +225,7 @@ class DesktopModel(
             inBackground("Loading the recommendation models") {
                 embedder()
                 // One detection loads the language models, which is the slow part.
-                detector().scores("warming up the language models")
+                detector()?.scores("warming up the language models")
             }
         }
     }
@@ -262,7 +258,7 @@ class DesktopModel(
     /** The size actually used: the user's choice, or the automatic one. */
     val effectiveUiScale: Float get() = uiScale ?: autoUiScale
 
-    private val autoUiScale by lazy { Zoom.auto() }
+    private val autoUiScale by lazy { platform.automaticUiScale() }
 
     fun changeTheme(value: Theme) {
         settings.theme = value
@@ -720,7 +716,7 @@ class DesktopModel(
 
     // Topics
 
-    private fun discoverer(embedder: OnnxEmbedder, withSearch: Boolean = false) = Discover(
+    private fun discoverer(embedder: Embedder, withSearch: Boolean = false) = Discover(
         cache, library, profiles, EmbeddingStore(db, embedder), detector(),
         source.takeIf { withSearch }, RankingConfig(showShorts = settings.showShorts), searchCache, topicStore,
         tagPlatforms = tagPlatforms,
@@ -848,22 +844,10 @@ class DesktopModel(
     }
 
     fun open(id: PlatformId) {
-        val player = player
-        val log = storage.playerLog
-        val process = try {
-            Player.open(player, id, source.watchUrl(id), log)
+        try {
+            platform.openVideo(id, source.watchUrl(id), player, storage.playerLog) { problem -> message = problem }
         } catch (e: Exception) {
             message = e.message
-            return
-        } ?: return
-        // A player that can't play the link usually quits within seconds; say why instead of doing nothing.
-        ownScope.launch(io) {
-            if (process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS) && process.exitValue() != 0) {
-                // The last line is usually a generic "Exiting"; the line naming the error says more.
-                val lines = runCatching { log?.readLines().orEmpty().map { it.trim() }.filter { it.isNotEmpty() } }.getOrDefault(emptyList())
-                val last = lines.lastOrNull { "ERROR" in it } ?: lines.lastOrNull()
-                message = "${player.label} couldn't play the video" + (last?.let { ": $it" } ?: "") + (log?.let { " (full output: ${it.path})" } ?: "")
-            }
         }
     }
 
@@ -1003,10 +987,14 @@ class DesktopModel(
 
     // The private vault, opened from the normal vault's model.
 
-    private val privateVaults: PrivateVaults? = if (storage.isPrivate) null else PrivateVaults(File(dataDir, "private"))
+    private val privateVaults: PrivateVaults? =
+        if (storage.isPrivate || !platform.hasPrivateVault) null else PrivateVaults(File(dataDir, "private"))
+
+    /** Whether "Private profiles…" is offered: in the normal vault, on platforms that have a private vault. */
+    val offersPrivateVault get() = privateVaults != null
 
     /** The open private vault, shown instead of this one while it's set. */
-    var privateModel by mutableStateOf<DesktopModel?>(null)
+    var privateModel by mutableStateOf<AppModel?>(null)
         private set
     var privateError by mutableStateOf<String?>(null)
     var privateBusy by mutableStateOf(false)
@@ -1034,10 +1022,10 @@ class DesktopModel(
                         pin.fill('\u0000')
                     }
                     unlocked?.let { u ->
-                        val database = EncryptedDatabase(vaults, u)
+                        val storage = platform.privateStorage(vaults, u, settings) ?: error("No private vault on this device")
                         // One thread for everything: the decrypted database is a single in-memory connection.
-                        DesktopModel(
-                            dataDir, scope, Dispatchers.IO.limitedParallelism(1), Storage.private(database, settings), models,
+                        AppModel(
+                            dataDir, scope, Dispatchers.IO.limitedParallelism(1), storage, models, platform,
                             privateSourceFactory = privateSourceFactory, sourceFactory = privateSourceFactory,
                         )
                     }
@@ -1070,18 +1058,4 @@ class DesktopModel(
         return scope.launch { open.shutdown() }
     }
 
-    companion object {
-        fun openDatabase(file: File): ForageDatabase = ForageDatabase(openDriver(file))
-
-        /** Opens (creating or upgrading) the vault's database file. */
-        fun openDriver(file: File): JdbcSqliteDriver {
-            file.absoluteFile.parentFile.mkdirs()
-            // Background fetches write while the UI reads; WAL lets them do so without blocking each other.
-            val properties = Properties().apply {
-                setProperty("journal_mode", "WAL")
-                setProperty("busy_timeout", "10000")
-            }
-            return JdbcSqliteDriver("jdbc:sqlite:${file.path}", properties, ForageDatabase.Schema)
-        }
-    }
 }

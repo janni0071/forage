@@ -1,9 +1,12 @@
 package forage.desktop
 
+import forage.app.*
+import forage.app.ui.*
+
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
-import forage.desktop.ui.App
-import forage.desktop.ui.ForageTheme
+import forage.app.ui.App
+import forage.app.ui.ForageTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking

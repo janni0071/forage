@@ -1,5 +1,8 @@
 package forage.desktop
 
+import forage.app.*
+import forage.app.ui.*
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 

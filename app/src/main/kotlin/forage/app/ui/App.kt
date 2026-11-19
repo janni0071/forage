@@ -1,10 +1,11 @@
-package forage.desktop.ui
+package forage.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,18 +54,29 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import forage.desktop.DesktopModel
-import forage.desktop.Screen
+import forage.app.AppModel
+import forage.app.Screen
+
+/**
+ * What a desktop window without the system's frame adds around the app: a title bar above the
+ * content, somewhere to drag the window by, edges to resize it, and an outline.
+ */
+class WindowChrome(
+    val titleBar: @Composable () -> Unit,
+    val dragArea: Modifier,
+    val overlay: @Composable BoxScope.() -> Unit,
+    val outlined: Boolean,
+)
 
 @Composable
-fun App(model: DesktopModel, onImport: () -> Unit, frame: WindowFrame? = null) {
-    val outline = if (frame != null && !frame.maximized) Modifier.border(1.dp, frameBorderColor()) else Modifier
+fun App(model: AppModel, onImport: () -> Unit, chrome: WindowChrome? = null) {
+    val outline = if (chrome?.outlined == true) Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant) else Modifier
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().then(outline)) {
             Row {
-                Sidebar(model, onImport, frame)
+                Sidebar(model, onImport, chrome)
                 Column(Modifier.weight(1f).fillMaxHeight()) {
-                    frame?.let { TitleBar(it) }
+                    chrome?.titleBar?.invoke()
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when (model.screen) {
                             Screen.LIBRARY -> LibraryScreen(model, onImport)
@@ -76,19 +88,19 @@ fun App(model: DesktopModel, onImport: () -> Unit, frame: WindowFrame? = null) {
                     }
                 }
             }
-            frame?.let { ResizeEdges(it) }
+            chrome?.overlay?.invoke(this)
         }
     }
 }
 
 @Composable
-private fun Sidebar(model: DesktopModel, onImport: () -> Unit, frame: WindowFrame?) {
+private fun Sidebar(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?) {
     val c = MaterialTheme.colorScheme
     Column(
         Modifier.width(236.dp).fillMaxHeight().background(c.surfaceContainerLow).padding(horizontal = 14.dp, vertical = 22.dp),
     ) {
         // Without the system title bar, the logo is somewhere to move the window by too.
-        val move = frame?.let { Modifier.moveWindow(it) } ?: Modifier
+        val move = chrome?.dragArea ?: Modifier
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, bottom = 30.dp).then(move)) {
             Box(
                 Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).background(Brush.linearGradient(listOf(Accent.pastelPink, Accent.lavender))),
@@ -167,14 +179,14 @@ private fun NavItem(
 }
 
 @Composable
-private fun SettingsItem(model: DesktopModel) {
+private fun SettingsItem(model: AppModel) {
     NavItem(Icons.Outlined.Settings, "Settings", selected = model.settingsOpen) { model.settingsOpen = true }
     if (model.settingsOpen) SettingsDialog(model)
 }
 
 /** Progress and messages float above the content, like a snackbar. */
 @Composable
-private fun StatusToast(model: DesktopModel, modifier: Modifier) {
+private fun StatusToast(model: AppModel, modifier: Modifier) {
     val job = model.job
     val text = job?.let { j ->
         listOfNotNull(j.label, j.total?.let { "${j.done} of $it" }, j.detail.takeIf { it.isNotBlank() }).joinToString(" · ")

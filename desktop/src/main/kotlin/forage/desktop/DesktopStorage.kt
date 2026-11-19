@@ -1,57 +1,44 @@
 package forage.desktop
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import forage.app.EncryptedStore
+import forage.app.Settings
+import forage.app.Storage
 import forage.core.db.ForageDatabase
 import forage.core.vault.PrivateVaults
 import org.sqlite.SQLiteConnection
 import java.io.File
 import java.util.Properties
 
-/**
- * Where a vault keeps its things. The normal vault uses files in the data folder; the private
- * vault keeps nothing on disk except its encrypted database file.
- */
-class Storage(
-    val db: ForageDatabase,
-    val settings: Settings,
-    /** Null keeps thumbnails in memory only. */
-    val thumbnailsDir: File?,
-    /** Null discards players' output. */
-    val playerLog: File?,
-    /** Set for the private vault. */
-    val encrypted: EncryptedDatabase? = null,
-    private val closeAction: () -> Unit = {},
-) {
-    val isPrivate get() = encrypted != null
-
-    /** Closes the database. The private vault closes through its model's shutdown instead. */
-    fun close() = closeAction()
-
-    companion object {
-        fun plain(dataDir: File): Storage {
-            val driver = DesktopModel.openDriver(File(dataDir, "forage.db"))
-            return Storage(
-                db = ForageDatabase(driver),
-                settings = Settings(File(dataDir, "settings.properties")),
-                thumbnailsDir = File(dataDir, "thumbnails"),
-                playerLog = File(dataDir, "logs/player.log"),
-                closeAction = {
-                    // Recent changes sit in a side file (forage.db-wal) until folded in. Doing that on exit
-                    // leaves everything in forage.db alone, so copying that one file to another computer is enough.
-                    driver.execute(null, "PRAGMA wal_checkpoint(TRUNCATE)", 0)
-                    driver.close()
-                },
-            )
-        }
-
-        /** The private vault's storage. Settings start as a copy of [settings] and aren't written anywhere. */
-        fun private(database: EncryptedDatabase, settings: Settings) = Storage(
-            db = database.db,
-            settings = Settings(null, copyOf = settings),
-            thumbnailsDir = null,
-            playerLog = null,
-            encrypted = database,
+/** The desktop's vault storage: a SQLite file through JDBC, and the private vault in memory. */
+object DesktopStorage {
+    fun plain(dataDir: File): Storage {
+        val driver = openDriver(File(dataDir, "forage.db"))
+        return Storage(
+            db = ForageDatabase(driver),
+            settings = Settings(File(dataDir, "settings.properties")),
+            thumbnailsDir = File(dataDir, "thumbnails"),
+            playerLog = File(dataDir, "logs/player.log"),
+            closeAction = {
+                // Recent changes sit in a side file (forage.db-wal) until folded in. Doing that on exit
+                // leaves everything in forage.db alone, so copying that one file to another computer is enough.
+                driver.execute(null, "PRAGMA wal_checkpoint(TRUNCATE)", 0)
+                driver.close()
+            },
         )
+    }
+
+    fun openDatabase(file: File): ForageDatabase = ForageDatabase(openDriver(file))
+
+    /** Opens (creating or upgrading) the vault's database file. */
+    fun openDriver(file: File): JdbcSqliteDriver {
+        file.absoluteFile.parentFile.mkdirs()
+        // Background fetches write while the UI reads; WAL lets them do so without blocking each other.
+        val properties = Properties().apply {
+            setProperty("journal_mode", "WAL")
+            setProperty("busy_timeout", "10000")
+        }
+        return JdbcSqliteDriver("jdbc:sqlite:${file.path}", properties, ForageDatabase.Schema)
     }
 }
 
@@ -61,10 +48,10 @@ class Storage(
  *
  * All use must come from one thread at a time: the in-memory database is a single connection.
  */
-class EncryptedDatabase(private val vaults: PrivateVaults, private val vault: PrivateVaults.Unlocked) : AutoCloseable {
+class EncryptedDatabase(private val vaults: PrivateVaults, private val vault: PrivateVaults.Unlocked) : EncryptedStore {
     private val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY, Properties())
     private val connection = driver.getConnection().unwrap(SQLiteConnection::class.java)
-    val db: ForageDatabase
+    override val db: ForageDatabase
     private var savedChanges = -1L
 
     init {
@@ -77,7 +64,7 @@ class EncryptedDatabase(private val vaults: PrivateVaults, private val vault: Pr
 
     /** Writes the vault if anything changed since the last save. Returns whether it did. */
     @Synchronized
-    fun saveIfChanged(): Boolean {
+    override fun saveIfChanged(): Boolean {
         val now = changes()
         if (now == savedChanges) return false
         save(now)

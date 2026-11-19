@@ -1,6 +1,5 @@
-package forage.desktop
+package forage.app
 
-import java.awt.GraphicsEnvironment
 import kotlin.math.roundToInt
 
 /**
@@ -10,14 +9,6 @@ import kotlin.math.roundToInt
  */
 object Zoom {
     val choices = listOf(1f, 1.25f, 1.5f, 1.75f, 2f)
-
-    /** The size to use when the user hasn't chosen one. */
-    fun auto(): Float {
-        val device = runCatching { GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice }.getOrNull() ?: return 1f
-        // The system scales Java already: draw as it says.
-        if (device.defaultConfiguration.defaultTransform.scaleX > 1.01) return 1f
-        return forScreenHeight(device.displayMode.height)
-    }
 
     /** A 1080-pixel-high screen is drawn at 100%; taller screens proportionally larger, in quarter steps. */
     fun forScreenHeight(pixels: Int): Float {

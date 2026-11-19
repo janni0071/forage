@@ -1,5 +1,8 @@
 package forage.desktop
 
+import forage.app.*
+import forage.app.ui.*
+
 import forage.core.PlatformId
 import forage.core.profile.VideoState
 import forage.core.source.Capability

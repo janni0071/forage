@@ -11,6 +11,8 @@ plugins {
 
 kotlin {
     jvmToolchain(21)
+    // The model and screens shared with the Android app.
+    sourceSets.main { kotlin.srcDir("../app/src/main/kotlin") }
 }
 
 dependencies {

@@ -1,5 +1,8 @@
 package forage.desktop
 
+import forage.app.*
+import forage.app.ui.*
+
 import com.sun.net.httpserver.HttpServer
 import forage.core.PlatformId
 import kotlinx.coroutines.runBlocking
@@ -38,7 +41,7 @@ class ThumbnailsTest {
     @Test
     fun `a refused link is looked up again`() {
         val asked = ArrayList<Boolean>()
-        val thumbnails = Thumbnails(null) { _, large, fresh ->
+        val thumbnails = Thumbnails(null, decodeImage = DesktopPlatform::decodeImage) { _, large, fresh ->
             asked += fresh
             if (large) emptyList() else if (fresh) listOf("$base/fresh.png") else listOf("$base/expired.png")
         }
@@ -50,7 +53,7 @@ class ThumbnailsTest {
 
     @Test
     fun `failures are reported by reason`() {
-        val thumbnails = Thumbnails(null) { v, _, _ -> listOf(if (v.id == "v1") "$base/expired.png" else "$base/page") }
+        val thumbnails = Thumbnails(null, decodeImage = DesktopPlatform::decodeImage) { v, _, _ -> listOf(if (v.id == "v1") "$base/expired.png" else "$base/page") }
         assertNull(runBlocking { thumbnails.load(id) })
         assertNull(runBlocking { thumbnails.load(PlatformId("other", "v2")) })
         assertEquals(
@@ -70,7 +73,7 @@ class ThumbnailsTest {
         }
         val other = "http://127.0.0.2:${second.address.port}"
         val asked = ArrayList<String>()
-        val thumbnails = Thumbnails(null) { _, _, _ ->
+        val thumbnails = Thumbnails(null, decodeImage = DesktopPlatform::decodeImage) { _, _, _ ->
             // Two on the refusing server, then one elsewhere: the second on the same server is skipped.
             listOf("$base/expired.png", "$base/expired2.png", "$other/fresh.png").also { asked += "list" }
         }
@@ -90,7 +93,7 @@ class ThumbnailsTest {
             start()
         }
         var lookups = 0
-        val thumbnails = Thumbnails(null) { _, large, fresh ->
+        val thumbnails = Thumbnails(null, decodeImage = DesktopPlatform::decodeImage) { _, large, fresh ->
             when {
                 large -> emptyList()
                 !fresh -> listOf("$base/a.png")

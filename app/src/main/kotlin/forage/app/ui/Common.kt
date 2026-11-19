@@ -1,4 +1,4 @@
-package forage.desktop.ui
+package forage.app.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.ui.text.style.TextAlign
@@ -41,7 +41,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.height
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
-import forage.desktop.DesktopModel
+import forage.app.AppModel
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -144,7 +144,7 @@ fun Tag(text: String, container: Color, content: Color, modifier: Modifier = Mod
 
 /** A video's preview image, or a quiet placeholder while it loads or when thumbnails are off. */
 @Composable
-fun Thumbnail(model: DesktopModel, id: PlatformId, width: Dp, modifier: Modifier = Modifier) {
+fun Thumbnail(model: AppModel, id: PlatformId, width: Dp, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(6.dp)
     val box = modifier.size(width, width * 9 / 16).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant)
     if (!model.showThumbnails) return Box(box)
@@ -165,7 +165,7 @@ private sealed interface ThumbnailState {
  */
 @Composable
 fun BoxScope.ThumbnailImage(
-    model: DesktopModel,
+    model: AppModel,
     id: PlatformId,
     large: Boolean = false,
     zoom: Float = 1f,
@@ -205,7 +205,7 @@ fun BoxScope.ThumbnailImage(
  * load every video's frames.
  */
 @Composable
-private fun BoxScope.PreviewFrames(model: DesktopModel, id: PlatformId, zoom: Float) {
+private fun BoxScope.PreviewFrames(model: AppModel, id: PlatformId, zoom: Float) {
     var frame by remember(id) { mutableStateOf<ImageBitmap?>(null) }
     var position by remember(id) { mutableStateOf(0 to 0) }
     LaunchedEffect(id) {

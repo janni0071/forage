@@ -1,4 +1,4 @@
-package forage.desktop.ui
+package forage.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -49,12 +49,12 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import forage.desktop.DesktopModel
-import forage.desktop.ProfileDialog
+import forage.app.AppModel
+import forage.app.ProfileDialog
 
 /** The profile card at the bottom of the sidebar; click to switch, create or delete profiles. */
 @Composable
-fun ProfileSwitcher(model: DesktopModel) {
+fun ProfileSwitcher(model: AppModel) {
     val c = MaterialTheme.colorScheme
     Box {
         Row(
@@ -115,7 +115,7 @@ fun ProfileSwitcher(model: DesktopModel) {
                     text = { Text("Lock private vault") },
                     onClick = { model.profileMenuOpen = false; model.onLock?.invoke() },
                 )
-            } else {
+            } else if (model.offersPrivateVault) {
                 // Always shown, whether or not a private vault exists, so the menu never gives one away.
                 DropdownMenuItem(
                     leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
@@ -141,7 +141,7 @@ private fun Avatar(name: String, size: Int) {
 }
 
 @Composable
-private fun ProfileDialogs(model: DesktopModel) {
+private fun ProfileDialogs(model: AppModel) {
     when (model.profileDialog) {
         ProfileDialog.NEW -> NewProfileDialog(model)
         ProfileDialog.DELETE -> AlertDialog(
@@ -163,7 +163,7 @@ private fun ProfileDialogs(model: DesktopModel) {
 }
 
 @Composable
-private fun NewProfileDialog(model: DesktopModel) {
+private fun NewProfileDialog(model: AppModel) {
     var name by remember { mutableStateOf("") }
     var problem by remember { mutableStateOf<String?>(null) }
     val create = { problem = model.createProfile(name) }
@@ -201,7 +201,7 @@ private fun NewProfileDialog(model: DesktopModel) {
  * and no vault at all get the same answer.
  */
 @Composable
-private fun PrivateVaultDialog(model: DesktopModel) {
+private fun PrivateVaultDialog(model: AppModel) {
     var creating by remember { mutableStateOf(false) }
     var pin by remember { mutableStateOf("") }
     var repeat by remember { mutableStateOf("") }

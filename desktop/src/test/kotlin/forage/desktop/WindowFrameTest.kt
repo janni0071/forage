@@ -1,5 +1,8 @@
 package forage.desktop
 
+import forage.app.*
+import forage.app.ui.*
+
 import forage.desktop.ui.resized
 import java.awt.Rectangle
 import kotlin.test.Test

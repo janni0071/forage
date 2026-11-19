@@ -1,5 +1,8 @@
 package forage.desktop
 
+import forage.app.*
+import forage.app.ui.*
+
 import forage.core.PlatformId
 import forage.core.importer.ImportResult
 import forage.core.importer.PlaylistEntry
@@ -256,7 +259,7 @@ class DesktopModelTest {
         val wal = folder.resolve("forage.db-wal")
         assertTrue(!wal.exists() || wal.length() == 0L, "pending changes left in ${wal.name}")
         // A fresh open of the file alone sees the change.
-        assertEquals("Written just before closing", forage.core.library.LibraryStore(DesktopModel.openDatabase(folder.resolve("forage.db"))).video(id("z"))?.title)
+        assertEquals("Written just before closing", forage.core.library.LibraryStore(DesktopStorage.openDatabase(folder.resolve("forage.db"))).video(id("z"))?.title)
     }
 
     @Test

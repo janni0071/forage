@@ -7,13 +7,21 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.res.useResource
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import forage.desktop.ui.App
+import forage.app.Settings
+import forage.app.Theme
+import forage.app.Zoom
+import forage.app.ui.App
+import forage.app.ui.ForageTheme
+import forage.app.ui.WindowChrome
+import forage.desktop.ui.ResizeEdges
+import forage.desktop.ui.TitleBar
 import forage.desktop.ui.WindowFrame
-import forage.desktop.ui.ForageTheme
+import forage.desktop.ui.moveWindow
 import java.io.File
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.Key
@@ -46,7 +54,7 @@ fun main(args: Array<String>) {
     val dir = dataDir(args)
     // The window opens at a size that fits the interface size, read before anything is shown.
     val startSettings = Settings(File(dir, "settings.properties"))
-    val startScale = startSettings.uiScale ?: Zoom.auto()
+    val startScale = startSettings.uiScale ?: automaticZoom()
     // Forage draws its own title bar unless asked not to; a window's frame can only be chosen before it opens.
     val ownFrame = !startSettings.systemTitleBar
     application {
@@ -99,7 +107,7 @@ fun main(args: Array<String>) {
                 }
             }
             val systemDark = isSystemInDarkTheme()
-            val linuxDark = remember { if ("linux" in System.getProperty("os.name").lowercase()) Theme.linuxPrefersDark() else null }
+            val linuxDark = remember { if ("linux" in System.getProperty("os.name").lowercase()) linuxPrefersDark() else null }
             val dark = when (active.theme) {
                 Theme.LIGHT -> false
                 Theme.DARK -> true
@@ -108,7 +116,10 @@ fun main(args: Array<String>) {
             val base = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(base.density * active.effectiveUiScale, base.fontScale)) {
             ForageTheme(dark = dark) {
-                App(active, frame = frame, onImport = {
+                val chrome = frame?.let { f ->
+                    WindowChrome(titleBar = { TitleBar(f) }, dragArea = Modifier.moveWindow(f), overlay = { ResizeEdges(f) }, outlined = !f.maximized)
+                }
+                App(active, chrome = chrome, onImport = {
                     val chooser = JFileChooser().apply {
                         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
                         dialogTitle = "Choose the extracted Takeout folder"
