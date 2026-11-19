@@ -7,9 +7,8 @@ import forage.core.source.VideoStub
 import java.io.BufferedReader
 import java.io.File
 import java.io.FilterInputStream
+import java.io.InputStream
 import java.io.InputStreamReader
-import java.sql.Connection
-import java.sql.DriverManager
 import java.util.PriorityQueue
 import java.util.zip.ZipInputStream
 import kotlin.math.ln
@@ -25,7 +24,7 @@ import kotlin.math.sqrt
  * the video rows, each tag keeps the list of videos carrying it (delta-encoded), so matching a
  * profile's tags reads a few dozen lists instead of every video.
  */
-class PornhubCatalogue private constructor(private val connection: Connection) : VideoCatalogue, AutoCloseable {
+class PornhubCatalogue private constructor(private val db: SqlFile) : VideoCatalogue, AutoCloseable {
     override val platform = PornhubSource.PLATFORM
     override val size: Int
     /** When the dump was imported, as epoch seconds. */
@@ -37,10 +36,7 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
     private val quality: ByteArray
 
     init {
-        fun meta(key: String) = connection.prepareStatement("SELECT value FROM meta WHERE key = ?").use { st ->
-            st.setString(1, key)
-            st.executeQuery().use { if (it.next()) it.getBytes(1) else null }
-        }
+        fun meta(key: String) = db.blob("meta", "value", "key = ?", key)
         size = meta("count")?.decodeToString()?.toInt() ?: 0
         importedAt = meta("imported_at")?.decodeToString()?.toLong() ?: 0
         current = meta("version")?.decodeToString() == SCHEMA_VERSION
@@ -48,7 +44,7 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
         quality = meta("quality") ?: ByteArray(size + 1)
     }
 
-    override fun matching(tagCounts: Map<String, Double>, limit: Int, exclude: Set<PlatformId>): List<CatalogueMatch> = synchronized(connection) {
+    override fun matching(tagCounts: Map<String, Double>, limit: Int, exclude: Set<PlatformId>): List<CatalogueMatch> = synchronized(db) {
         if (size == 0 || limit <= 0) return emptyList()
         // Weigh each profile tag by how rare it is in the catalogue; keep the most telling.
         val tags = tagCounts.entries.mapNotNull { (raw, count) ->
@@ -105,15 +101,14 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
         }
     }
 
-    override fun thumbnailUrl(id: PlatformId): String? = synchronized(connection) {
+    override fun thumbnailUrl(id: PlatformId): String? = synchronized(db) {
         if (id.platform != platform) return null
-        connection.prepareStatement("SELECT thumb FROM video WHERE key = ?").use { st ->
-            st.setString(1, id.id)
-            st.executeQuery().use { if (it.next()) it.getString(1) else null }
-        }
+        var thumb: String? = null
+        db.query("SELECT thumb FROM video WHERE key = ?", listOf(id.id)) { thumb = it.string(0) }
+        thumb
     }
 
-    override fun close() = synchronized(connection) { connection.close() }
+    override fun close() = synchronized(db) { db.close() }
 
     private data class Tag(val id: Int, val name: String, val df: Int)
 
@@ -121,51 +116,42 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
         val key: String, val title: String, val duration: Long?, val performers: List<String>, val tagIds: Set<Int>, val thumb: String?,
     )
 
-    private fun tag(name: String): Tag? = connection.prepareStatement("SELECT id, df FROM tag WHERE name = ?").use { st ->
-        st.setString(1, name)
-        st.executeQuery().use { if (it.next()) Tag(it.getInt(1), name, it.getInt(2)) else null }
+    private fun tag(name: String): Tag? {
+        var found: Tag? = null
+        db.query("SELECT id, df FROM tag WHERE name = ?", listOf(name)) { found = Tag(it.int(0), name, it.int(1)) }
+        return found
     }
 
-    private fun postings(tagId: Int): ByteArray = connection.prepareStatement("SELECT postings FROM tag WHERE id = ?").use { st ->
-        st.setInt(1, tagId)
-        st.executeQuery().use { if (it.next()) it.getBytes(1) ?: ByteArray(0) else ByteArray(0) }
-    }
+    // Popular tags' lists run to megabytes, so they're read in pieces.
+    private fun postings(tagId: Int): ByteArray = db.blob("tag", "postings", "id = ?", tagId) ?: ByteArray(0)
 
-    private fun rowId(key: String): Int? = connection.prepareStatement("SELECT id FROM video WHERE key = ?").use { st ->
-        st.setString(1, key)
-        st.executeQuery().use { if (it.next()) it.getInt(1) else null }
+    private fun rowId(key: String): Int? {
+        var id: Int? = null
+        db.query("SELECT id FROM video WHERE key = ?", listOf(key)) { id = it.int(0) }
+        return id
     }
 
     private fun rows(ids: List<Int>): Map<Int, Row> {
         if (ids.isEmpty()) return emptyMap()
         val sql = "SELECT id, key, title, duration, performers, tags, thumb FROM video WHERE id IN (${ids.joinToString(",")})"
-        return connection.createStatement().use { st ->
-            st.executeQuery(sql).use { rs ->
-                buildMap {
-                    while (rs.next()) {
-                        val tagIds = HashSet<Int>()
-                        decodeList(rs.getBytes(6) ?: ByteArray(0)) { tagIds += it }
-                        put(
-                            rs.getInt(1),
-                            Row(
-                                rs.getString(2), rs.getString(3), rs.getLong(4).takeIf { it > 0 },
-                                rs.getString(5).orEmpty().split(';').map { it.trim() }.filter { it.isNotEmpty() }, tagIds,
-                                rs.getString(7),
-                            ),
-                        )
-                    }
-                }
-            }
+        val rows = HashMap<Int, Row>()
+        db.query(sql) { r ->
+            val tagIds = HashSet<Int>()
+            decodeList(r.bytes(5) ?: ByteArray(0)) { tagIds += it }
+            rows[r.int(0)] = Row(
+                r.string(1).orEmpty(), r.string(2).orEmpty(), r.long(3).takeIf { it > 0 },
+                r.string(4).orEmpty().split(';').map { it.trim() }.filter { it.isNotEmpty() }, tagIds,
+                r.string(6),
+            )
         }
+        return rows
     }
 
     private fun tagNames(ids: Set<Int>): Map<Int, String> {
         if (ids.isEmpty()) return emptyMap()
-        return connection.createStatement().use { st ->
-            st.executeQuery("SELECT id, display FROM tag WHERE id IN (${ids.joinToString(",")})").use { rs ->
-                buildMap { while (rs.next()) put(rs.getInt(1), rs.getString(2)) }
-            }
-        }
+        val names = HashMap<Int, String>()
+        db.query("SELECT id, display FROM tag WHERE id IN (${ids.joinToString(",")})") { names[it.int(0)] = it.string(1).orEmpty() }
+        return names
     }
 
     /** What an import did. */
@@ -193,11 +179,10 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
         private const val SCHEMA_VERSION = "2"
         private val EMBED_KEY = Regex("""/embed/([A-Za-z0-9]+)""")
 
-        fun open(file: File): PornhubCatalogue {
+        /** Opens the catalogue in [file], through [opener]: JDBC on the desktop, Android's SQLite on a phone. */
+        fun open(file: File, opener: SqlFile.Opener = JdbcSqlFile): PornhubCatalogue {
             require(file.isFile) { "No catalogue at ${file.path}" }
-            val connection = DriverManager.getConnection("jdbc:sqlite:${file.path}")
-            connection.createStatement().use { it.execute("PRAGMA query_only = ON") }
-            return PornhubCatalogue(connection)
+            return PornhubCatalogue(opener.open(file, writable = false))
         }
 
         /** Same spelling for the catalogue's tags and the profile's: lower case, hyphens and underscores as spaces. */
@@ -218,13 +203,26 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
             now: () -> Long = { System.currentTimeMillis() / 1000 },
             /** Called just before the new file replaces the old one, to close anything reading it. */
             beforeReplace: () -> Unit = {},
+            opener: SqlFile.Opener = JdbcSqlFile,
+        ): ImportSummary = import({ zip.inputStream() }, zip.length(), target, progress, cancelled, now, beforeReplace, opener)
+
+        /** The same from a stream [open] gives, [size] bytes long (a phone's file picker hands out streams, not files). */
+        fun import(
+            open: () -> InputStream,
+            size: Long,
+            target: File,
+            progress: (Double) -> Unit = {},
+            cancelled: () -> Boolean = { false },
+            now: () -> Long = { System.currentTimeMillis() / 1000 },
+            beforeReplace: () -> Unit = {},
+            opener: SqlFile.Opener = JdbcSqlFile,
         ): ImportSummary {
             target.absoluteFile.parentFile.mkdirs()
             val temp = File(target.absoluteFile.parentFile, "${target.name}.importing")
             temp.delete()
-            val total = zip.length().coerceAtLeast(1)
+            val total = size.coerceAtLeast(1)
             var read = 0L
-            val counting = object : FilterInputStream(zip.inputStream().buffered(1 shl 20)) {
+            val counting = object : FilterInputStream(open().buffered(1 shl 20)) {
                 override fun read(): Int = super.read().also { if (it >= 0) read++ }
                 override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { if (it > 0) read += it }
             }
@@ -233,7 +231,7 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
                     var entry = zin.nextEntry
                     while (entry != null && (entry.isDirectory || !entry.name.endsWith(".csv", ignoreCase = true))) entry = zin.nextEntry
                     entry ?: throw LayoutException("The zip holds no .csv file", "no .csv entry")
-                    DriverManager.getConnection("jdbc:sqlite:${temp.path}").use { db ->
+                    opener.open(temp, writable = true).use { db ->
                         write(BufferedReader(InputStreamReader(zin, Charsets.UTF_8), 1 shl 20), db, now()) { rows ->
                             if (rows % 20_000 == 0L) {
                                 if (cancelled()) throw InterruptedException("Import stopped")
@@ -307,21 +305,25 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
             }
         }
 
-        private fun write(reader: BufferedReader, db: Connection, importedAt: Long, onRow: (Long) -> Unit): ImportSummary {
-            db.createStatement().use { st ->
-                st.execute("PRAGMA journal_mode = OFF")
-                st.execute("PRAGMA synchronous = OFF")
-                st.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value BLOB)")
-                st.execute(
-                    "CREATE TABLE video (id INTEGER PRIMARY KEY, key TEXT NOT NULL, title TEXT NOT NULL, duration INTEGER, " +
-                        "views INTEGER, rating REAL, thumb TEXT, performers TEXT, tags BLOB)",
-                )
-                st.execute("CREATE TABLE tag (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, display TEXT NOT NULL, df INTEGER NOT NULL, postings BLOB)")
-            }
-            db.autoCommit = false
+        private fun write(reader: BufferedReader, db: SqlFile, importedAt: Long, onRow: (Long) -> Unit): ImportSummary {
+            db.execute("PRAGMA journal_mode = OFF")
+            db.execute("PRAGMA synchronous = OFF")
+            db.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value BLOB)")
+            db.execute(
+                "CREATE TABLE video (id INTEGER PRIMARY KEY, key TEXT NOT NULL, title TEXT NOT NULL, duration INTEGER, " +
+                    "views INTEGER, rating REAL, thumb TEXT, performers TEXT, tags BLOB)",
+            )
+            db.execute("CREATE TABLE tag (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, display TEXT NOT NULL, df INTEGER NOT NULL, postings BLOB)")
+            return db.transaction { writeRows(reader, db, importedAt, onRow) }
+        }
+
+        private fun writeRows(reader: BufferedReader, db: SqlFile, importedAt: Long, onRow: (Long) -> Unit): ImportSummary {
+            // Lean on memory, so a phone can import too: most tags are on one video and dropped at
+            // the end, so a tag's list starts only with its second video (its first is kept apart).
             val tagIds = HashMap<String, Int>()
-            val tagDisplay = ArrayList<String>()
-            val postings = ArrayList<VarintBuffer>()
+            val tagNames = ArrayList<String>()
+            var firstRow = IntArray(1 shl 16)
+            val lists = ArrayList<VarintBuffer?>()
             val tagCounts = GrowableBytes()
             val quality = GrowableBytes()
             tagCounts.add(0)
@@ -333,91 +335,78 @@ class PornhubCatalogue private constructor(private val connection: Connection) :
             var firstLine: String? = null
             val layouts = HashMap<Pair<Int, Int>, Int>()
 
-            val insert = db.prepareStatement("INSERT INTO video (id, key, title, duration, views, rating, thumb, performers, tags) VALUES (?,?,?,?,?,?,?,?,?)")
-            while (true) {
-                val line = reader.readLine() ?: break
-                if (line.isBlank()) continue
-                lines++
-                if (firstLine == null) firstLine = line
-                onRow(lines)
-                val p = parse(line)
-                if (p == null) {
-                    unreadable++
-                    // Stop early when the file isn't what this reader expects, instead of importing nothing for minutes.
-                    if (lines == 2000L && unreadable > 400) {
-                        throw LayoutException("The dump isn't laid out the way Forage expects", describe(firstLine))
+            db.prepare("INSERT INTO video (id, key, title, duration, views, rating, thumb, performers, tags) VALUES (?,?,?,?,?,?,?,?,?)").use { insert ->
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    if (line.isBlank()) continue
+                    lines++
+                    if (firstLine == null) firstLine = line
+                    onRow(lines)
+                    val p = parse(line)
+                    if (p == null) {
+                        unreadable++
+                        // Stop early when the file isn't what this reader expects, instead of importing nothing for minutes.
+                        if (lines == 2000L && unreadable > 400) {
+                            throw LayoutException("The dump isn't laid out the way Forage expects", describe(firstLine))
+                        }
+                        continue
                     }
-                    continue
-                }
-                layouts.merge(p.fields to p.numbersAt, 1, Int::plus)
-                if (p.views < MIN_VIEWS) {
-                    fewViews++
-                    continue
-                }
-                row++
-                val ids = p.tags.map { t ->
-                    val name = normalize(t)
-                    tagIds.getOrPut(name) {
-                        tagDisplay += t.lowercase()
-                        postings += VarintBuffer()
-                        tagDisplay.size - 1
+                    layouts.merge(p.fields to p.numbersAt, 1, Int::plus)
+                    if (p.views < MIN_VIEWS) {
+                        fewViews++
+                        continue
                     }
-                }.distinct()
-                ids.forEach { postings[it].addDelta(row) }
-                val rating = if (p.likes + p.dislikes > 0) p.likes.toDouble() / (p.likes + p.dislikes) else 0.5
-                tagCounts.add(ids.size.coerceAtMost(255))
-                val q = 0.6 * (log10(p.views.toDouble() + 1) / 7).coerceIn(0.0, 1.0) + 0.4 * rating
-                quality.add((q * 255).toInt().coerceIn(0, 255))
-                insert.setInt(1, row)
-                insert.setString(2, p.key)
-                insert.setString(3, p.title)
-                insert.setLong(4, p.duration)
-                insert.setLong(5, p.views)
-                insert.setDouble(6, rating)
-                insert.setString(7, p.thumb)
-                insert.setString(8, p.performers.joinToString(";"))
-                insert.setBytes(9, VarintBuffer().also { b -> ids.forEach { b.add(it) } }.toByteArray())
-                insert.addBatch()
-                if (row % 10_000 == 0) insert.executeBatch()
+                    row++
+                    val ids = p.tags.map { t ->
+                        val name = normalize(t)
+                        tagIds.getOrPut(name) {
+                            val id = tagNames.size
+                            tagNames += name
+                            lists += null
+                            if (id == firstRow.size) firstRow = firstRow.copyOf(firstRow.size * 2)
+                            id
+                        }
+                    }.distinct()
+                    for (id in ids) {
+                        when {
+                            firstRow[id] == 0 -> firstRow[id] = row
+                            lists[id] == null -> lists[id] = VarintBuffer().apply { addDelta(firstRow[id]); addDelta(row) }
+                            else -> lists[id]!!.addDelta(row)
+                        }
+                    }
+                    val rating = if (p.likes + p.dislikes > 0) p.likes.toDouble() / (p.likes + p.dislikes) else 0.5
+                    tagCounts.add(ids.size.coerceAtMost(255))
+                    val q = 0.6 * (log10(p.views.toDouble() + 1) / 7).coerceIn(0.0, 1.0) + 0.4 * rating
+                    quality.add((q * 255).toInt().coerceIn(0, 255))
+                    insert.run(
+                        row, p.key, p.title, p.duration, p.views, rating, p.thumb, p.performers.joinToString(";"),
+                        VarintBuffer().also { b -> ids.forEach { b.add(it) } }.toByteArray(),
+                    )
+                }
             }
-            insert.executeBatch()
-            insert.close()
             if (row == 0) {
                 throw LayoutException("Forage found no videos it could read in the dump", firstLine?.let(::describe) ?: "empty file")
             }
 
             var keptTags = 0
-            db.prepareStatement("INSERT INTO tag (id, name, display, df, postings) VALUES (?,?,?,?,?)").use { st ->
-                for ((name, id) in tagIds) {
-                    val list = postings[id]
+            db.prepare("INSERT INTO tag (id, name, display, df, postings) VALUES (?,?,?,?,?)").use { st ->
+                for (id in tagNames.indices) {
+                    val list = lists[id] ?: continue
                     if (list.count < MIN_TAG_VIDEOS) continue
                     keptTags++
-                    st.setInt(1, id)
-                    st.setString(2, name)
-                    st.setString(3, tagDisplay[id])
-                    st.setInt(4, list.count)
-                    st.setBytes(5, list.toByteArray())
-                    st.addBatch()
-                    if (keptTags % 5_000 == 0) st.executeBatch()
+                    st.run(id, tagNames[id], tagNames[id], list.count, list.toByteArray())
                 }
-                st.executeBatch()
             }
-            db.prepareStatement("INSERT INTO meta (key, value) VALUES (?, ?)").use { st ->
+            db.prepare("INSERT INTO meta (key, value) VALUES (?, ?)").use { st ->
                 for ((k, v) in listOf(
                     "version" to SCHEMA_VERSION.toByteArray(),
                     "count" to row.toString().toByteArray(),
                     "imported_at" to importedAt.toString().toByteArray(),
                     "tag_counts" to tagCounts.toByteArray(),
                     "quality" to quality.toByteArray(),
-                )) {
-                    st.setString(1, k)
-                    st.setBytes(2, v)
-                    st.addBatch()
-                }
-                st.executeBatch()
+                )) st.run(k, v)
             }
-            db.createStatement().use { it.execute("CREATE INDEX video_key ON video (key)") }
-            db.commit()
+            db.execute("CREATE INDEX video_key ON video (key)")
             val (fields, at) = layouts.maxBy { it.value }.key
             val layout = "$fields fields, counts in fields ${at + 1}–${at + 4}" + if (layouts.size > 1) " (most lines)" else ""
             return ImportSummary(row, unreadable, fewViews, keptTags, layout)

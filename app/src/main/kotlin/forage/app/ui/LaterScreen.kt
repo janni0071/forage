@@ -48,6 +48,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -278,6 +280,8 @@ private fun BigThumbnail(model: AppModel, item: LaterItem, width: Dp?, playIcon:
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     val zoom by animateFloatAsState(if (hovered) 1.05f else 1f)
+    // On a phone, touching and holding the thumbnail plays its preview.
+    var holding by remember { mutableStateOf(false) }
     Box(
         // A width, or (null) the whole width available.
         (if (width != null) Modifier.width(width) else Modifier.fillMaxWidth())
@@ -286,9 +290,9 @@ private fun BigThumbnail(model: AppModel, item: LaterItem, width: Dp?, playIcon:
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .hoverable(hover)
             .pointerHoverIcon(PointerIcon.Hand)
-            .clickable { model.open(item.id) },
+            .tapOrHold(model.platform.isMobile, { model.open(item.id) }) { holding = it },
     ) {
-        if (model.showThumbnails) ThumbnailImage(model, item.id, large = true, zoom = zoom, compact = width != null && width < 300.dp, preview = hovered)
+        if (model.showThumbnails) ThumbnailImage(model, item.id, large = true, zoom = zoom, compact = width != null && width < 300.dp, preview = hovered || holding)
         if (hovered) {
             Box(
                 Modifier.align(Alignment.Center).size(playIcon).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)),

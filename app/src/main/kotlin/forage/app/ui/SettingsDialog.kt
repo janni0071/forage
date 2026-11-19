@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -153,20 +154,22 @@ fun SettingsDialog(model: AppModel) {
                         Text(model.catalogueInfo ?: "Not imported yet", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                         Text(
                             if (model.catalogueInfo == null) "Forage downloads the dump from the site (1.6 GB), imports it in a few minutes and deletes " +
-                                "the download; the catalogue then takes about 1.3 GB. If the download breaks off, starting it again continues it."
-                            else "The site updates the dump now and then; download it again to catch up.",
+                                "the download; the catalogue then takes about 1.3 GB. If the download breaks off, starting it again continues it." +
+                                (if (model.platform.isMobile) " A catalogue made on a computer (its catalogues/pornhub.db) works too." else "")
+                            else "The site updates the dump now and then; download it again to catch up." +
+                            (if (model.platform.isMobile) " If a phone runs out of memory importing it, import it on a computer and choose its catalogues/pornhub.db here instead." else ""),
                             style = MaterialTheme.typography.bodySmall,
                             color = c.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // Wrapped on a phone, where the three don't fit side by side.
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             AccentButton(if (model.catalogueInfo == null) "Download and import" else "Download again", null, enabled = model.job == null) {
                                 model.downloadCatalogue()
                             }
-                            OutlinedButton(onClick = { model.platform.chooseFile("Choose the downloaded embed dump (pornhub.com-db.zip)", "zip")?.let(model::importCatalogue) }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
-                                Text("Choose a downloaded file…")
+                            OutlinedButton(onClick = { model.chooseCatalogueFile() }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
+                                Text(if (compact) "Choose a file…" else "Choose a downloaded file…", maxLines = 1)
                             }
-                            Spacer(Modifier.weight(1f))
                             if (model.catalogueInfo != null) TextButton(onClick = model::removeCatalogue) { Text("Remove") }
                         }
                     }

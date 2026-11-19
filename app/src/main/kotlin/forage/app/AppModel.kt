@@ -36,7 +36,6 @@ import forage.source.pornhub.DumpDownload
 import forage.source.pornhub.PornhubCatalogue
 import forage.source.pornhub.PornhubSource
 import forage.source.youtube.YouTubeSource
-import forage.core.vault.PrivateVaults
 import forage.core.vault.VaultDamagedException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job as CoroutineJob
@@ -555,7 +554,7 @@ class AppModel(
 
     private fun openAnyCatalogue(): PornhubCatalogue? = synchronized(catalogueLock) {
         if (!isPrivate) return null
-        if (catalogue == null && catalogueFile.isFile) catalogue = runCatching { PornhubCatalogue.open(catalogueFile) }.getOrNull()
+        if (catalogue == null && catalogueFile.isFile) catalogue = runCatching { PornhubCatalogue.open(catalogueFile, platform.sqlFiles) }.getOrNull()
         catalogue
     }
 
@@ -574,22 +573,51 @@ class AppModel(
         }
     }
 
-    /** Imports the site's embed dump (the downloaded zip) as the catalogue, replacing any earlier one when done. */
-    fun importCatalogue(zip: File) {
+    /** Asks for the dump (or a catalogue made on another device) and imports it. */
+    fun chooseCatalogueFile() = platform.chooseFile(
+        "Choose the downloaded embed dump (pornhub.com-db.zip), or a catalogue made on another device (pornhub.db)",
+        listOf("zip", "db"),
+        ::importCatalogue,
+    )
+
+    /**
+     * Imports the site's embed dump (the downloaded zip) as the catalogue, replacing any earlier
+     * one when done; or takes over a catalogue another device already made (its pornhub.db), for
+     * phones without the memory to import the dump themselves.
+     */
+    fun importCatalogue(file: PickedFile) {
         settingsOpen = false
         runJob("Importing the catalogue") { update ->
+            val head = file.open().use { it.readNBytes(16) }
+            if (head.decodeToString(0, minOf(head.size, 15)) == "SQLite format 3") {
+                update("Copying ${file.name}")
+                val incoming = File(catalogueFile.parentFile.apply { mkdirs() }, "${catalogueFile.name}.copying")
+                file.open().use { input -> incoming.outputStream().use { input.copyTo(it, 1 shl 20) } }
+                val usable = runCatching { PornhubCatalogue.open(incoming, platform.sqlFiles).use { it.current && it.size > 0 } }.getOrDefault(false)
+                if (!usable) {
+                    incoming.delete()
+                    return@runJob "${file.name} isn't a catalogue this version of Forage can use"
+                }
+                closeCatalogue()
+                catalogueFile.delete()
+                check(incoming.renameTo(catalogueFile)) { "Couldn't move the catalogue into place" }
+                describeCatalogue()
+                return@runJob "Took over the catalogue from ${file.name}: ${catalogueInfo.orEmpty()}"
+            }
             val job = currentCoroutineContext()[CoroutineJob]
             var shown = -1
             val summary = try {
-                PornhubCatalogue.import(zip, catalogueFile, progress = { share ->
+                PornhubCatalogue.import(file.open, file.size, catalogueFile, progress = { share ->
                     val percent = (share * 100).toInt()
                     if (percent != shown) {
                         shown = percent
-                        update("$percent % of ${zip.name} read")
+                        update("$percent % of ${file.name} read")
                     }
-                }, cancelled = { job?.isActive == false }, beforeReplace = ::closeCatalogue)
+                }, cancelled = { job?.isActive == false }, beforeReplace = ::closeCatalogue, opener = platform.sqlFiles)
             } catch (e: PornhubCatalogue.LayoutException) {
                 return@runJob "${e.message}. Its layout: ${e.layout}"
+            } catch (e: OutOfMemoryError) {
+                return@runJob OUT_OF_MEMORY
             }
             describeCatalogue()
             "Imported %,d videos into the catalogue (%,d left out with under %,d views, %,d lines unreadable; layout: %s). The zip can go now."
@@ -626,9 +654,11 @@ class AppModel(
                         percent = p
                         update("Importing: $p %")
                     }
-                }, cancelled = { job?.isActive == false }, beforeReplace = ::closeCatalogue)
+                }, cancelled = { job?.isActive == false }, beforeReplace = ::closeCatalogue, opener = platform.sqlFiles)
             } catch (e: PornhubCatalogue.LayoutException) {
                 return@runJob "${e.message}. Its layout: ${e.layout}"
+            } catch (e: OutOfMemoryError) {
+                return@runJob OUT_OF_MEMORY
             }
             zip.delete()
             describeCatalogue()
@@ -996,11 +1026,8 @@ class AppModel(
 
     // The private vault, opened from the normal vault's model.
 
-    private val privateVaults: PrivateVaults? =
-        if (storage.isPrivate || !platform.hasPrivateVault) null else PrivateVaults(File(dataDir, "private"))
-
     /** Whether "Private profiles…" is offered: in the normal vault, on platforms that have a private vault. */
-    val offersPrivateVault get() = privateVaults != null
+    val offersPrivateVault get() = !storage.isPrivate && platform.hasPrivateVault
 
     /** The open private vault, shown instead of this one while it's set. */
     var privateModel by mutableStateOf<AppModel?>(null)
@@ -1018,23 +1045,21 @@ class AppModel(
      * PIN has one already). The PIN is wiped from memory afterwards.
      */
     fun unlockPrivate(pin: CharArray, create: Boolean): CoroutineJob? {
-        val vaults = privateVaults ?: return null
-        if (privateBusy) return null
+        if (!offersPrivateVault || privateBusy) return null
         privateError = null
         privateBusy = true
         return scope.launch {
             try {
                 val opened = withContext(Dispatchers.IO) {
-                    val unlocked = try {
-                        if (create) vaults.create(pin) else vaults.unlock(pin)
+                    val storage = try {
+                        platform.openPrivateVault(dataDir, pin, create, settings)
                     } finally {
                         pin.fill('\u0000')
                     }
-                    unlocked?.let { u ->
-                        val storage = platform.privateStorage(vaults, u, settings) ?: error("No private vault on this device")
-                        // One thread for everything: the decrypted database is a single in-memory connection.
+                    storage?.let {
+                        // One thread for everything: the private vault's database is a single connection.
                         AppModel(
-                            dataDir, scope, Dispatchers.IO.limitedParallelism(1), storage, models, platform,
+                            dataDir, scope, Dispatchers.IO.limitedParallelism(1), it, models, platform,
                             privateSourceFactory = privateSourceFactory, sourceFactory = privateSourceFactory,
                         )
                     }
@@ -1067,4 +1092,8 @@ class AppModel(
         return scope.launch { open.shutdown() }
     }
 
+    private companion object {
+        const val OUT_OF_MEMORY = "Not enough memory on this device to import the dump. Import it on a computer instead, " +
+            "then copy catalogues/pornhub.db from its Forage folder here and choose it in Settings."
+    }
 }

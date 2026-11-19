@@ -13,8 +13,8 @@ android {
         // The shared code is built for Java 21; Android has all of its library methods from Android 15 (API 35) on.
         minSdk = 35
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.2.0"
         // Phones of the last decade; leaving out the other processor types saves over 100 MB of ONNX Runtime.
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -70,12 +70,13 @@ dependencies {
     implementation(project(":embedding-onnx"))
     implementation(libs.onnxruntime.android)
     implementation(libs.sqldelight.android.driver)
+    implementation(libs.sqlcipher.android)
     implementation(libs.compose.material3)
     implementation(libs.compose.icons)
     implementation(libs.androidx.activity.compose)
 }
 
 configurations.configureEach {
-    // The catalogue's JDBC driver is for the desktop; the private platform comes to Android in a later step.
+    // The desktop's JDBC driver has no Android build; the catalogue uses Android's own SQLite here.
     exclude(group = "org.xerial", module = "sqlite-jdbc")
 }

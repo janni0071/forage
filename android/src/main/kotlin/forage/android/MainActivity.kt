@@ -58,6 +58,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** The system file picker for the shared screens (the catalogue import, for one). */
+    private var picked: ((Uri) -> Unit)? = null
+    private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val then = picked
+        picked = null
+        if (uri != null) then?.invoke(uri)
+    }
+
     private fun replaceDatabase(uri: Uri) {
         app.scope.launch {
             val problem = withContext(Dispatchers.IO) {
@@ -74,9 +82,18 @@ class MainActivity : ComponentActivity() {
         }
     }.getOrNull()
 
+    override fun onDestroy() {
+        if (isFinishing) app.platform.picker = null
+        super.onDestroy()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        app.platform.picker = { mimeTypes, then ->
+            picked = then
+            pickFile.launch(mimeTypes)
+        }
         setContent {
             val model = app.model ?: return@setContent
             val active = model.privateModel ?: model

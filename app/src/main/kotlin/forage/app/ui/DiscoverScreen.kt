@@ -176,6 +176,8 @@ private fun PickCard(model: AppModel, view: PickView) {
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     val zoom by animateFloatAsState(if (hovered && !rejected) 1.05f else 1f)
+    // On a phone, touching and holding the thumbnail plays its preview.
+    var holding by remember { mutableStateOf(false) }
 
     Column(Modifier.alpha(if (rejected) 0.45f else 1f)) {
         // The thumbnail: click to watch; zooms gently under the mouse.
@@ -187,9 +189,9 @@ private fun PickCard(model: AppModel, view: PickView) {
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .hoverable(hover)
                 .pointerHoverIcon(PointerIcon.Hand)
-                .clickable { model.open(pick.video) },
+                .tapOrHold(model.platform.isMobile, { model.open(pick.video) }) { holding = it },
         ) {
-            if (model.showThumbnails) ThumbnailImage(model, pick.video, large = true, zoom = zoom, preview = hovered && !rejected)
+            if (model.showThumbnails) ThumbnailImage(model, pick.video, large = true, zoom = zoom, preview = (hovered || holding) && !rejected)
             formatDuration(pick.durationSeconds)?.let {
                 Badge(it, Modifier.align(Alignment.BottomEnd).padding(8.dp))
             }

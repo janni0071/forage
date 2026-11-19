@@ -19,7 +19,7 @@ import java.io.File
 private object PhonePreview : Platform by DesktopPlatform {
     override val isMobile = true
     override val players = emptyList<Player>()
-    override val hasPrivateVault = false
+    override val hasPrivateVault = true
 }
 
 /**
@@ -45,7 +45,7 @@ fun main(args: Array<String>) {
             }
         }
         val scene = ImageComposeScene(width = 824, height = 1784, density = Density(2f)) {
-            ForageTheme(dark = dark) { App(model, onImport = {}) }
+            ForageTheme(dark = dark) { App(model.privateModel ?: model, onImport = {}) }
         }
         repeat(12) { scene.render(it * 100_000_000L) }
         File(outDir, "phone-$name.png").writeBytes(scene.render(1_200_000_000L).encodeToData(EncodedImageFormat.PNG)!!.bytes)
@@ -70,6 +70,12 @@ fun main(args: Array<String>) {
         runBlocking { searchResults.take(5).forEach { thumbnails.load(it.id) } }
     }
     shot("discover-dark", dark = true) { closeAddDialog(); screen = Screen.DISCOVER }
+    shot("private-dialog", dark = true) { profileDialog = forage.app.ProfileDialog.PRIVATE }
+    shot("private-settings", dark = true) {
+        profileDialog = null
+        runBlocking { unlockPrivate("phone screenshot passphrase".toCharArray(), create = true)?.join() }
+        privateModel?.settingsOpen = true
+    }
 
     // A new phone: nothing imported yet.
     val empty = java.nio.file.Files.createTempDirectory("phone-empty").toFile()

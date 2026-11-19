@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import forage.app.AppModel
 import forage.app.Models
+import forage.app.PickedFile
 import forage.app.Platform
 import forage.app.Player
 import forage.app.Settings
@@ -18,7 +19,9 @@ import forage.embedding.onnx.ModelFiles
 import forage.embedding.onnx.ModelSpec
 import forage.embedding.onnx.OnnxEmbedder
 import forage.language.lingua.LinguaDetector
+import forage.source.pornhub.JdbcSqlFile
 import forage.source.pornhub.PornhubSource
+import forage.source.pornhub.SqlFile
 import forage.source.youtube.YouTubeSource
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -66,17 +69,24 @@ object DesktopPlatform : Platform {
 
     override val hasPrivateVault = true
 
-    override fun privateStorage(vaults: PrivateVaults, vault: PrivateVaults.Unlocked, settings: Settings): Storage =
-        Storage.private(EncryptedDatabase(vaults, vault), settings)
+    override fun openPrivateVault(dataDir: File, pin: CharArray, create: Boolean, settings: Settings): Storage? {
+        val vaults = PrivateVaults(File(dataDir, "private"))
+        val vault = (if (create) vaults.create(pin) else vaults.unlock(pin)) ?: return null
+        return Storage.private(EncryptedDatabase(vaults, vault), settings)
+    }
 
-    override fun chooseFile(title: String, extension: String): File? {
+    override fun chooseFile(title: String, extensions: List<String>, chosen: (PickedFile) -> Unit) {
         val chooser = javax.swing.JFileChooser().apply {
             dialogTitle = title
-            fileFilter = javax.swing.filechooser.FileNameExtensionFilter("$extension files", extension)
+            fileFilter = javax.swing.filechooser.FileNameExtensionFilter(extensions.joinToString(", ") { ".$it" }, *extensions.toTypedArray())
             currentDirectory = File(System.getProperty("user.home"), "Downloads").takeIf { it.isDirectory }
         }
-        return if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
+        if (chooser.showOpenDialog(null) != javax.swing.JFileChooser.APPROVE_OPTION) return
+        val file = chooser.selectedFile
+        chosen(PickedFile(file.name, file.length()) { file.inputStream() })
     }
+
+    override val sqlFiles: SqlFile.Opener = JdbcSqlFile
 }
 
 /** The shared model, as the desktop app (and its tests) create it. */

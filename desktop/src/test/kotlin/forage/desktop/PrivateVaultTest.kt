@@ -110,10 +110,20 @@ class PrivateVaultTest {
         val vault = assertNotNull(model.privateModel, model.privateError)
         assertTrue(vault.offersCatalogue)
         assertNull(vault.catalogueInfo)
-        vault.importCatalogue(zip)
+        vault.importCatalogue(PickedFile(zip.name, zip.length()) { zip.inputStream() })
         runBlocking { withTimeout(20_000) { while (vault.job != null) kotlinx.coroutines.delay(20) } }
         assertTrue(vault.catalogueInfo.orEmpty().startsWith("5 videos, imported"), "${vault.catalogueInfo} / ${vault.message}")
-        assertTrue(java.io.File(dir, "catalogues/pornhub.db").isFile)
+        val made = java.io.File(dir, "catalogues/pornhub.db")
+        assertTrue(made.isFile)
+
+        // A catalogue made on another device is taken over as it is.
+        val elsewhere = java.io.File(dir, "from-laptop.db").also { made.copyTo(it) }
+        vault.removeCatalogue()
+        runBlocking { withTimeout(10_000) { while (vault.catalogueInfo != null) kotlinx.coroutines.delay(20) } }
+        vault.importCatalogue(PickedFile(elsewhere.name, elsewhere.length()) { elsewhere.inputStream() })
+        runBlocking { withTimeout(20_000) { while (vault.job != null) kotlinx.coroutines.delay(20) } }
+        assertTrue(vault.catalogueInfo.orEmpty().startsWith("5 videos, imported"), "${vault.catalogueInfo} / ${vault.message}")
+        assertTrue(vault.message.orEmpty().startsWith("Took over the catalogue"), vault.message)
         vault.removeCatalogue()
         runBlocking { withTimeout(10_000) { while (vault.catalogueInfo != null) kotlinx.coroutines.delay(20) } }
         assertTrue(!java.io.File(dir, "catalogues/pornhub.db").exists())

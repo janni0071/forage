@@ -56,6 +56,18 @@ class PrivateVaults(private val dir: File, private val iterations: Int = ITERATI
         return Unlocked(key, file, null)
     }
 
+    /**
+     * The raw key and the file for [pin], for a database engine that encrypts by itself (SQLCipher
+     * on Android). Same derivation, salt and hidden file names as the sealed vaults; only the file
+     * ending differs, so the two kinds never mix. The caller wipes [Derived.key] after use.
+     */
+    class Derived(val key: ByteArray, val file: File)
+
+    fun derived(pin: CharArray, extension: String): Derived {
+        val (key, id) = deriveBits(pin)
+        return Derived(key, File(dir, "$id.$extension"))
+    }
+
     /** Encrypts [contents] into the vault's file, replacing it in one step so a crash can't leave half a file. */
     fun save(vault: Unlocked, contents: ByteArray) {
         val nonce = ByteArray(NONCE_BYTES).also(SecureRandom()::nextBytes)
@@ -70,6 +82,14 @@ class PrivateVaults(private val dir: File, private val iterations: Int = ITERATI
     }
 
     private fun derive(pin: CharArray): Pair<SecretKeySpec, File> {
+        val (keyBytes, id) = deriveBits(pin)
+        val key = SecretKeySpec(keyBytes, "AES")
+        keyBytes.fill(0)
+        return key to File(dir, "$id.vault")
+    }
+
+    /** The key and the file name's id from [pin]. */
+    private fun deriveBits(pin: CharArray): Pair<ByteArray, String> {
         require(pin.isNotEmpty()) { "Empty PIN" }
         val spec = PBEKeySpec(pin, salt, iterations, (KEY_BYTES + ID_BYTES) * 8)
         val bits = try {
@@ -77,10 +97,10 @@ class PrivateVaults(private val dir: File, private val iterations: Int = ITERATI
         } finally {
             spec.clearPassword()
         }
-        val key = SecretKeySpec(bits.copyOfRange(0, KEY_BYTES), "AES")
+        val key = bits.copyOfRange(0, KEY_BYTES)
         val id = bits.copyOfRange(KEY_BYTES, KEY_BYTES + ID_BYTES).joinToString("") { "%02x".format(it) }
         bits.fill(0)
-        return key to File(dir, "$id.vault")
+        return key to id
     }
 
     private fun open(key: SecretKeySpec, sealed: ByteArray): ByteArray {

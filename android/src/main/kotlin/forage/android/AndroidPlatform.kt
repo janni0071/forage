@@ -9,6 +9,11 @@ import android.view.textclassifier.TextClassificationManager
 import android.view.textclassifier.TextLanguage
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import android.provider.OpenableColumns
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.driver.android.AndroidSqliteDriver
+import forage.app.EncryptedStore
+import forage.app.PickedFile
 import forage.app.Platform
 import forage.app.Player
 import forage.app.Settings
@@ -16,7 +21,11 @@ import forage.app.Storage
 import forage.core.PlatformId
 import forage.core.embedding.Embedder
 import forage.core.language.LanguageDetector
+import forage.core.db.ForageDatabase
 import forage.core.vault.PrivateVaults
+import forage.core.vault.VaultDamagedException
+import forage.source.pornhub.SqlFile
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import forage.embedding.onnx.ModelFiles
 import forage.embedding.onnx.ModelSpec
 import forage.embedding.onnx.OnnxEmbedder
@@ -58,12 +67,69 @@ class AndroidPlatform(private val context: Context) : Platform {
 
     override fun automaticUiScale() = 1f
 
-    // The private vault comes to Android in the next step.
-    override val hasPrivateVault = false
+    override val hasPrivateVault = true
 
-    override fun privateStorage(vaults: PrivateVaults, vault: PrivateVaults.Unlocked, settings: Settings): Storage? = null
+    /**
+     * The private vault with SQLCipher: the database file is encrypted page by page, so its
+     * contents never reach the disk in the clear, with the key and the hidden file name derived
+     * from the PIN exactly as on the desktop (only the file ending differs).
+     */
+    override fun openPrivateVault(dataDir: File, pin: CharArray, create: Boolean, settings: Settings): Storage? {
+        val derived = PrivateVaults(File(dataDir, "private")).derived(pin, "cipher")
+        if (!create && !derived.file.isFile) {
+            derived.key.fill(0)
+            return null
+        }
+        System.loadLibrary("sqlcipher")
+        // The factory keeps the key for as long as the vault is open; it goes with the driver.
+        val driver = AndroidSqliteDriver(ForageDatabase.Schema, context, derived.file.absolutePath, SupportOpenHelperFactory(derived.key))
+        try {
+            // Opening is lazy: read something now, so a damaged file shows at unlock, not later.
+            driver.executeQuery(null, "SELECT count(*) FROM sqlite_master", { c -> c.next(); QueryResult.Value(c.getLong(0)) }, 0)
+        } catch (e: Exception) {
+            driver.close()
+            throw VaultDamagedException("The vault file is damaged or can't be read", e)
+        }
+        val db = ForageDatabase(driver)
+        return Storage.private(
+            object : EncryptedStore {
+                override val db = db
+                // Every change is encrypted as it's written; there's nothing to save later.
+                override fun saveIfChanged() = false
+                override fun close() = driver.close()
+            },
+            settings,
+        )
+    }
 
-    override fun chooseFile(title: String, extension: String): File? = null
+    /** Set by the open screen: shows the system's file picker and passes on what was picked. */
+    var picker: ((mimeTypes: Array<String>, picked: (Uri) -> Unit) -> Unit)? = null
+
+    override fun chooseFile(title: String, extensions: List<String>, chosen: (PickedFile) -> Unit) {
+        val mimes = extensions.flatMap { MIME_TYPES[it].orEmpty() }.distinct().toTypedArray().ifEmpty { arrayOf("*/*") }
+        val show = picker ?: return
+        show(mimes) { uri ->
+            var name = uri.lastPathSegment ?: "file"
+            var size = -1L
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    c.getString(0)?.let { name = it }
+                    if (!c.isNull(1)) size = c.getLong(1)
+                }
+            }
+            chosen(PickedFile(name, size) { context.contentResolver.openInputStream(uri) ?: error("Couldn't read $name") })
+        }
+    }
+
+    override val sqlFiles: SqlFile.Opener = AndroidSqlFile
+
+    private companion object {
+        // Many file managers label SQLite files as plain binary data.
+        val MIME_TYPES = mapOf(
+            "zip" to listOf("application/zip", "application/x-zip-compressed"),
+            "db" to listOf("application/x-sqlite3", "application/vnd.sqlite3", "application/octet-stream"),
+        )
+    }
 }
 
 /**

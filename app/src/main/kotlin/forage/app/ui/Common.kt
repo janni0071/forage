@@ -7,6 +7,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
@@ -361,4 +364,27 @@ fun SearchField(
             }
         },
     )
+}
+
+/**
+ * Opens on a tap; on a phone, touching and holding sets [holding] until the finger lifts, so a
+ * preview can play while it's held (phones have no hover). With a mouse it's an ordinary click.
+ */
+@Composable
+fun Modifier.tapOrHold(mobile: Boolean, onTap: () -> Unit, holding: (Boolean) -> Unit): Modifier {
+    if (!mobile) return clickable(onClick = onTap)
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    return pointerInput(onTap) {
+        detectTapGestures(
+            onTap = { onTap() },
+            onLongPress = {
+                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                holding(true)
+            },
+            onPress = {
+                tryAwaitRelease()
+                holding(false)
+            },
+        )
+    }
 }

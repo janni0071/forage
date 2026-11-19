@@ -4,8 +4,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import forage.core.PlatformId
 import forage.core.embedding.Embedder
 import forage.core.language.LanguageDetector
-import forage.core.vault.PrivateVaults
+import forage.source.pornhub.SqlFile
 import java.io.File
+import java.io.InputStream
 
 /**
  * What differs between the desktop app and the Android app. The model and the screens are shared;
@@ -48,11 +49,23 @@ interface Platform {
     val hasPrivateVault: Boolean
 
     /**
-     * The storage of an unlocked private vault, or null where this platform has no private vault
-     * yet. [settings] are the normal vault's, to start the private vault's in-memory copy from.
+     * Opens the private vault for [pin] (with [create], making one if that PIN has none), or
+     * returns null when nothing unlocks with it. Throws VaultDamagedException for a vault that
+     * can't be read. [settings] are the normal vault's, to start the private vault's in-memory
+     * copy from. Each platform keeps its vaults its own way: the desktop seals a whole database,
+     * Android encrypts page by page with SQLCipher.
      */
-    fun privateStorage(vaults: PrivateVaults, vault: PrivateVaults.Unlocked, settings: Settings): Storage?
+    fun openPrivateVault(dataDir: File, pin: CharArray, create: Boolean, settings: Settings): Storage?
 
-    /** Asks the user for a file with [extension]; null when cancelled or not offered. */
-    fun chooseFile(title: String, extension: String): File?
+    /**
+     * Asks the user for a file with one of [extensions]; [chosen] gets it, perhaps later (a phone's
+     * picker answers once the user is back), and isn't called when they cancel.
+     */
+    fun chooseFile(title: String, extensions: List<String>, chosen: (PickedFile) -> Unit)
+
+    /** How this platform opens plain SQLite files, such as the catalogue. */
+    val sqlFiles: SqlFile.Opener
 }
+
+/** A file the user picked: its name and size, and how to read it (a phone's picker gives streams, not paths). */
+class PickedFile(val name: String, val size: Long, val open: () -> InputStream)
