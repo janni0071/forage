@@ -4,12 +4,8 @@ import forage.core.source.SourceException
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.net.ProxySelector
+import java.net.HttpURLConnection
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 
 /**
  * Downloads the site's embed dump, the zip [PornhubCatalogue.import] reads. The download goes to
@@ -30,11 +26,6 @@ object DumpDownload {
         cancelled: () -> Boolean = { false },
         attempts: Int = 5,
         sleep: (Long) -> Unit = { Thread.sleep(it) },
-        client: HttpClient = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .connectTimeout(Duration.ofSeconds(15))
-            .proxy(ProxySelector.getDefault())
-            .build(),
     ): File {
         target.absoluteFile.parentFile.mkdirs()
         val part = File(target.absoluteFile.parentFile, "${target.name}.part")
@@ -42,7 +33,7 @@ object DumpDownload {
         repeat(attempts) { attempt ->
             if (attempt > 0) sleep(1000L shl (attempt - 1).coerceAtMost(4))
             try {
-                if (fetch(client, uri, part, progress, cancelled)) {
+                if (fetch(uri, part, progress, cancelled)) {
                     target.delete()
                     check(part.renameTo(target)) { "Couldn't move the download into place" }
                     return target
@@ -55,41 +46,46 @@ object DumpDownload {
     }
 
     /** One request, continuing the part file. True when the file is complete. */
-    private fun fetch(client: HttpClient, uri: URI, part: File, progress: (Long, Long?) -> Unit, cancelled: () -> Boolean): Boolean {
+    private fun fetch(uri: URI, part: File, progress: (Long, Long?) -> Unit, cancelled: () -> Boolean): Boolean {
         val have = if (part.isFile) part.length() else 0L
-        val request = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(2))
-            .apply { if (have > 0) header("Range", "bytes=$have-") }
-            .build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
-        val status = response.statusCode()
-        val length = response.headers().firstValueAsLong("Content-Length").let { if (it.isPresent) it.asLong else null }
+        // HttpURLConnection, which the desktop JVM and Android both have.
+        val connection = uri.toURL().openConnection() as HttpURLConnection
+        try {
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 120_000
+            connection.instanceFollowRedirects = true
+            if (have > 0) connection.setRequestProperty("Range", "bytes=$have-")
+            return read(connection, have, part, progress, cancelled)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun read(connection: HttpURLConnection, have: Long, part: File, progress: (Long, Long?) -> Unit, cancelled: () -> Boolean): Boolean {
+        val status = connection.responseCode
+        val length = connection.contentLengthLong.takeIf { it >= 0 }
         val append = when (status) {
             206 -> true
             200 -> false
             // Asked for more than there is: the part file already holds all of it.
-            416 -> { response.body().close(); return have > 0 }
+            416 -> return have > 0
             403, 451 -> {
-                response.body().close()
                 throw SourceException.Blocked(
                     "The site refused the download (HTTP $status). It blocks some regions over age-verification laws; " +
                         "if the link opens in your browser, download it there and choose the file instead",
                 )
             }
-            else -> {
-                response.body().close()
-                throw SourceException("The site answered the download with HTTP $status")
-            }
+            else -> throw SourceException("The site answered the download with HTTP $status")
         }
-        val type = response.headers().firstValue("Content-Type").orElse("")
+        val type = connection.contentType.orEmpty()
         if ("text/html" in type) {
-            response.body().close()
             throw SourceException.Blocked(
                 "The site answered with a web page instead of the dump; where it requires age verification it shows that page " +
                     "to programs too. Download the dump in your browser and choose the file instead",
             )
         }
         val total = length?.let { if (append) have + it else it }
-        response.body().use { body -> copy(body, part, append, have.takeIf { append } ?: 0L, total, progress, cancelled) }
+        connection.inputStream.use { body -> copy(body, part, append, have.takeIf { append } ?: 0L, total, progress, cancelled) }
         return total == null || part.length() >= total
     }
 

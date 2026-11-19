@@ -18,6 +18,7 @@ dependencies {
     implementation(project(":source-youtube"))
     implementation(project(":source-pornhub"))
     implementation(project(":embedding-onnx"))
+    implementation(libs.onnxruntime)
     implementation(project(":language-lingua"))
     implementation(libs.sqldelight.sqlite.driver)
     implementation(libs.sqlite.jdbc)

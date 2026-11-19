@@ -8,7 +8,9 @@ kotlin {
 
 dependencies {
     api(project(":core"))
-    implementation(libs.onnxruntime)
+    // Compiled against only: the desktop and the Android app each bring their platform's build of it.
+    compileOnly(libs.onnxruntime)
+    testImplementation(libs.onnxruntime)
     implementation(libs.serialization.json)
     testImplementation(libs.kotlin.test)
     // The reference tokenizer (Rust through JNI, desktop only), to check the Kotlin one against.

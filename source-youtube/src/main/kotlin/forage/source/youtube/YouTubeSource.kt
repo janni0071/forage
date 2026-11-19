@@ -27,7 +27,7 @@ import org.schabi.newpipe.extractor.stream.StreamInfoItem
 /** YouTube through NewPipeExtractor: no account, no API key. */
 class YouTubeSource : ExtractorSource {
     init {
-        NewPipe.init(JdkDownloader(), Localization("en", "US"))
+        NewPipe.init(UrlConnectionDownloader(), Localization("en", "US"))
     }
 
     override val platform = Platforms.YOUTUBE

@@ -13,13 +13,9 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import java.net.ProxySelector
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
@@ -36,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap
  * day, so they are remembered for a few hours only and looked up again after that.
  */
 class PornhubSource(
-    private val http: Http = Http.jdk(),
+    private val http: Http = Http.default(),
     /** Gap between two requests, whichever thread sends them. */
     private val pause: Duration = Duration.ofMillis(400),
     private val clock: () -> Instant = Instant::now,
@@ -53,19 +49,19 @@ class PornhubSource(
         data class Response(val status: Int, val body: String)
 
         companion object {
-            fun jdk(): Http {
-                val client = HttpClient.newBuilder()
-                    .followRedirects(HttpClient.Redirect.NORMAL)
-                    .connectTimeout(Duration.ofSeconds(10))
-                    .proxy(ProxySelector.getDefault())
-                    .build()
-                return Http { uri ->
-                    val request = HttpRequest.newBuilder(uri)
-                        .timeout(Duration.ofSeconds(20))
-                        .header("Accept", "application/json")
-                        .build()
-                    val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-                    Response(response.statusCode(), response.body())
+            /** `HttpURLConnection`, which the desktop JVM and Android both have. */
+            fun default(): Http = Http { uri ->
+                val connection = uri.toURL().openConnection() as java.net.HttpURLConnection
+                try {
+                    connection.connectTimeout = 10_000
+                    connection.readTimeout = 20_000
+                    connection.setRequestProperty("Accept", "application/json")
+                    val status = connection.responseCode
+                    val body = (if (status >= 400) connection.errorStream else connection.inputStream)
+                        ?.use { it.readBytes().toString(Charsets.UTF_8) }.orEmpty()
+                    Response(status, body)
+                } finally {
+                    connection.disconnect()
                 }
             }
         }
