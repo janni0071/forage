@@ -237,9 +237,11 @@ private fun Main(model: AppModel, page: VideoPage, maxWidth: Dp) {
                 Modifier.padding(top = 18.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                itemVerticalAlignment = Alignment.CenterVertically,
+                itemVerticalAlignment = Alignment.Top,
             ) {
-                Box(Modifier.padding(end = 8.dp)) { play() }
+                // Level with the round buttons, not with their labels below: their circles are
+                // 44 dp tall under 4 dp of padding, so their middle is 26 dp down, as Play's is here.
+                Box(Modifier.padding(top = 2.dp, end = 8.dp)) { play() }
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) { actions() }
             }
         }
