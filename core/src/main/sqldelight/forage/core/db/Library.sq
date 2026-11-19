@@ -161,6 +161,22 @@ UPDATE subscription SET name = coalesce(:name, name) WHERE channel_id = :channel
 selectSubscriptions:
 SELECT * FROM subscription ORDER BY name;
 
+selectSubscription:
+SELECT * FROM subscription WHERE channel_id = ?;
+
+deleteSubscription:
+DELETE FROM subscription WHERE channel_id = ?;
+
+-- The playlists a video is in.
+selectPlaylistsOfVideo:
+SELECT playlist FROM playlist_item WHERE video_id = ? ORDER BY playlist;
+
+selectWatchEventsOfVideo:
+SELECT watched_at FROM watch_event WHERE video_id = ?;
+
+isSavedForLater:
+SELECT count(*) FROM watch_later WHERE video_id = ?;
+
 insertWatchLater:
 INSERT OR IGNORE INTO watch_later VALUES (?, ?);
 

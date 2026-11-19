@@ -162,7 +162,7 @@ private fun TopicStrip(model: AppModel) {
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(container)
-                    .clickable { model.screen = forage.app.Screen.TOPICS }
+                    .clickable { model.go(forage.app.Screen.TOPICS) }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
@@ -189,7 +189,7 @@ private fun PickCard(model: AppModel, view: PickView) {
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .hoverable(hover)
                 .pointerHoverIcon(PointerIcon.Hand)
-                .tapOrHold(model.platform.isMobile, { model.open(pick.video) }) { holding = it },
+                .tapOrHold(model.platform.isMobile, { model.showPick(pick) }) { holding = it },
         ) {
             if (model.showThumbnails) ThumbnailImage(model, pick.video, large = true, zoom = zoom, preview = (hovered || holding) && !rejected)
             formatDuration(pick.durationSeconds)?.let {
@@ -210,7 +210,7 @@ private fun PickCard(model: AppModel, view: PickView) {
             minLines = 2,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 10.dp).clickable { model.open(pick.video) },
+            modifier = Modifier.padding(top = 10.dp).clickable { model.showPick(pick) },
         )
         Text(
             listOfNotNull(pick.channelName, formatAge(pick.uploadedAt)).joinToString("  ·  "),

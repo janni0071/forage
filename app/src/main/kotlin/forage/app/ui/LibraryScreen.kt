@@ -5,6 +5,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -96,7 +98,6 @@ import androidx.compose.material3.AlertDialog
 @Composable
 fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
     if (model.addDialogOpen) AddVideosDialog(model)
-    LibraryDialogs(model)
     if (model.libraryEmpty) {
         EmptyLibrary(model, onImport)
         return
@@ -369,7 +370,7 @@ private fun PlaylistTools(model: AppModel, name: String) {
 
 /** The library's dialogs: adding to a playlist, making, renaming and deleting one, and clearing the history. */
 @Composable
-private fun LibraryDialogs(model: AppModel) {
+internal fun LibraryDialogs(model: AppModel) {
     when (val dialog = model.libraryDialog) {
         null -> {}
         is LibraryDialog.AddToPlaylist -> AddToPlaylistDialog(model, dialog.videos)
@@ -554,7 +555,7 @@ private fun ActionBar(model: AppModel, visibleCount: Int) {
                     ) { actions() }
                 }
                 selected == 0 && !compact -> Text(
-                    "Select videos to like them or add them to a playlist, or use the buttons that appear on hover",
+"Click a video to open it. Select with the circles to like several at once or add them to a playlist",
                     style = MaterialTheme.typography.bodySmall,
                     color = c.onSurfaceVariant,
                 )
@@ -597,19 +598,14 @@ private fun VideoRow(model: AppModel, row: LibraryRow) {
                 }
             )
             .hoverable(hover)
-            .clickable { model.toggle(row.id) }
+            .openOrSelect(model, row)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val compact = LocalCompact.current
         SelectDot(selected, visible = true, onImage = false) { model.toggle(row.id) }
         Spacer(Modifier.width(if (compact) 8.dp else 12.dp))
-        // On a phone, tapping the thumbnail plays the video; tapping the rest of the row selects it.
-        LibraryThumbnail(
-            model, row,
-            if (compact) Modifier.width(120.dp).clip(RoundedCornerShape(12.dp)).clickable { model.open(row.id) } else Modifier.width(168.dp),
-            compact = true,
-        )
+        LibraryThumbnail(model, row, Modifier.width(if (compact) 120.dp else 168.dp), compact = true)
         Column(Modifier.weight(1f).padding(horizontal = if (compact) 12.dp else 16.dp)) {
             Title(row, maxLines = if (compact) 2 else 1)
             Text(details(row), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
@@ -631,7 +627,7 @@ private fun LibraryCard(model: AppModel, row: LibraryRow, anySelected: Boolean) 
             .clip(RoundedCornerShape(16.dp))
             .background(if (selected) c.primaryContainer.copy(alpha = 0.55f) else if (hovered) c.surfaceContainerLow else Color.Transparent)
             .hoverable(hover)
-            .clickable { model.toggle(row.id) }
+            .openOrSelect(model, row)
             .padding(6.dp),
     ) {
         Box {
@@ -650,6 +646,19 @@ private fun LibraryCard(model: AppModel, row: LibraryRow, anySelected: Boolean) 
         )
     }
 }
+
+/**
+ * A click opens the video's page; while videos are selected it adds or removes this one instead.
+ * A long press (or right-click hold) starts selecting, as in a phone's gallery.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun Modifier.openOrSelect(model: AppModel, row: LibraryRow): Modifier = combinedClickable(
+    onClick = {
+        if (model.selection.isEmpty()) model.showVideo(row.id, row.title, null, row.channelName, row.durationSeconds)
+        else model.toggle(row.id)
+    },
+    onLongClick = { model.toggle(row.id) },
+)
 
 @Composable
 private fun Title(row: LibraryRow, maxLines: Int, modifier: Modifier = Modifier) {

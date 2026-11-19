@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -102,6 +103,8 @@ class MainActivity : ComponentActivity() {
                 Theme.DARK -> true
                 Theme.SYSTEM -> isSystemInDarkTheme()
             }
+            // The system's back gesture leaves a video page before it leaves the app.
+            BackHandler(enabled = active.videoPage != null) { active.closeVideo() }
             ForageTheme(dark = dark) {
                 // Drawn edge to edge; the content keeps clear of the status and navigation bars.
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {

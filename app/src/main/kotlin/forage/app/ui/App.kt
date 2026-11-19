@@ -128,7 +128,7 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
                 )) {
                     NavigationBarItem(
                         selected = model.screen == screen,
-                        onClick = { model.screen = screen },
+                        onClick = { model.go(screen) },
                         icon = { Icon(icon, contentDescription = null) },
                         label = { Text(label) },
                     )
@@ -141,6 +141,9 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
 
 @Composable
 private fun Screens(model: AppModel, onImport: () -> Unit) {
+    // The library's dialogs open from video pages and other screens too.
+    LibraryDialogs(model)
+    model.videoPage?.let { return VideoPageScreen(model, it) }
     when (model.screen) {
         Screen.LIBRARY -> LibraryScreen(model, onImport)
         Screen.TOPICS -> TopicsScreen(model)
@@ -197,13 +200,13 @@ private fun Sidebar(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
             }
         }
 
-        NavItem(Icons.Outlined.VideoLibrary, "Library", model.screen == Screen.LIBRARY) { model.screen = Screen.LIBRARY }
-        NavItem(Icons.Outlined.BubbleChart, "Topics", model.screen == Screen.TOPICS) { model.screen = Screen.TOPICS }
+        NavItem(Icons.Outlined.VideoLibrary, "Library", model.screen == Screen.LIBRARY) { model.go(Screen.LIBRARY) }
+        NavItem(Icons.Outlined.BubbleChart, "Topics", model.screen == Screen.TOPICS) { model.go(Screen.TOPICS) }
         NavItem(Icons.Outlined.AutoAwesome, "Discover", model.screen == Screen.DISCOVER, count = model.picks.size.takeIf { it > 0 }) {
-            model.screen = Screen.DISCOVER
+            model.go(Screen.DISCOVER)
         }
         NavItem(Icons.Outlined.WatchLater, "Watch later", model.screen == Screen.LATER, count = model.later.size.takeIf { it > 0 }) {
-            model.screen = Screen.LATER
+            model.go(Screen.LATER)
         }
 
         Spacer(Modifier.weight(1f))

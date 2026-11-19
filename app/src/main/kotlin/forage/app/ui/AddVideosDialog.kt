@@ -183,7 +183,7 @@ private fun SearchRow(model: AppModel, stub: VideoStub) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp),
     ) {
-        Box(Modifier.clickable { model.open(stub.id) }.pointerHoverIcon(PointerIcon.Hand)) {
+        Box(Modifier.clickable { model.showVideo(stub, fromSearch = true) }.pointerHoverIcon(PointerIcon.Hand)) {
             Thumbnail(model, stub.id, if (compact) 112.dp else 160.dp)
             formatDuration(stub.durationSeconds)?.let {
                 Text(

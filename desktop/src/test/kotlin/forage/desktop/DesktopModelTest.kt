@@ -345,4 +345,67 @@ class DesktopModelTest {
         assertTrue("have details yet" in model.message!!, model.message)
         assertEquals(null, model.job)
     }
+
+    private fun cached(v: String, title: String, channel: String? = null, related: List<VideoStub> = emptyList()) = model.cache.put(
+        VideoDetails(
+            forage.core.source.VideoMetadata(
+                id(v), title, "About $title", listOf("tag"), 300, channel?.let(::id), channel?.let { "Channel $it" },
+                null, null, null, false,
+            ),
+            related,
+        )
+    )
+
+    @Test
+    fun `a video page shows cached details, takes likes and saves, and goes back`() {
+        cached("b", "Sourdough basics", channel = "UCbread", related = listOf(VideoStub(id("r"), "Rye bread", null, "Brotzeit", 600, false)))
+        model.showVideo(id("b"), "Sourdough basics")
+        val page = model.videoPage!!
+        assertEquals("About Sourdough basics", page.details?.metadata?.description)
+        assertEquals(false, page.loading)
+        assertEquals(1, page.inLibrary.watchCount)
+
+        model.choose(VideoState.LIKED)
+        assertEquals(VideoState.LIKED, model.videoPage!!.state)
+        assertEquals(listOf(id("b")), model.profiles.entries(model.profile, VideoState.LIKED).map { it.video })
+        model.choose(VideoState.LIKED)
+        assertEquals(null, model.videoPage!!.state)
+        assertEquals(emptyList(), model.profiles.entries(model.profile))
+
+        model.toggleLater()
+        assertTrue(model.videoPage!!.inLibrary.savedForLater)
+        assertEquals(listOf(id("b")), model.later.map { it.id })
+
+        model.toggleFollow()
+        assertTrue(model.videoPage!!.following)
+        assertTrue(model.library.follows(id("UCbread")))
+
+        model.addToPlaylist("Bread", listOf(id("b")))
+        assertEquals(listOf("Bread"), model.videoPage!!.inLibrary.playlists)
+
+        // A related video opens on top; back returns to the first, and again to the screen.
+        model.showVideo(model.videoPage!!.details!!.related.single())
+        assertEquals(listOf(id("b"), id("r")), model.videoStack.map { it.id })
+        assertTrue(model.videoPage!!.gone)
+        model.closeVideo()
+        assertEquals(id("b"), model.videoPage?.id)
+        model.closeVideo()
+        assertNull(model.videoPage)
+    }
+
+    @Test
+    fun `a page opened from search brings the search back when it closes, and switching screens closes pages`() {
+        model.addDialogOpen = true
+        model.showVideo(VideoStub(id("s"), "Found", null, null, null, false), fromSearch = true)
+        assertEquals(false, model.addDialogOpen)
+        assertEquals("Found", model.videoPage?.shownTitle)
+        model.closeVideo()
+        assertTrue(model.addDialogOpen)
+
+        model.closeAddDialog()
+        model.showVideo(id("a"))
+        model.go(Screen.DISCOVER)
+        assertNull(model.videoPage)
+        assertEquals(Screen.DISCOVER, model.screen)
+    }
 }

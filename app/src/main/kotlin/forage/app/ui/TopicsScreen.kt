@@ -2,6 +2,7 @@ package forage.app.ui
 
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -140,7 +141,7 @@ private fun TopicCard(model: AppModel, topic: Cluster) {
                 Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     for (video in topic.videos.take(12)) {
                         Column(Modifier.width(132.dp)) {
-                            Thumbnail(model, video.id, 132.dp)
+                            Thumbnail(model, video.id, 132.dp, Modifier.clickable { model.showVideo(video.id, video.title, video.channel) })
                             Text(video.title, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                         }
                     }
@@ -148,7 +149,7 @@ private fun TopicCard(model: AppModel, topic: Cluster) {
             } else Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (video in topic.videos.take(6)) {
                     Column(Modifier.weight(1f)) {
-                        Thumbnail(model, video.id, 150.dp)
+                        Thumbnail(model, video.id, 150.dp, Modifier.clickable { model.showVideo(video.id, video.title, video.channel) })
                         Text(
                             video.title,
                             style = MaterialTheme.typography.bodySmall,

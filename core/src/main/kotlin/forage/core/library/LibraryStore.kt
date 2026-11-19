@@ -20,6 +20,14 @@ data class LibraryVideo(
     val uploadedAt: Instant? = null,
 )
 
+/** Where a video appears in the library: the history, playlists and the watch-later queue. */
+data class VideoInLibrary(
+    val watchCount: Int = 0,
+    val lastWatched: Instant? = null,
+    val playlists: List<String> = emptyList(),
+    val savedForLater: Boolean = false,
+)
+
 /** A video in the watch-later queue and when it was saved. */
 data class SavedVideo(val id: PlatformId, val savedAt: Instant)
 
@@ -173,6 +181,27 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
 
     /** Everything watched or saved: never to be recommended, whatever the profile. */
     fun knownVideoIds(): Set<PlatformId> = queries.selectKnownVideoIds().executeAsList().map(PlatformId::parse).toSet()
+
+    /** Follows a channel, as a subscription would; following it again only updates the name. */
+    fun follow(channel: PlatformId, name: String?) = queries.transaction {
+        queries.insertSubscription(channel.toString(), clock().epochSecond)
+        queries.updateSubscription(name, channel.toString())
+    }
+
+    fun unfollow(channel: PlatformId) = queries.deleteSubscription(channel.toString())
+
+    fun follows(channel: PlatformId): Boolean = queries.selectSubscription(channel.toString()).executeAsOneOrNull() != null
+
+    /** Everything the library holds about one video, for its page. */
+    fun about(id: PlatformId): VideoInLibrary {
+        val watches = queries.selectWatchEventsOfVideo(id.toString()).executeAsList()
+        return VideoInLibrary(
+            watchCount = watches.size,
+            lastWatched = watches.filter { it > 0 }.maxOrNull()?.let(Instant::ofEpochSecond),
+            playlists = queries.selectPlaylistsOfVideo(id.toString()).executeAsList(),
+            savedForLater = queries.isSavedForLater(id.toString()).executeAsOne() > 0,
+        )
+    }
 
     fun subscriptions(): List<Subscription> =
         queries.selectSubscriptions().executeAsList().map { Subscription(PlatformId.parse(it.channel_id), it.name) }

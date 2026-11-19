@@ -11,6 +11,8 @@ import forage.core.importer.TakeoutData
 import forage.core.importer.TakeoutFolder
 import forage.core.language.LanguageDetector
 import forage.core.library.LibraryStore
+import forage.core.library.VideoInLibrary
+import forage.core.source.VideoDetails
 import forage.core.library.WatchHistory
 import forage.core.library.WatchedVideo
 import forage.core.metadata.FetchOutcome
@@ -117,6 +119,36 @@ enum class LaterSort(val label: String, val shortLabel: String) {
 }
 
 data class PickView(val pick: StoredPick, val feedback: Set<Feedback>)
+
+/**
+ * A video on its own page. What the screen it was opened from knew about it shows at once; the
+ * details (description, tags, related videos) follow from the cache or the platform.
+ */
+data class VideoPage(
+    val id: PlatformId,
+    val title: String? = null,
+    val channel: PlatformId? = null,
+    val channelName: String? = null,
+    val durationSeconds: Long? = null,
+    val uploadedAt: Instant? = null,
+    val details: VideoDetails? = null,
+    val loading: Boolean = false,
+    /** Why the details couldn't be loaded, if they couldn't. */
+    val problem: String? = null,
+    /** True when the platform says the video is gone. */
+    val gone: Boolean = false,
+    val state: VideoState? = null,
+    val inLibrary: VideoInLibrary = VideoInLibrary(),
+    val following: Boolean = false,
+    /** Opened from the search dialog, which comes back when the page closes. */
+    val fromSearch: Boolean = false,
+) {
+    val shownTitle: String? get() = details?.metadata?.title ?: title
+    val shownChannel: PlatformId? get() = details?.metadata?.channel ?: channel
+    val shownChannelName: String? get() = details?.metadata?.channelName ?: channelName
+    val shownDuration: Long? get() = details?.metadata?.durationSeconds ?: durationSeconds
+    val shownUploadedAt: Instant? get() = details?.metadata?.uploadedAt ?: uploadedAt
+}
 
 /** A long-running task. [total] is null when progress can't be counted. */
 data class Job(val label: String, val done: Int = 0, val total: Int? = null, val detail: String = "")
@@ -246,6 +278,162 @@ class AppModel(
     }
 
     var screen by mutableStateOf(Screen.LIBRARY)
+
+    /** Switches screens from the navigation, leaving any open video pages. */
+    fun go(to: Screen) {
+        closeAllVideos()
+        screen = to
+    }
+
+    // Video pages (SPEC, Direction: "a video page behind every video")
+
+    /** The pages opened one from another, the one on screen last. */
+    var videoStack by mutableStateOf<List<VideoPage>>(emptyList())
+        private set
+    val videoPage: VideoPage? get() = videoStack.lastOrNull()
+
+    /** Opens a video's page, starting from what the caller already knows about it. */
+    fun showVideo(
+        id: PlatformId,
+        title: String? = null,
+        channel: PlatformId? = null,
+        channelName: String? = null,
+        durationSeconds: Long? = null,
+        uploadedAt: Instant? = null,
+        fromSearch: Boolean = false,
+    ) {
+        if (videoPage?.id == id) return
+        // The search dialog steps aside without forgetting its results.
+        if (fromSearch) addDialogOpen = false
+        videoStack = videoStack + VideoPage(id, title, channel, channelName, durationSeconds, uploadedAt, loading = true, fromSearch = fromSearch)
+        launchQuiet { loadPage(id, fetch = true) }
+    }
+
+    fun showPick(pick: StoredPick) = showVideo(pick.video, pick.title, pick.channel, pick.channelName, pick.durationSeconds, pick.uploadedAt)
+
+    fun showLater(item: LaterItem) = showVideo(item.id, item.title, null, item.channelName, item.durationSeconds, item.uploadedAt)
+
+    fun showVideo(stub: VideoStub, fromSearch: Boolean = false) =
+        showVideo(stub.id, stub.title, stub.channel, stub.channelName, stub.durationSeconds, stub.uploadedAt, fromSearch)
+
+    /** Back from the page on screen to the one before, or to the screen it was opened from. */
+    fun closeVideo() {
+        val closing = videoPage ?: return
+        videoStack = videoStack.dropLast(1)
+        if (closing.fromSearch) addDialogOpen = true
+    }
+
+    fun closeAllVideos() {
+        if (videoStack.isEmpty()) return
+        val fromSearch = videoStack.any { it.fromSearch }
+        videoStack = emptyList()
+        if (fromSearch) closeAddDialog()
+    }
+
+    /** Fetches the details again after they failed to load. */
+    fun retryVideo() {
+        val page = videoPage ?: return
+        updatePage(page.id) { it.copy(loading = true, problem = null) }
+        launchQuiet { loadPage(page.id, fetch = true) }
+    }
+
+    /** Applies [change] to the open pages of [id]. */
+    private fun updatePage(id: PlatformId, change: (VideoPage) -> VideoPage) {
+        videoStack = videoStack.map { if (it.id == id) change(it) else it }
+    }
+
+    private suspend fun loadPage(id: PlatformId, fetch: Boolean) {
+        val known = library.video(id)
+        val state = profiles.entries(profile).firstOrNull { it.video == id }?.state
+        updatePage(id) { page ->
+            page.copy(
+                title = page.title ?: known?.title,
+                channel = page.channel ?: known?.channel,
+                channelName = page.channelName ?: known?.channelName,
+                durationSeconds = page.durationSeconds ?: known?.durationSeconds,
+                uploadedAt = page.uploadedAt ?: known?.uploadedAt,
+                details = page.details ?: cache.video(id),
+                state = state,
+                inLibrary = library.about(id),
+            )
+        }
+        updatePage(id) { it.copy(following = it.shownChannel?.let(library::follows) == true) }
+        if (!fetch || videoStack.none { it.id == id && it.details == null }) {
+            updatePage(id) { it.copy(loading = false) }
+            return
+        }
+        val outcome = MetadataFetcher(source, cache).fetch(id)
+        updatePage(id) { page ->
+            when (outcome) {
+                is FetchOutcome.Fetched -> page.copy(details = outcome.details, loading = false)
+                is FetchOutcome.Cached -> page.copy(details = outcome.details, loading = false)
+                is FetchOutcome.Unavailable -> page.copy(loading = false, gone = true, problem = outcome.reason)
+                is FetchOutcome.Failed -> page.copy(loading = false, problem = outcome.error.message ?: "The platform didn't answer")
+            }
+        }
+        updatePage(id) { it.copy(following = it.shownChannel?.let(library::follows) == true) }
+    }
+
+    /** Keeps what the page shows about its video in the library, so lists show it before any fetch. */
+    private fun rememberPage(page: VideoPage) = library.remember(
+        page.id, page.shownTitle, page.shownChannel, page.shownChannelName,
+        page.details?.metadata?.isShort ?: false, page.shownDuration, page.shownUploadedAt,
+    )
+
+    /** Like, Not interested, or (the same again) neither, for the video on screen. */
+    fun choose(state: VideoState) {
+        val page = videoPage ?: return
+        val next = if (page.state == state) null else state
+        updatePage(page.id) { it.copy(state = next) }
+        launchQuiet { rememberPage(page) }
+        mark(listOf(page.id), next)
+        launchQuiet { loadPicks() }
+    }
+
+    fun toggleLater() {
+        val page = videoPage ?: return
+        val saved = !page.inLibrary.savedForLater
+        updatePage(page.id) { it.copy(inLibrary = it.inLibrary.copy(savedForLater = saved)) }
+        launchQuiet {
+            rememberPage(page)
+            if (saved) library.saveForLater(page.id) else library.removeFromWatchLater(page.id)
+            loadLater()
+            loadPicks()
+            message = if (saved) "Saved for later" else "Taken off watch later"
+        }
+    }
+
+    fun toggleFollow() {
+        val page = videoPage ?: return
+        val channel = page.shownChannel ?: return
+        val follow = !page.following
+        updatePage(page.id) { it.copy(following = follow) }
+        launchQuiet {
+            if (follow) library.follow(channel, page.shownChannelName) else library.unfollow(channel)
+            // Every open page of that channel follows along.
+            videoStack = videoStack.map { if (it.shownChannel == channel) it.copy(following = follow) else it }
+            val name = page.shownChannelName ?: "the channel"
+            message = if (follow) "Following $name" else "Stopped following $name"
+        }
+    }
+
+    /** Plays the video on screen. */
+    fun playPage() {
+        val page = videoPage ?: return
+        launchQuiet { rememberPage(page) }
+        open(page.id)
+        if (recordHistory) {
+            updatePage(page.id) { it.copy(inLibrary = it.inLibrary.copy(watchCount = it.inLibrary.watchCount + 1, lastWatched = Instant.now())) }
+        }
+    }
+
+    /** Refreshes the open pages after the library or likes changed elsewhere, e.g. a playlist dialog. */
+    private fun refreshPages() {
+        for (page in videoStack.distinctBy { it.id }) {
+            val state = profiles.entries(profile).firstOrNull { it.video == page.id }?.state
+            updatePage(page.id) { it.copy(state = state, inLibrary = library.about(page.id)) }
+        }
+    }
 
     var showThumbnails by mutableStateOf(settings.showThumbnails)
         private set
@@ -422,6 +610,7 @@ class AppModel(
             selection = emptySet()
             loadRows()
             loadProfiles()
+            refreshPages()
             if (state != null) fetchMissingDetails(ids)
         }
     }
@@ -459,6 +648,7 @@ class AppModel(
             selection = emptySet()
             loadSources()
             loadRows()
+            refreshPages()
             message = when {
                 added == 0 -> "Already in \"$clean\""
                 added == 1 -> "Added 1 video to \"$clean\""
@@ -594,6 +784,7 @@ class AppModel(
             loadRows()
             loadPicks()
             loadProfiles()
+            refreshPages()
         }
         message = "Switched to \"${to.name}\""
     }
@@ -621,6 +812,7 @@ class AppModel(
             profiles.delete(doomed)
             loadProfiles()
         }
+        closeAllVideos()
         message = "Deleted \"${doomed.name}\". The library and watch later queue are unchanged."
     }
 

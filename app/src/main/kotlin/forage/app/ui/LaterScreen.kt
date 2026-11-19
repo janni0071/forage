@@ -262,7 +262,7 @@ private fun QueueRow(model: AppModel, item: LaterItem, position: Int) {
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable { model.open(item.id) },
+                modifier = Modifier.clickable { model.showLater(item) },
             )
             Text(details(item), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
         }
@@ -290,7 +290,7 @@ private fun BigThumbnail(model: AppModel, item: LaterItem, width: Dp?, playIcon:
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .hoverable(hover)
             .pointerHoverIcon(PointerIcon.Hand)
-            .tapOrHold(model.platform.isMobile, { model.open(item.id) }) { holding = it },
+            .tapOrHold(model.platform.isMobile, { model.showLater(item) }) { holding = it },
     ) {
         if (model.showThumbnails) ThumbnailImage(model, item.id, large = true, zoom = zoom, compact = width != null && width < 300.dp, preview = hovered || holding)
         if (hovered) {
