@@ -59,6 +59,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import forage.app.AppModel
 import forage.app.Screen
@@ -81,6 +82,10 @@ val LocalCompact = staticCompositionLocalOf { false }
 @Composable
 fun screenPadding(): PaddingValues =
     if (LocalCompact.current) PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp) else PaddingValues(start = 32.dp, end = 16.dp, top = 24.dp)
+
+/** Space kept clear at the right of a list for the scrollbar; phones scroll by swiping and have none. */
+@Composable
+fun scrollbarGap(): Dp = if (LocalCompact.current) 0.dp else 16.dp
 
 @Composable
 fun App(model: AppModel, onImport: () -> Unit, chrome: WindowChrome? = null) {

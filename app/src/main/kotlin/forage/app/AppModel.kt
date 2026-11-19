@@ -7,6 +7,7 @@ import forage.core.PlatformId
 import forage.core.db.ForageDatabase
 import forage.core.embedding.Embedder
 import forage.core.embedding.EmbeddingStore
+import forage.core.importer.TakeoutData
 import forage.core.importer.TakeoutFolder
 import forage.core.importer.WatchEvent
 import forage.core.language.LanguageDetector
@@ -418,8 +419,14 @@ class AppModel(
         }
     }
 
-    fun importTakeout(dir: File) = runJob("Importing ${dir.name}") { _ ->
-        val summary = library.importTakeout(TakeoutFolder.read(dir))
+    /** Imports a Takeout export: the extracted folder, or the zip as Google offers it. */
+    fun importTakeout(file: File) = importTakeout(file.name) {
+        if (file.isDirectory) TakeoutFolder.read(file) else file.inputStream().use(TakeoutFolder::readZip)
+    }
+
+    /** Imports a Takeout export that [read] reads, wherever it comes from (a phone's file picker, say). */
+    fun importTakeout(name: String, read: () -> TakeoutData) = runJob("Importing $name") { _ ->
+        val summary = library.importTakeout(read())
         reload()
         "Imported ${summary.watchEvents} watch events, ${summary.playlists.size} playlists and " +
             "${summary.subscriptions} subscriptions. Nothing was added to the profile."

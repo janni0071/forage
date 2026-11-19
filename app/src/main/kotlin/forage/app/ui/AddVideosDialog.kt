@@ -42,6 +42,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -65,8 +69,14 @@ import forage.app.AppModel
 fun AddVideosDialog(model: AppModel) {
     val c = MaterialTheme.colorScheme
     var tab by remember { mutableStateOf(if (model.searchPlatforms.isEmpty()) Tab.LINKS else Tab.SEARCH) }
-    BasicAlertDialog(onDismissRequest = model::closeAddDialog) {
-        Surface(shape = RoundedCornerShape(28.dp), color = c.surfaceContainerLow, modifier = Modifier.width(720.dp)) {
+    val compact = LocalCompact.current
+    // On a phone the dialog takes the whole width; the system's default leaves a quarter of it empty.
+    BasicAlertDialog(onDismissRequest = model::closeAddDialog, properties = DialogProperties(usePlatformDefaultWidth = !compact)) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = c.surfaceContainerLow,
+            modifier = if (compact) Modifier.fillMaxWidth().padding(horizontal = 12.dp) else Modifier.width(720.dp),
+        ) {
             Column(Modifier.padding(if (LocalCompact.current) 20.dp else 28.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Add videos", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -115,6 +125,14 @@ private fun SearchTab(model: AppModel) {
             }
         }
     }
+    // Searching puts the keyboard away, so the results have the screen.
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    fun search() {
+        keyboard?.hide()
+        focusManager.clearFocus()
+        model.searchVideos(query)
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedTextField(
             value = query,
@@ -123,17 +141,17 @@ private fun SearchTab(model: AppModel) {
             leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { model.searchVideos(query) }),
+            keyboardActions = KeyboardActions(onSearch = { search() }),
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.weight(1f).focusRequester(focus).onPreviewKeyEvent {
                 if (it.type == KeyEventType.KeyDown && (it.key == Key.Enter || it.key == Key.NumPadEnter)) {
-                    model.searchVideos(query)
+                    search()
                     true
                 } else false
             },
         )
         // On a phone the keyboard's search key does this, and the field needs the room.
-        if (!LocalCompact.current) AccentButton("Search", null, enabled = query.isNotBlank() && !model.searching) { model.searchVideos(query) }
+        if (!LocalCompact.current) AccentButton("Search", null, enabled = query.isNotBlank() && !model.searching) { search() }
     }
 
     Box(Modifier.fillMaxWidth().height(440.dp).padding(top = 12.dp)) {
@@ -155,15 +173,16 @@ private fun SearchTab(model: AppModel) {
 private fun SearchRow(model: AppModel, stub: VideoStub) {
     val c = MaterialTheme.colorScheme
     val added = stub.id in model.searchInProfile
+    val compact = LocalCompact.current
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
             .background(if (added) c.primaryContainer.copy(alpha = 0.35f) else c.surfaceContainerLow)
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp),
     ) {
         Box(Modifier.clickable { model.open(stub.id) }.pointerHoverIcon(PointerIcon.Hand)) {
-            Thumbnail(model, stub.id, 160.dp)
+            Thumbnail(model, stub.id, if (compact) 112.dp else 160.dp)
             formatDuration(stub.durationSeconds)?.let {
                 Text(
                     it,
@@ -181,7 +200,11 @@ private fun SearchRow(model: AppModel, stub: VideoStub) {
             val meta = listOfNotNull(stub.channelName, formatAge(stub.uploadedAt), "Short".takeIf { stub.isShort }).joinToString("  ·  ")
             if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (added) {
+        if (compact) {
+            // Round buttons on a phone: a label would leave the title no room.
+            if (added) Icon(Icons.Filled.Check, contentDescription = "In profile", tint = c.primary, modifier = Modifier.padding(horizontal = 10.dp).size(22.dp))
+            else FilledTonalIconButton(onClick = { model.addFromSearch(stub) }) { Icon(Icons.Outlined.Add, contentDescription = "Add") }
+        } else if (added) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 12.dp)) {
                 Icon(Icons.Filled.Check, contentDescription = null, tint = c.primary, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))

@@ -126,8 +126,8 @@ fun main(args: Array<String>) {
                 }
                 App(active, chrome = chrome, onImport = {
                     val chooser = JFileChooser().apply {
-                        fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-                        dialogTitle = "Choose the extracted Takeout folder"
+                        fileSelectionMode = JFileChooser.FILES_AND_DIRECTORIES
+                        dialogTitle = "Choose the Takeout zip, or the folder it was extracted to"
                     }
                     if (chooser.showOpenDialog(window) == JFileChooser.APPROVE_OPTION) model.importTakeout(chooser.selectedFile)
                 })

@@ -88,7 +88,7 @@ fun DiscoverScreen(model: AppModel) {
                 state = gridState,
                 horizontalArrangement = Arrangement.spacedBy(20.dp),
                 verticalArrangement = Arrangement.spacedBy(28.dp),
-                contentPadding = PaddingValues(end = 16.dp, top = 8.dp, bottom = 96.dp),
+                contentPadding = PaddingValues(end = scrollbarGap(), top = 8.dp, bottom = 96.dp),
             ) {
                 items(model.picks, key = { it.pick.position }) { PickCard(model, it) }
             }
@@ -117,7 +117,7 @@ private fun Header(model: AppModel) {
 @Composable
 private fun TopicStrip(model: AppModel) {
     Row(
-        Modifier.fillMaxWidth().padding(end = 16.dp).horizontalScroll(rememberScrollState()),
+        Modifier.fillMaxWidth().padding(end = scrollbarGap()).horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -43,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -57,9 +58,14 @@ import forage.app.Theme
 @Composable
 fun SettingsDialog(model: AppModel) {
     val c = MaterialTheme.colorScheme
-    BasicAlertDialog(onDismissRequest = { model.settingsOpen = false }) {
-        Surface(shape = RoundedCornerShape(28.dp), color = c.surfaceContainerLow, modifier = Modifier.width(600.dp)) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(28.dp)) {
+    val compact = LocalCompact.current
+    BasicAlertDialog(onDismissRequest = { model.settingsOpen = false }, properties = DialogProperties(usePlatformDefaultWidth = !compact)) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = c.surfaceContainerLow,
+            modifier = if (compact) Modifier.fillMaxWidth().padding(horizontal = 12.dp) else Modifier.width(600.dp),
+        ) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(if (compact) 20.dp else 28.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     IconButton(onClick = { model.settingsOpen = false }) { Icon(Icons.Outlined.Close, contentDescription = "Close") }

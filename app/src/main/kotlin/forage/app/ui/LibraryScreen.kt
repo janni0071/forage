@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -129,11 +130,12 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
             } else if (model.libraryGrid) {
                 val gridState = rememberLazyGridState()
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 210.dp),
+                    // Two columns on a phone, as many as fit in a window.
+                    columns = GridCells.Adaptive(minSize = if (LocalCompact.current) 150.dp else 210.dp),
                     state = gridState,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = PaddingValues(end = 16.dp, bottom = 96.dp),
+                    contentPadding = PaddingValues(end = scrollbarGap(), bottom = 96.dp),
                 ) {
                     items(visible.size, key = { visible[it].id.toString() }) { i ->
                         LibraryCard(model, visible[i], anySelected = model.selection.isNotEmpty())
@@ -142,7 +144,7 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
                 Scrollbar(gridState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             } else {
                 val listState = rememberLazyListState()
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(end = 16.dp), contentPadding = PaddingValues(bottom = 96.dp)) {
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(end = scrollbarGap()), contentPadding = PaddingValues(bottom = 96.dp)) {
                     items(visible, key = { it.id.toString() }) { row -> VideoRow(model, row) }
                 }
                 Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
@@ -154,8 +156,9 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
 @Composable
 private fun EmptyLibrary(model: AppModel, onImport: () -> Unit) {
     val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
     Column(
-        Modifier.fillMaxSize().padding(48.dp),
+        Modifier.fillMaxSize().padding(if (compact) 24.dp else 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -172,20 +175,28 @@ private fun EmptyLibrary(model: AppModel, onImport: () -> Unit) {
         )
         Text(
             if (model.isPrivate) {
-                "Add videos by their link. They go into this vault's profile and stay here, encrypted,\n" +
+                "Add videos by their link. They go into this vault's profile and stay here, encrypted, " +
                     "apart from everything else in Forage."
             } else {
-                "Import a Google Takeout export of your YouTube data, or add videos by their link.\n" +
+                "Import a Google Takeout export of your YouTube data, or search for videos and add them. " +
                     "Imported videos land in the library as watched; nothing enters your profile until you choose it."
             },
             style = MaterialTheme.typography.bodyLarge,
             color = c.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 16.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.padding(vertical = 16.dp).widthIn(max = 640.dp),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (!model.isPrivate) AccentButton("Import Takeout folder", Icons.Outlined.CloudDownload, onClick = onImport)
+        // Side by side in a window; stacked on a phone, where they don't fit next to each other.
+        val importLabel = if (model.platform.isMobile) "Import Takeout zip" else "Import Takeout"
+        val buttons: @Composable () -> Unit = {
+            if (!model.isPrivate) AccentButton(importLabel, Icons.Outlined.CloudDownload, onClick = onImport)
             if (model.isPrivate) AccentButton("Add videos", Icons.Outlined.Add) { model.addDialogOpen = true }
-            else OutlinedButton(onClick = { model.addDialogOpen = true }, shape = RoundedCornerShape(12.dp)) { Text("Search or add by link") }
+            else OutlinedButton(onClick = { model.addDialogOpen = true }, shape = RoundedCornerShape(12.dp)) { Text("Search or add by link", maxLines = 1) }
+        }
+        if (compact) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) { buttons() }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { buttons() }
         }
     }
 }

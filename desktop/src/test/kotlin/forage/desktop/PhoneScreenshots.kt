@@ -53,10 +53,34 @@ fun main(args: Array<String>) {
         println("wrote phone-$name.png")
     }
     shot("library") { screen = Screen.LIBRARY }
-    shot("discover") { screen = Screen.DISCOVER }
-    shot("later") { screen = Screen.LATER }
-    shot("topics") { screen = Screen.TOPICS }
+    shot("library-grid") { showLibraryAsGrid(true) }
+    shot("discover") { showLibraryAsGrid(false); screen = Screen.DISCOVER }
+    shot("later") {
+        // A few saved videos, so the queue shows its rows.
+        picks.take(4).forEach { if (it.pick.video !in later.map { l -> l.id }) feedback(it, forage.app.Feedback.SAVED) }
+        screen = Screen.LATER
+    }
+    shot("topics") { screen = Screen.TOPICS; loadTopics() }
     shot("settings") { settingsOpen = true }
-    shot("add") { settingsOpen = false; screen = Screen.LIBRARY; addDialogOpen = true }
-    shot("discover-dark", dark = true) { addDialogOpen = false; screen = Screen.DISCOVER }
+    shot("add") {
+        settingsOpen = false
+        screen = Screen.LIBRARY
+        addDialogOpen = true
+        searchVideos("geowizard")
+        runBlocking { searchResults.take(5).forEach { thumbnails.load(it.id) } }
+    }
+    shot("discover-dark", dark = true) { closeAddDialog(); screen = Screen.DISCOVER }
+
+    // A new phone: nothing imported yet.
+    val empty = java.nio.file.Files.createTempDirectory("phone-empty").toFile()
+    val fresh = AppModel(
+        empty, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined,
+        DesktopStorage.plain(empty), Models(empty, PhonePreview), PhonePreview,
+    )
+    runBlocking { fresh.reload() }
+    val scene = ImageComposeScene(width = 824, height = 1784, density = Density(2f)) { ForageTheme(dark = true) { App(fresh, onImport = {}) } }
+    repeat(12) { scene.render(it * 100_000_000L) }
+    File(outDir, "phone-empty.png").writeBytes(scene.render(1_200_000_000L).encodeToData(EncodedImageFormat.PNG)!!.bytes)
+    scene.close()
+    println("wrote phone-empty.png")
 }

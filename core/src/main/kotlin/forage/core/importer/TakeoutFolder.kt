@@ -1,6 +1,8 @@
 package forage.core.importer
 
 import java.io.File
+import java.io.InputStream
+import java.util.zip.ZipInputStream
 
 /** Everything Forage reads from an extracted Takeout archive. */
 data class TakeoutData(
@@ -26,6 +28,38 @@ object TakeoutFolder {
             .associate { unescape(it.name.removeSuffix(PLAYLIST_SUFFIX)) to TakeoutCsv.playlist(it.readText()) }
         val subscriptions = files.firstOrNull { it.name == "subscriptions.csv" }
             ?.let { TakeoutCsv.subscriptions(it.readText()) }.orEmpty()
+        return TakeoutData(history, playlists, subscriptions)
+    }
+
+    /**
+     * Reads a Takeout archive as downloaded, without unpacking it: the zip Google offers, and the
+     * only form a phone sees. Same files, found by name, as [read] looks for.
+     */
+    fun readZip(input: InputStream): TakeoutData {
+        var historyJson: ByteArray? = null
+        var historyHtml: ByteArray? = null
+        val playlists = LinkedHashMap<String, List<PlaylistEntry>>()
+        var subscriptions: List<Subscription> = emptyList()
+        var found = false
+        ZipInputStream(input.buffered()).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                if (entry.isDirectory) continue
+                val name = unescape(entry.name.substringAfterLast('/'))
+                when {
+                    name == "watch-history.json" -> historyJson = zip.readBytes()
+                    name == "watch-history.html" -> historyHtml = zip.readBytes()
+                    name.endsWith(PLAYLIST_SUFFIX) -> playlists[name.removeSuffix(PLAYLIST_SUFFIX)] = TakeoutCsv.playlist(zip.readBytes().decodeToString())
+                    name == "subscriptions.csv" -> subscriptions = TakeoutCsv.subscriptions(zip.readBytes().decodeToString())
+                    else -> continue
+                }
+                found = true
+            }
+        }
+        require(found) { "No YouTube data in this file: a Takeout export has a watch history, playlists or subscriptions" }
+        val history = historyJson?.let { TakeoutWatchHistory.parse(it.inputStream()) }
+            ?: historyHtml?.let { TakeoutWatchHistoryHtml.parse(it.inputStream()) }
+            ?: ImportResult(emptyList(), emptyMap())
         return TakeoutData(history, playlists, subscriptions)
     }
 

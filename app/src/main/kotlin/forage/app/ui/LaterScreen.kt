@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -91,7 +92,9 @@ fun LaterScreen(model: AppModel) {
         }
         Box(Modifier.weight(1f)) {
             val listState = rememberLazyListState()
-            LazyColumn(state = listState, contentPadding = PaddingValues(end = 16.dp, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Room for the scrollbar in a window; a phone has none.
+            val end = if (LocalCompact.current) 0.dp else 16.dp
+            LazyColumn(state = listState, contentPadding = PaddingValues(end = end, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 itemsIndexed(queue, key = { _, it -> it.id.toString() }) { index, item ->
                     if (index == 0) UpNext(model, item) else QueueRow(model, item, index + 1)
                 }
@@ -105,6 +108,7 @@ fun LaterScreen(model: AppModel) {
 @Composable
 private fun UpNext(model: AppModel, item: LaterItem) {
     val c = MaterialTheme.colorScheme
+    if (LocalCompact.current) return UpNextCompact(model, item)
     Row(
         Modifier
             .fillMaxWidth()
@@ -148,8 +152,76 @@ private fun UpNext(model: AppModel, item: LaterItem) {
     }
 }
 
+/** Up next on a phone: the thumbnail across the width, the title and the buttons below it. */
+@Composable
+private fun UpNextCompact(model: AppModel, item: LaterItem) {
+    val c = MaterialTheme.colorScheme
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 14.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(c.surfaceContainerLow)
+            .padding(12.dp),
+    ) {
+        BigThumbnail(model, item, width = null, playIcon = 52.dp)
+        Text("UP NEXT", style = MaterialTheme.typography.labelLarge, color = c.primary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+        Text(
+            item.title ?: "Untitled video",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Text(details(item), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+        FlowRow(
+            Modifier.padding(top = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            AccentButton("Play", Icons.Filled.PlayArrow) { model.open(item.id) }
+            OutlinedButton(onClick = { model.markWatched(item) }, shape = RoundedCornerShape(12.dp)) {
+                Icon(Icons.Outlined.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Watched", maxLines = 1)
+            }
+            OutlinedButton(onClick = { model.removeFromLater(item.id) }, shape = RoundedCornerShape(12.dp)) {
+                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Remove", maxLines = 1)
+            }
+        }
+    }
+}
+
+/** A queued video on a phone: a small thumbnail, the title, and its three actions under the title. */
+@Composable
+private fun QueueRowCompact(model: AppModel, item: LaterItem) {
+    val c = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
+        BigThumbnail(model, item, width = 136.dp, playIcon = 30.dp)
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(
+                item.title ?: "Untitled video",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(details(item), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                RoundAction(Icons.Filled.PlayArrow, "Play", filled = true) { model.open(item.id) }
+                RoundAction(Icons.Outlined.CheckCircle, "Mark as watched") { model.markWatched(item) }
+                RoundAction(Icons.Outlined.Close, "Remove from the queue") { model.removeFromLater(item.id) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun QueueRow(model: AppModel, item: LaterItem, position: Int) {
+    if (LocalCompact.current) return QueueRowCompact(model, item)
     val c = MaterialTheme.colorScheme
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
@@ -190,13 +262,13 @@ private fun QueueRow(model: AppModel, item: LaterItem, position: Int) {
 
 /** A 16:9 thumbnail that plays on click, zooms a little under the mouse and shows the length. */
 @Composable
-private fun BigThumbnail(model: AppModel, item: LaterItem, width: Dp, playIcon: Dp) {
+private fun BigThumbnail(model: AppModel, item: LaterItem, width: Dp?, playIcon: Dp) {
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     val zoom by animateFloatAsState(if (hovered) 1.05f else 1f)
     Box(
-        Modifier
-            .width(width)
+        // A width, or (null) the whole width available.
+        (if (width != null) Modifier.width(width) else Modifier.fillMaxWidth())
             .aspectRatio(16f / 9f)
             .clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
@@ -204,7 +276,7 @@ private fun BigThumbnail(model: AppModel, item: LaterItem, width: Dp, playIcon: 
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable { model.open(item.id) },
     ) {
-        if (model.showThumbnails) ThumbnailImage(model, item.id, large = true, zoom = zoom, compact = width < 300.dp, preview = hovered)
+        if (model.showThumbnails) ThumbnailImage(model, item.id, large = true, zoom = zoom, compact = width != null && width < 300.dp, preview = hovered)
         if (hovered) {
             Box(
                 Modifier.align(Alignment.Center).size(playIcon).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)),

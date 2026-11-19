@@ -1,5 +1,7 @@
 package forage.app.ui
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -133,7 +135,17 @@ private fun TopicCard(model: AppModel, topic: Cluster) {
                 }
             }
             // A strip of the topic's videos says more than its keywords.
-            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (LocalCompact.current) {
+                // A phone: the videos in a row to swipe through, each at a size that shows it.
+                Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (video in topic.videos.take(12)) {
+                        Column(Modifier.width(132.dp)) {
+                            Thumbnail(model, video.id, 132.dp)
+                            Text(video.title, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                        }
+                    }
+                }
+            } else Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (video in topic.videos.take(6)) {
                     Column(Modifier.weight(1f)) {
                         Thumbnail(model, video.id, 150.dp)
