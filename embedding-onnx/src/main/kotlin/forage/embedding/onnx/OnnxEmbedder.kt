@@ -1,6 +1,5 @@
 package forage.embedding.onnx
 
-import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
@@ -15,23 +14,22 @@ class OnnxEmbedder(private val spec: ModelSpec, files: ModelFiles.Local) : Embed
 
     private val env = OrtEnvironment.getEnvironment()
     private val session = env.createSession(files.model.toString(), OrtSession.SessionOptions())
-    private val tokenizer = HuggingFaceTokenizer.builder()
-        .optTokenizerPath(files.tokenizer)
-        .optTruncation(true)
-        .optMaxLength(spec.maxTokens)
-        .optPadding(true)
-        .build()
+    // Plain Kotlin, so the same tokenization runs on Android; tested token for token against the reference library.
+    private val tokenizer = UnigramTokenizer.load(files.tokenizer.toFile())
 
     override fun embed(texts: List<String>): List<FloatArray> {
         if (texts.isEmpty()) return emptyList()
-        val encodings = tokenizer.batchEncode(texts)
-        val length = encodings[0].ids.size
+        val encodings = texts.map { tokenizer.encode(it, spec.maxTokens) }
+        // Padded to the longest text in the batch, with the padding masked out.
+        val length = encodings.maxOf { it.size }
         val shape = longArrayOf(texts.size.toLong(), length.toLong())
-        val ids = LongArray(texts.size * length)
+        val ids = LongArray(texts.size * length) { tokenizer.padId.toLong() }
         val mask = LongArray(texts.size * length)
         encodings.forEachIndexed { row, e ->
-            e.ids.copyInto(ids, row * length)
-            e.attentionMask.copyInto(mask, row * length)
+            for (t in e.indices) {
+                ids[row * length + t] = e[t].toLong()
+                mask[row * length + t] = 1
+            }
         }
 
         val inputs = HashMap<String, OnnxTensor>()
@@ -67,7 +65,6 @@ class OnnxEmbedder(private val spec: ModelSpec, files: ModelFiles.Local) : Embed
     }
 
     override fun close() {
-        tokenizer.close()
         session.close()
     }
 }

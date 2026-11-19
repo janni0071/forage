@@ -85,10 +85,10 @@ val hostNatives: Map<String, String>? = run {
     val os = System.getProperty("os.name").lowercase()
     val arm = System.getProperty("os.arch").lowercase().let { it == "aarch64" || it == "arm64" }
     when {
-        "linux" in os && !arm -> mapOf("onnx" to "linux-x64", "tokenizers" to "linux-x86_64", "sqlite" to "Linux/x86_64")
-        "linux" in os -> mapOf("onnx" to "linux-aarch64", "tokenizers" to "linux-aarch64", "sqlite" to "Linux/aarch64")
-        "mac" in os && arm -> mapOf("onnx" to "osx-aarch64", "tokenizers" to "osx-aarch64", "sqlite" to "Mac/aarch64")
-        "win" in os && !arm -> mapOf("onnx" to "win-x64", "tokenizers" to "win-x86_64", "sqlite" to "Windows/x86_64")
+        "linux" in os && !arm -> mapOf("onnx" to "linux-x64", "sqlite" to "Linux/x86_64")
+        "linux" in os -> mapOf("onnx" to "linux-aarch64", "sqlite" to "Linux/aarch64")
+        "mac" in os && arm -> mapOf("onnx" to "osx-aarch64", "sqlite" to "Mac/aarch64")
+        "win" in os && !arm -> mapOf("onnx" to "win-x64", "sqlite" to "Windows/x86_64")
         else -> null // unknown platform: keep everything
     }
 }
@@ -102,7 +102,7 @@ val linguaLanguages = setOf(
 fun keepEntry(name: String): Boolean {
     fun onlyHost(prefix: String, key: String): Boolean =
         !name.startsWith(prefix) || hostNatives == null || name == prefix || name.startsWith(prefix + hostNatives.getValue(key) + "/") ||
-            // Files beside the platform folders (the tokenizer library's version file, for one) are needed everywhere.
+            // Files beside the platform folders are needed everywhere.
             '/' !in name.removePrefix(prefix) ||
             // Directory entries on the way to the kept folder.
             (name.endsWith("/") && (prefix + hostNatives.getValue(key) + "/").startsWith(name))
@@ -110,7 +110,7 @@ fun keepEntry(name: String): Boolean {
         val code = name.removePrefix("language-models/").substringBefore('/')
         return code.isEmpty() || code in linguaLanguages
     }
-    return onlyHost("ai/onnxruntime/native/", "onnx") && onlyHost("native/lib/", "tokenizers") && onlyHost("org/sqlite/native/", "sqlite") &&
+    return onlyHost("ai/onnxruntime/native/", "onnx") && onlyHost("org/sqlite/native/", "sqlite") &&
         // Debug symbols for the macOS library alone are 58 MB.
         !name.contains(".dSYM/")
 }
