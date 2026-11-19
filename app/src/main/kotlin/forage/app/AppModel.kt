@@ -100,7 +100,9 @@ data class LaterItem(
     val savedAt: Instant,
 )
 
-enum class LaterSort(val label: String) { RECENT("Recently saved"), OLDEST("Oldest first"), SHORTEST("Shortest first") }
+enum class LaterSort(val label: String, val shortLabel: String) {
+    RECENT("Recently saved", "Recent"), OLDEST("Oldest first", "Oldest"), SHORTEST("Shortest first", "Shortest"),
+}
 
 data class PickView(val pick: StoredPick, val feedback: Set<Feedback>)
 

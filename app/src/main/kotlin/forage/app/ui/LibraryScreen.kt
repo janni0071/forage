@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.material3.OutlinedIconButton
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
@@ -88,55 +90,33 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
         return
     }
     val visible = model.visibleRows
+    val compact = LocalCompact.current
+    // On a phone the header scrolls away with the videos, so the list gets the whole screen;
+    // in a window it stays put above the list.
+    val header: @Composable () -> Unit = { LibraryHeader(model, visible.size) }
     Column(Modifier.fillMaxSize().padding(screenPadding())) {
-        ScreenHeader("Library", "Choose what shapes your profile") {
-            OutlinedTextField(
-                value = model.query,
-                onValueChange = { model.query = it },
-                placeholder = { Text("Search titles and channels") },
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                modifier = if (LocalCompact.current) Modifier.fillMaxWidth() else Modifier.width(300.dp),
-            )
-            ViewToggle(model)
-            OutlinedButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Add videos")
-            }
-            OutlinedButton(onClick = model::fetchDetails, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    when {
-                        LocalCompact.current -> "Fetch details"
-                        model.selection.isEmpty() -> "Fetch profile details"
-                        else -> "Fetch details of selection"
-                    }
-                )
-            }
-        }
-        SourceTabs(model)
-        Filters(model)
-        ActionBar(model, visible.size)
+        if (!compact) header()
         Box(Modifier.weight(1f)) {
             if (visible.isEmpty()) {
-                Text(
-                    "Nothing here matches. Try another filter or source.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 24.dp),
-                )
+                Column {
+                    if (compact) header()
+                    Text(
+                        "Nothing here matches. Try another filter or source.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 24.dp),
+                    )
+                }
             } else if (model.libraryGrid) {
                 val gridState = rememberLazyGridState()
                 LazyVerticalGrid(
                     // Two columns on a phone, as many as fit in a window.
-                    columns = GridCells.Adaptive(minSize = if (LocalCompact.current) 150.dp else 210.dp),
+                    columns = GridCells.Adaptive(minSize = if (compact) 150.dp else 210.dp),
                     state = gridState,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = PaddingValues(end = scrollbarGap(), bottom = 96.dp),
                 ) {
+                    if (compact) item(span = { GridItemSpan(maxLineSpan) }) { header() }
                     items(visible.size, key = { visible[it].id.toString() }) { i ->
                         LibraryCard(model, visible[i], anySelected = model.selection.isNotEmpty())
                     }
@@ -145,11 +125,54 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
             } else {
                 val listState = rememberLazyListState()
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(end = scrollbarGap()), contentPadding = PaddingValues(bottom = 96.dp)) {
+                    if (compact) item { header() }
                     items(visible, key = { it.id.toString() }) { row -> VideoRow(model, row) }
                 }
                 Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             }
         }
+    }
+}
+
+/** Title, search, buttons, sources, filters and the selection bar. */
+@Composable
+private fun LibraryHeader(model: AppModel, visibleCount: Int) {
+    val compact = LocalCompact.current
+    Column {
+        ScreenHeader("Library", "Choose what shapes your profile") {
+            if (compact) {
+                // A phone: search, the view switch and adding share one row; fetching gets the next.
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SearchField(model.query, { model.query = it }, "Search", Modifier.weight(1f))
+                    ViewToggle(model)
+                    OutlinedIconButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.size(ControlHeight)) {
+                        Icon(Icons.Outlined.Add, contentDescription = "Add videos")
+                    }
+                }
+            } else {
+                SearchField(model.query, { model.query = it }, "Search titles and channels", Modifier.width(300.dp))
+                ViewToggle(model)
+                OutlinedButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
+                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add videos")
+                }
+            }
+            OutlinedButton(onClick = model::fetchDetails, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
+                Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    when {
+                        compact -> "Fetch details"
+                        model.selection.isEmpty() -> "Fetch profile details"
+                        else -> "Fetch details of selection"
+                    }
+                )
+            }
+        }
+        SourceTabs(model)
+        Filters(model)
+        ActionBar(model, visibleCount)
     }
 }
 
@@ -210,7 +233,7 @@ private fun ViewToggle(model: AppModel) {
             val on = model.libraryGrid == grid
             Box(
                 Modifier
-                    .size(44.dp, 40.dp)
+                    .size(44.dp, ControlHeight)
                     .background(if (on) c.primaryContainer else Color.Transparent)
                     .clickable { model.showLibraryAsGrid(grid) }
                     .pointerHoverIcon(PointerIcon.Hand),

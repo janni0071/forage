@@ -38,6 +38,8 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.WatchLater
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -80,7 +82,8 @@ fun LaterScreen(model: AppModel) {
                     FilterChip(
                         selected = model.laterSort == sort,
                         onClick = { model.laterSort = sort },
-                        label = { Text(sort.label) },
+                        // Short labels on a phone, so the three fit on one line.
+                        label = { Text(if (LocalCompact.current) sort.shortLabel else sort.label, maxLines = 1) },
                         shape = RoundedCornerShape(10.dp),
                     )
                 }
@@ -175,22 +178,31 @@ private fun UpNextCompact(model: AppModel, item: LaterItem) {
             modifier = Modifier.padding(top = 4.dp),
         )
         Text(details(item), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
-        FlowRow(
-            Modifier.padding(top = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            AccentButton("Play", Icons.Filled.PlayArrow) { model.open(item.id) }
-            OutlinedButton(onClick = { model.markWatched(item) }, shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Outlined.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Watched", maxLines = 1)
+        // One row of three equal buttons; Watched and Remove without icons, so the labels fit.
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { model.open(item.id) },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Accent.pastelPink, contentColor = Color(0xFF3E0423)),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                modifier = Modifier.weight(1f).height(ControlHeight),
+            ) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Play", maxLines = 1, fontWeight = FontWeight.SemiBold)
             }
-            OutlinedButton(onClick = { model.removeFromLater(item.id) }, shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Remove", maxLines = 1)
-            }
+            OutlinedButton(
+                onClick = { model.markWatched(item) },
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                modifier = Modifier.weight(1f).height(ControlHeight),
+            ) { Text("Watched", maxLines = 1) }
+            OutlinedButton(
+                onClick = { model.removeFromLater(item.id) },
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                modifier = Modifier.weight(1f).height(ControlHeight),
+            ) { Text("Remove", maxLines = 1) }
         }
     }
 }

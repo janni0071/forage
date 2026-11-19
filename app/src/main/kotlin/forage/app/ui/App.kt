@@ -30,7 +30,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.BubbleChart
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.FileUpload
+import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
@@ -111,12 +111,13 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
                 if (model.isPrivate) {
                     IconButton(onClick = { model.onLock?.invoke() }) { Icon(Icons.Outlined.Lock, contentDescription = "Lock private vault") }
                 }
-                IconButton(onClick = onImport) { Icon(Icons.Outlined.FileUpload, contentDescription = "Import a library") }
+                IconButton(onClick = onImport) { Icon(Icons.Outlined.FileDownload, contentDescription = "Import a library") }
                 IconButton(onClick = { model.settingsOpen = true }) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") }
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Screens(model, onImport)
-                StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
+                // Above Discover's floating button, not on top of it.
+                StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = if (model.screen == Screen.DISCOVER) 88.dp else 12.dp))
             }
             NavigationBar(containerColor = c.surfaceContainerLow) {
                 for ((screen, icon, label) in listOf(
@@ -209,7 +210,7 @@ private fun Sidebar(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
         if (model.isPrivate) {
             NavItem(Icons.Outlined.Lock, "Lock private vault", selected = false) { model.onLock?.invoke() }
         } else {
-            NavItem(Icons.Outlined.FileUpload, "Import Takeout", selected = false, enabled = model.job == null, onClick = onImport)
+            NavItem(Icons.Outlined.FileDownload, "Import Takeout", selected = false, enabled = model.job == null, onClick = onImport)
         }
         SettingsItem(model)
         HorizontalDivider(Modifier.padding(top = 14.dp, bottom = 8.dp), color = c.outlineVariant)

@@ -35,6 +35,8 @@ import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -69,30 +71,52 @@ import forage.app.PickView
 
 @Composable
 fun DiscoverScreen(model: AppModel) {
-    Column(Modifier.fillMaxSize().padding(screenPadding())) {
-        Header(model)
-        if (model.topics.isNotEmpty()) TopicStrip(model)
-        if (model.picks.isEmpty()) {
-            Text(
-                "No recommendations yet. Add videos to your profile in the library, fetch their details,\n" +
-                    "then press \"Find recommendations\". Nothing is ever recommended unless you ask.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 24.dp),
-            )
-            return
+    val compact = LocalCompact.current
+    val header: @Composable () -> Unit = {
+        Column {
+            Header(model)
+            if (model.topics.isNotEmpty()) TopicStrip(model)
         }
-        Box(Modifier.weight(1f).padding(top = 16.dp)) {
-            val gridState = rememberLazyGridState()
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 290.dp),
-                state = gridState,
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
-                verticalArrangement = Arrangement.spacedBy(28.dp),
-                contentPadding = PaddingValues(end = scrollbarGap(), top = 8.dp, bottom = 96.dp),
-            ) {
-                items(model.picks, key = { it.pick.position }) { PickCard(model, it) }
+    }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().padding(screenPadding())) {
+            // On a phone the header scrolls away with the cards; in a window it stays above them.
+            if (!compact || model.picks.isEmpty()) header()
+            if (model.picks.isEmpty()) {
+                Text(
+                    "No recommendations yet. Add videos to your profile in the library, fetch their details, " +
+                        "then press \"Find recommendations\". Nothing is ever recommended unless you ask.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 24.dp),
+                )
+            } else {
+                Box(Modifier.weight(1f).padding(top = if (compact) 0.dp else 16.dp)) {
+                    val gridState = rememberLazyGridState()
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 290.dp),
+                        state = gridState,
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(28.dp),
+                        contentPadding = PaddingValues(end = scrollbarGap(), top = 8.dp, bottom = 96.dp),
+                    ) {
+                        if (compact) item(span = { GridItemSpan(maxLineSpan) }) { header() }
+                        items(model.picks, key = { it.pick.position }) { PickCard(model, it) }
+                    }
+                    Scrollbar(gridState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+                }
             }
-            Scrollbar(gridState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+        }
+        // A phone's main action floats at the bottom right, where a thumb reaches it, so the
+        // header's chips fit on one line. Hidden while a batch is being found.
+        if (compact && model.job == null) {
+            ExtendedFloatingActionButton(
+                onClick = model::discover,
+                icon = { Icon(Icons.Filled.AutoAwesome, contentDescription = null) },
+                text = { Text(if (model.picks.isEmpty()) "Find recommendations" else "New batch") },
+                containerColor = Accent.pastelPink,
+                contentColor = Color(0xFF3E0423),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            )
         }
     }
 }
@@ -108,8 +132,10 @@ private fun Header(model: AppModel) {
     ) {
         ToggleChip(if (model.isPrivate) "Search online" else "Search YouTube", search) { search = it; model.settings.searchYouTube = it }
         ToggleChip("Shorts", shorts) { shorts = it; model.settings.showShorts = it }
-        Spacer(Modifier.width(6.dp))
-        AccentButton(if (model.picks.isEmpty()) "Find recommendations" else "New batch", Icons.Filled.AutoAwesome, enabled = model.job == null, onClick = model::discover)
+        if (!LocalCompact.current) {
+            Spacer(Modifier.width(6.dp))
+            AccentButton(if (model.picks.isEmpty()) "Find recommendations" else "New batch", Icons.Filled.AutoAwesome, enabled = model.job == null, onClick = model::discover)
+        }
     }
 }
 

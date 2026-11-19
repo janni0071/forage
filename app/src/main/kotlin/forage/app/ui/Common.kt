@@ -7,6 +7,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.background
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -302,4 +308,57 @@ fun StateTag(state: VideoState?) {
         VideoState.NEGATIVE -> Tag("Not for me", c.errorContainer, c.onErrorContainer)
         null -> {}
     }
+}
+
+/** The height of a screen's header controls (search field, buttons, switches), so they line up. */
+val ControlHeight = 44.dp
+
+/**
+ * A search field as tall as the buttons beside it; Material's text field is taller and stands out
+ * in a row of buttons. Highlighted while focused, with a clear button once there's text.
+ */
+@Composable
+fun SearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    onSearch: (() -> Unit)? = null,
+) {
+    val c = MaterialTheme.colorScheme
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    androidx.compose.foundation.text.BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyLarge.copy(color = c.onSurface),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(c.primary),
+        interactionSource = interaction,
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            imeAction = if (onSearch != null) androidx.compose.ui.text.input.ImeAction.Search else androidx.compose.ui.text.input.ImeAction.Done,
+        ),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearch?.invoke() }),
+        modifier = modifier.height(ControlHeight),
+        decorationBox = { field ->
+            Row(
+                Modifier.fillMaxSize()
+                    .border(if (focused) 2.dp else 1.dp, if (focused) c.primary else c.outline, RoundedCornerShape(12.dp))
+                    .padding(start = 12.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, tint = c.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = c.onSurfaceVariant, maxLines = 1)
+                    field()
+                }
+                if (value.isNotEmpty()) {
+                    IconButton(onClick = { onValueChange("") }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Clear", tint = c.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        },
+    )
 }
