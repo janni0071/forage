@@ -36,14 +36,7 @@ fun main(args: Array<String>) {
     runBlocking { model.reload() }
     fun shot(name: String, dark: Boolean = false, setup: AppModel.() -> Unit) {
         model.setup()
-        runBlocking {
-            when (model.screen) {
-                Screen.LIBRARY -> model.visibleRows.take(8).forEach { model.thumbnails.load(it.id) }
-                Screen.DISCOVER -> model.picks.take(4).forEach { model.thumbnails.load(it.pick.video, large = true) }
-                Screen.LATER -> model.later.take(4).forEach { model.thumbnails.load(it.id, large = true) }
-                Screen.TOPICS -> model.topics.take(3).flatMap { t -> t.videos.take(4) }.forEach { model.thumbnails.load(it.id) }
-            }
-        }
+        runBlocking { preload(model) }
         val scene = ImageComposeScene(width = 824, height = 1784, density = Density(2f)) {
             ForageTheme(dark = dark) { App(model.privateModel ?: model, onImport = {}) }
         }
@@ -52,24 +45,28 @@ fun main(args: Array<String>) {
         scene.close()
         println("wrote phone-$name.png")
     }
-    shot("library") { screen = Screen.LIBRARY }
+    shot("home") { go(Screen.HOME) }
+    shot("library-hub") { go(Screen.LIBRARY) }
+    shot("library") { openLibrary(forage.app.LibraryView.LIST) }
     shot("library-grid") { showLibraryAsGrid(true) }
-    shot("discover") { showLibraryAsGrid(false); screen = Screen.DISCOVER }
+    shot("discover") { showLibraryAsGrid(false); go(Screen.DISCOVER) }
     shot("later") {
         // A few saved videos, so the queue shows its rows.
         picks.take(4).forEach { if (it.pick.video !in later.map { l -> l.id }) feedback(it, forage.app.Feedback.SAVED) }
-        screen = Screen.LATER
+        openLibrary(forage.app.LibraryView.LATER)
     }
-    shot("topics") { screen = Screen.TOPICS; loadTopics() }
+    shot("topics") { openLibrary(forage.app.LibraryView.TASTE); loadTopics() }
+    shot("subscriptions") { go(Screen.SUBSCRIPTIONS) }
     shot("settings") { settingsOpen = true }
     shot("add") {
         settingsOpen = false
-        screen = Screen.LIBRARY
-        addDialogOpen = true
-        searchVideos("geowizard")
+        openLibrary(forage.app.LibraryView.LIST)
+        go(Screen.HOME)
+        searchText = "geowizard"
+        submitSearch()
         runBlocking { searchResults.take(5).forEach { thumbnails.load(it.id) } }
     }
-    shot("discover-dark", dark = true) { closeAddDialog(); screen = Screen.DISCOVER }
+    shot("discover-dark", dark = true) { closeAddDialog(); go(Screen.DISCOVER) }
     shot("private-dialog", dark = true) { profileDialog = forage.app.ProfileDialog.PRIVATE }
     shot("private-settings", dark = true) {
         profileDialog = null

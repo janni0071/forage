@@ -94,8 +94,6 @@ class DesktopModelTest {
             m.likeFromSearch(m.searchResults.first())
             assertEquals(emptySet(), m.searchLiked)
             assertEquals(emptyList(), m.profiles.entries(m.profile))
-            m.closeAddDialog()
-            assertEquals(emptyList(), m.searchResults)
         } finally {
             m.close()
         }
@@ -115,7 +113,7 @@ class DesktopModelTest {
 
     @Test
     fun `lists the history and filters it by text and state`() {
-        assertEquals(listOf("Liked", "History", "Watch later", "Not interested"), model.sources.map { it.label })
+        assertEquals(listOf("Liked", "History", "Watch later", "Not interested", "All videos"), model.sources.map { it.label })
         assertEquals(LibrarySource.Liked, model.currentSource)
         assertEquals(emptyList(), model.rows)
         model.selectSource(LibrarySource.History)
@@ -178,7 +176,7 @@ class DesktopModelTest {
         assertEquals(listOf(id("b")), model.rows.map { it.id })
         model.deletePlaylist("Baking")
         assertEquals(LibrarySource.Liked, model.currentSource)
-        assertEquals(listOf("Liked", "History", "Watch later", "Not interested"), model.sources.map { it.label })
+        assertEquals(listOf("Liked", "History", "Watch later", "Not interested", "All videos"), model.sources.map { it.label })
         assertEquals("Sourdough basics", model.library.video(id("b"))?.title)
     }
 
@@ -395,19 +393,52 @@ class DesktopModelTest {
     }
 
     @Test
-    fun `a page opened from search brings the search back when it closes, and switching screens closes pages`() {
-        model.addDialogOpen = true
-        model.showVideo(VideoStub(id("s"), "Found", null, null, null, false), fromSearch = true)
-        assertEquals(false, model.addDialogOpen)
-        assertEquals("Found", model.videoPage?.shownTitle)
-        model.closeVideo()
-        assertTrue(model.addDialogOpen)
+    fun `the search bar searches the platforms outside the library and the library inside it`() {
+        assertEquals(Screen.HOME, model.screen)
+        model.searchText = "dovetails"
+        model.submitSearch()
+        assertTrue(model.searchShown)
+        assertTrue(model.hasSearched)
+        // A video opened from the results goes back to them.
+        model.showVideo(VideoStub(id("s"), "Found", null, null, null, false))
+        assertTrue(model.canGoBack)
+        model.back()
+        assertNull(model.videoPage)
+        assertTrue(model.searchShown)
+        model.back()
+        assertEquals(false, model.searchShown)
+        assertEquals(false, model.canGoBack)
 
-        model.closeAddDialog()
+        // In the library, searching from the overview looks through every video.
+        model.go(Screen.LIBRARY)
+        assertEquals(LibraryView.HUB, model.libraryView)
+        model.query = "wren"
+        model.submitSearch()
+        assertEquals(LibraryView.LIST, model.libraryView)
+        assertEquals(LibrarySource.All, model.currentSource)
+        assertEquals(listOf(id("a")), model.visibleRows.map { it.id })
+        model.back()
+        assertEquals(LibraryView.HUB, model.libraryView)
+
+        // Switching tabs closes pages and results.
         model.showVideo(id("a"))
         model.go(Screen.DISCOVER)
         assertNull(model.videoPage)
         assertEquals(Screen.DISCOVER, model.screen)
+    }
+
+    @Test
+    fun `home knows what was watched, liked and followed`() {
+        assertEquals(listOf(id("b"), id("a")), model.recentlyWatched.map { it.id })
+        assertEquals(2L, model.historySize)
+        assertTrue(model.imported)
+        model.mark(listOf(id("a")), VideoState.LIKED)
+        assertEquals(listOf(id("a")), model.recentlyLiked.map { it.id })
+        model.library.follow(id("UCwren"), "Workshop Wren")
+        model.unfollow(id("UCwren"))
+        assertEquals(emptyList(), model.following)
+        model.follow(forage.core.importer.Subscription(id("UCwren"), "Workshop Wren"))
+        assertEquals(listOf("Workshop Wren"), model.following.map { it.name })
     }
 
     @Test

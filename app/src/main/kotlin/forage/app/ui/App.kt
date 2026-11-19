@@ -28,13 +28,29 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.BubbleChart
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Subscriptions
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
-import androidx.compose.material.icons.outlined.WatchLater
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -114,18 +130,28 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
                 IconButton(onClick = onImport) { Icon(Icons.Outlined.FileDownload, contentDescription = "Import a library") }
                 IconButton(onClick = { model.settingsOpen = true }) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") }
             }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            // The search bar slides away while the content scrolls down, and back when it scrolls up.
+            var barShown by remember { mutableStateOf(true) }
+            val hideOnScroll = remember {
+                object : NestedScrollConnection {
+                    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                        if (available.y < -6f) barShown = false else if (available.y > 6f) barShown = true
+                        return Offset.Zero
+                    }
+                }
+            }
+            LaunchedEffect(model.screen, model.libraryView, model.searchShown, model.focusSearch) { barShown = true }
+            val withBar = model.videoPage == null
+            val barOffset by animateDpAsState(if (barShown) 0.dp else 96.dp)
+            Box(Modifier.weight(1f).fillMaxWidth().nestedScroll(hideOnScroll)) {
                 Screens(model, onImport)
-                // Above Discover's floating button, not on top of it.
-                StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = if (model.screen == Screen.DISCOVER) 88.dp else 12.dp))
+                if (withBar) PhoneSearchBar(model, Modifier.align(Alignment.BottomCenter).offset(y = barOffset))
+                // Above the search bar and Discover's floating button, not on top of them.
+                val clear = (if (withBar && barShown) 72.dp else 12.dp) + (if (model.screen == Screen.DISCOVER && !model.searchShown && withBar) 76.dp else 0.dp)
+                StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = clear))
             }
             NavigationBar(containerColor = c.surfaceContainerLow) {
-                for ((screen, icon, label) in listOf(
-                    Triple(Screen.LIBRARY, Icons.Outlined.VideoLibrary, "Library"),
-                    Triple(Screen.TOPICS, Icons.Outlined.BubbleChart, "Topics"),
-                    Triple(Screen.DISCOVER, Icons.Outlined.AutoAwesome, "Discover"),
-                    Triple(Screen.LATER, Icons.Outlined.WatchLater, "Later"),
-                )) {
+                for ((screen, icon, label) in TABS) {
                     NavigationBarItem(
                         selected = model.screen == screen,
                         onClick = { model.go(screen) },
@@ -139,16 +165,94 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
     if (model.settingsOpen) SettingsDialog(model)
 }
 
+private val TABS = listOf(
+    Triple(Screen.HOME, Icons.Outlined.Home, "Home"),
+    Triple(Screen.DISCOVER, Icons.Outlined.AutoAwesome, "Discover"),
+    Triple(Screen.SUBSCRIPTIONS, Icons.Outlined.Subscriptions, "Subscriptions"),
+    Triple(Screen.LIBRARY, Icons.Outlined.VideoLibrary, "Library"),
+)
+
 @Composable
 private fun Screens(model: AppModel, onImport: () -> Unit) {
     // The library's dialogs open from video pages and other screens too.
     LibraryDialogs(model)
     model.videoPage?.let { return VideoPageScreen(model, it) }
+    if (model.searchShown) return SearchScreen(model)
     when (model.screen) {
-        Screen.LIBRARY -> LibraryScreen(model, onImport)
-        Screen.TOPICS -> TopicsScreen(model)
+        Screen.HOME -> HomeScreen(model, onImport)
         Screen.DISCOVER -> DiscoverScreen(model)
-        Screen.LATER -> LaterScreen(model)
+        Screen.SUBSCRIPTIONS -> SubscriptionsScreen(model)
+        Screen.LIBRARY -> LibraryScreen(model, onImport)
+    }
+}
+
+/** What the search bar says it searches: your library in the library tab, the platforms elsewhere. */
+private fun searchHint(model: AppModel): String = when {
+    model.screen == Screen.LIBRARY && !model.searchShown -> "Search your library"
+    model.searchPlatforms.size == 1 -> "Search ${model.searchPlatforms.single().second}"
+    else -> "Search videos"
+}
+
+/** The phone's search bar, just above the tabs where a thumb reaches it (SPEC, Direction). */
+@Composable
+private fun PhoneSearchBar(model: AppModel, modifier: Modifier) {
+    val c = MaterialTheme.colorScheme
+    val inLibrary = model.screen == Screen.LIBRARY && !model.searchShown
+    val value = if (inLibrary) model.query else model.searchText
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(model.focusSearch) { if (model.focusSearch > 0) runCatching { focus.requestFocus() } }
+    Surface(
+        color = c.surfaceContainerHigh,
+        shape = RoundedCornerShape(26.dp),
+        shadowElevation = 6.dp,
+        modifier = modifier.padding(horizontal = 12.dp, vertical = 10.dp).fillMaxWidth().height(52.dp),
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = { if (inLibrary) model.query = it else model.searchText = it },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = c.onSurface),
+            cursorBrush = SolidColor(c.primary),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = {
+                // Searching puts the keyboard away, so the results have the screen.
+                keyboard?.hide()
+                focusManager.clearFocus()
+                model.submitSearch()
+            }),
+            modifier = Modifier.fillMaxSize().focusRequester(focus),
+            decorationBox = { field ->
+                Row(Modifier.fillMaxSize().padding(start = 18.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Search, contentDescription = null, tint = c.onSurfaceVariant, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                        if (value.isEmpty()) Text(searchHint(model), style = MaterialTheme.typography.bodyLarge, color = c.onSurfaceVariant, maxLines = 1)
+                        field()
+                    }
+                    if (value.isNotEmpty()) {
+                        IconButton(onClick = { if (inLibrary) model.query = "" else model.searchText = "" }) {
+                            Icon(Icons.Outlined.Close, contentDescription = "Clear", tint = c.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            },
+        )
+    }
+}
+
+/** The desktop's search bar, above every tab but the library, which has its own. */
+@Composable
+private fun TopSearchBar(model: AppModel) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(model.focusSearch) { if (model.focusSearch > 0) runCatching { focus.requestFocus() } }
+    Row(Modifier.fillMaxWidth().padding(start = 32.dp, end = 32.dp, top = 16.dp)) {
+        SearchField(
+            model.searchText, { model.searchText = it }, searchHint(model),
+            Modifier.widthIn(max = 560.dp).fillMaxWidth().focusRequester(focus),
+            onSearch = model::submitSearch,
+        )
     }
 }
 
@@ -161,6 +265,7 @@ private fun WideApp(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
                 Sidebar(model, onImport, chrome)
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     chrome?.titleBar?.invoke()
+                    if (model.screen != Screen.LIBRARY || model.searchShown) TopSearchBar(model)
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         Screens(model, onImport)
                         StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp))
@@ -200,14 +305,12 @@ private fun Sidebar(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
             }
         }
 
-        NavItem(Icons.Outlined.VideoLibrary, "Library", model.screen == Screen.LIBRARY) { model.go(Screen.LIBRARY) }
-        NavItem(Icons.Outlined.BubbleChart, "Topics", model.screen == Screen.TOPICS) { model.go(Screen.TOPICS) }
+        NavItem(Icons.Outlined.Home, "Home", model.screen == Screen.HOME) { model.go(Screen.HOME) }
         NavItem(Icons.Outlined.AutoAwesome, "Discover", model.screen == Screen.DISCOVER, count = model.picks.size.takeIf { it > 0 }) {
             model.go(Screen.DISCOVER)
         }
-        NavItem(Icons.Outlined.WatchLater, "Watch later", model.screen == Screen.LATER, count = model.later.size.takeIf { it > 0 }) {
-            model.go(Screen.LATER)
-        }
+        NavItem(Icons.Outlined.Subscriptions, "Subscriptions", model.screen == Screen.SUBSCRIPTIONS) { model.go(Screen.SUBSCRIPTIONS) }
+        NavItem(Icons.Outlined.VideoLibrary, "Library", model.screen == Screen.LIBRARY) { model.go(Screen.LIBRARY) }
 
         Spacer(Modifier.weight(1f))
         if (model.isPrivate) {

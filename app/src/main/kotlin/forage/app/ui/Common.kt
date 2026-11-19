@@ -20,6 +20,13 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -343,7 +350,15 @@ fun SearchField(
             imeAction = if (onSearch != null) androidx.compose.ui.text.input.ImeAction.Search else androidx.compose.ui.text.input.ImeAction.Done,
         ),
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearch?.invoke() }),
-        modifier = modifier.height(ControlHeight),
+        // A desktop keyboard's Enter doesn't always come through as the search action.
+        modifier = modifier.height(ControlHeight).onPreviewKeyEvent { event ->
+            if (onSearch != null && event.type == androidx.compose.ui.input.key.KeyEventType.KeyDown &&
+                (event.key == androidx.compose.ui.input.key.Key.Enter || event.key == androidx.compose.ui.input.key.Key.NumPadEnter)
+            ) {
+                onSearch()
+                true
+            } else false
+        },
         decorationBox = { field ->
             Row(
                 Modifier.fillMaxSize()
@@ -404,3 +419,87 @@ fun Modifier.tapOrHold(mobile: Boolean, onTap: () -> Unit, holding: (Boolean) ->
 
 /** How long a finger rests on a thumbnail before its preview starts. */
 private const val HOLD_MILLIS = 250L
+
+/** "← Back" at the top of a page that was opened from somewhere. */
+@Composable
+fun BackLink(label: String, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(androidx.compose.ui.input.pointer.PointerIcon.Hand)
+            .padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(androidx.compose.material.icons.Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null, tint = c.onSurface, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = c.onSurface)
+    }
+}
+
+/** A video in a sideways row (Home, the library's overview): thumbnail, title, a line about it. */
+@Composable
+fun VideoTile(
+    model: AppModel,
+    id: PlatformId,
+    title: String?,
+    subtitle: String?,
+    durationSeconds: Long?,
+    width: Dp,
+    onClick: () -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    Column(
+        Modifier
+            .width(width)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(androidx.compose.ui.input.pointer.PointerIcon.Hand),
+    ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(c.surfaceVariant)) {
+            if (model.showThumbnails) ThumbnailImage(model, id, compact = width < 220.dp)
+            formatDuration(durationSeconds)?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(5.dp)
+                        .clip(RoundedCornerShape(4.dp)).background(Color.Black.copy(alpha = 0.75f)).padding(horizontal = 5.dp, vertical = 1.dp),
+                )
+            }
+        }
+        Text(
+            title ?: "Untitled video",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (title != null) c.onSurface else c.onSurfaceVariant,
+            minLines = 2,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 6.dp, start = 2.dp, end = 2.dp),
+        )
+        subtitle?.takeIf { it.isNotEmpty() }?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp))
+        }
+    }
+}
+
+/** A section's title on Home and the library's overview, with a link to the whole list. */
+@Composable
+fun SectionTitle(title: String, link: String? = null, onLink: () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        if (link != null) {
+            Text(
+                link,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onLink)
+                    .pointerHoverIcon(androidx.compose.ui.input.pointer.PointerIcon.Hand).padding(horizontal = 6.dp, vertical = 4.dp),
+            )
+        }
+    }
+}

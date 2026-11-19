@@ -53,7 +53,11 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
 
-enum class Screen { LIBRARY, TOPICS, DISCOVER, LATER }
+/** The four tabs (SPEC, Direction: Layout). */
+enum class Screen { HOME, DISCOVER, SUBSCRIPTIONS, LIBRARY }
+
+/** Where in the library tab: its overview, or one of the lists it leads to. */
+enum class LibraryView { HUB, LIST, PLAYLISTS, LATER, TASTE }
 
 enum class ProfileDialog { NEW, DELETE, PRIVATE }
 
@@ -65,6 +69,7 @@ sealed interface LibrarySource {
     data object History : LibrarySource { override val label = "History" }
     data class Playlist(val name: String, val size: Long) : LibrarySource { override val label = name }
     data object NotInterested : LibrarySource { override val label = "Not interested" }
+    data object All : LibrarySource { override val label = "All videos" }
 }
 
 /** Narrows the history or a playlist by what the profile thinks of each video. */
@@ -141,8 +146,6 @@ data class VideoPage(
     val inLibrary: VideoInLibrary = VideoInLibrary(),
     /** Which of [creators] the library follows. */
     val following: Set<PlatformId> = emptySet(),
-    /** Opened from the search dialog, which comes back when the page closes. */
-    val fromSearch: Boolean = false,
 ) {
     val shownTitle: String? get() = details?.metadata?.title ?: title
     val shownChannel: PlatformId? get() = details?.metadata?.channel ?: channel
@@ -299,12 +302,118 @@ class AppModel(
         }
     }
 
-    var screen by mutableStateOf(Screen.LIBRARY)
+    var screen by mutableStateOf(Screen.HOME)
+        private set
 
-    /** Switches screens from the navigation, leaving any open video pages. */
+    var libraryView by mutableStateOf(LibraryView.HUB)
+        private set
+
+    /**
+     * Switches tabs from the navigation, leaving any open video pages and search results. The
+     * library tab chosen again returns to its overview.
+     */
     fun go(to: Screen) {
         closeAllVideos()
+        searchShown = false
+        if (to == Screen.LIBRARY) libraryView = LibraryView.HUB
         screen = to
+    }
+
+    /** Opens a list from the library's overview, e.g. the likes or one playlist. */
+    fun openLibrary(view: LibraryView, source: LibrarySource? = null) {
+        closeAllVideos()
+        searchShown = false
+        screen = Screen.LIBRARY
+        libraryView = view
+        if (source != null && source != currentSource) selectSource(source)
+        if (view == LibraryView.TASTE && !topicsCurrent && job == null && profileSize > 0) loadTopics()
+    }
+
+    /** Whether Back has somewhere to go inside the app: a video page, search results or a library list. */
+    val canGoBack: Boolean get() = videoPage != null || searchShown || (screen == Screen.LIBRARY && libraryView != LibraryView.HUB)
+
+    fun back() {
+        when {
+            videoPage != null -> closeVideo()
+            searchShown -> searchShown = false
+            screen == Screen.LIBRARY && libraryView != LibraryView.HUB -> {
+                libraryView = LibraryView.HUB
+                selection = emptySet()
+            }
+        }
+    }
+
+    // Search (SPEC, Direction: "Search within reach")
+
+    /** What the search bar holds outside the library, where it searches the platforms. */
+    var searchText by mutableStateOf("")
+
+    /** True while the search results are on screen. */
+    var searchShown by mutableStateOf(false)
+        private set
+
+    /** Set to put the cursor in the search bar, e.g. from Home's "Get started". */
+    var focusSearch by mutableStateOf(0)
+        private set
+
+    fun askForSearch() {
+        focusSearch++
+    }
+
+    /**
+     * Runs the search bar's search. In the library it searches your own videos (all of them, from
+     * the overview); anywhere else the platforms, with the results on a page of their own.
+     */
+    fun submitSearch() {
+        if (screen == Screen.LIBRARY) {
+            if (libraryView != LibraryView.LIST) openLibrary(LibraryView.LIST, LibrarySource.All)
+            return
+        }
+        val q = searchText.trim()
+        if (q.isEmpty()) return
+        closeAllVideos()
+        searchShown = true
+        searchVideos(q)
+    }
+
+    // Home and the library overview
+
+    /** The most recently watched videos, newest first. */
+    var recentlyWatched by mutableStateOf<List<LibraryRow>>(emptyList())
+        private set
+    var recentlyLiked by mutableStateOf<List<LibraryRow>>(emptyList())
+        private set
+    /** How many different videos the history holds. */
+    var historySize by mutableStateOf(0L)
+        private set
+    /** The channels and performers this vault follows. */
+    var following by mutableStateOf<List<forage.core.importer.Subscription>>(emptyList())
+        private set
+    /** Whether anything was ever imported, for Home's "Get started". */
+    var imported by mutableStateOf(false)
+        private set
+    var hasSearched by mutableStateOf(settings.hasSearched)
+        private set
+
+    /** Follows someone again from the subscriptions list. */
+    fun follow(subscription: forage.core.importer.Subscription) = launchQuiet {
+        library.follow(subscription.channel, subscription.name)
+        refreshFollowing()
+        loadHome()
+        message = "Following ${subscription.name ?: "them"} again"
+    }
+
+    private fun refreshFollowing() {
+        videoStack = videoStack.map { it.copy(following = followed(it)) }
+    }
+
+    /** Stops following someone from the subscriptions list. */
+    fun unfollow(channel: PlatformId) = launchQuiet {
+        val name = following.firstOrNull { it.channel == channel }?.name
+        library.unfollow(channel)
+        refreshFollowing()
+        loadHome()
+        message = "Stopped following ${name ?: "them"}"
     }
 
     // Video pages (SPEC, Direction: "a video page behind every video")
@@ -322,12 +431,9 @@ class AppModel(
         channelName: String? = null,
         durationSeconds: Long? = null,
         uploadedAt: Instant? = null,
-        fromSearch: Boolean = false,
     ) {
         if (videoPage?.id == id) return
-        // The search dialog steps aside without forgetting its results.
-        if (fromSearch) addDialogOpen = false
-        videoStack = videoStack + VideoPage(id, title, channel, channelName, durationSeconds, uploadedAt, loading = true, fromSearch = fromSearch)
+        videoStack = videoStack + VideoPage(id, title, channel, channelName, durationSeconds, uploadedAt, loading = true)
         launchQuiet { loadPage(id, fetch = true) }
     }
 
@@ -335,21 +441,18 @@ class AppModel(
 
     fun showLater(item: LaterItem) = showVideo(item.id, item.title, null, item.channelName, item.durationSeconds, item.uploadedAt)
 
-    fun showVideo(stub: VideoStub, fromSearch: Boolean = false) =
-        showVideo(stub.id, stub.title, stub.channel, stub.channelName, stub.durationSeconds, stub.uploadedAt, fromSearch)
+    fun showVideo(stub: VideoStub) =
+        showVideo(stub.id, stub.title, stub.channel, stub.channelName, stub.durationSeconds, stub.uploadedAt)
+
+    fun showRow(row: LibraryRow) = showVideo(row.id, row.title, null, row.channelName, row.durationSeconds)
 
     /** Back from the page on screen to the one before, or to the screen it was opened from. */
     fun closeVideo() {
-        val closing = videoPage ?: return
-        videoStack = videoStack.dropLast(1)
-        if (closing.fromSearch) addDialogOpen = true
+        if (videoStack.isNotEmpty()) videoStack = videoStack.dropLast(1)
     }
 
     fun closeAllVideos() {
-        if (videoStack.isEmpty()) return
-        val fromSearch = videoStack.any { it.fromSearch }
-        videoStack = emptyList()
-        if (fromSearch) closeAddDialog()
+        if (videoStack.isNotEmpty()) videoStack = emptyList()
     }
 
     /** Fetches the details again after they failed to load. */
@@ -441,6 +544,7 @@ class AppModel(
         apply()
         launchQuiet {
             if (follow) library.follow(id, creator.name) else library.unfollow(id)
+            loadHome()
             message = if (follow) "Following ${creator.name}" else "Stopped following ${creator.name}"
         }
     }
@@ -578,7 +682,8 @@ class AppModel(
         get() {
             val q = query.trim()
             // The state filter only applies where states are mixed: the history and playlists.
-            val filter = if (currentSource is LibrarySource.History || currentSource is LibrarySource.Playlist) stateFilter else StateFilter.ALL
+            val mixed = currentSource is LibrarySource.History || currentSource is LibrarySource.Playlist || currentSource == LibrarySource.All
+            val filter = if (mixed) stateFilter else StateFilter.ALL
             return rows.filter { row ->
                 filter.matches(row.state) && (q.isEmpty() ||
                     row.title?.contains(q, ignoreCase = true) == true || row.channelName?.contains(q, ignoreCase = true) == true)
@@ -597,7 +702,7 @@ class AppModel(
 
     private fun loadSources() {
         val playlists = library.playlists().map { (name, size) -> LibrarySource.Playlist(name, size) }
-        sources = listOf(LibrarySource.Liked, LibrarySource.History) + playlists + LibrarySource.NotInterested
+        sources = listOf(LibrarySource.Liked, LibrarySource.History) + playlists + LibrarySource.NotInterested + LibrarySource.All
         if (currentSource !in sources) {
             // A playlist whose size changed is still the same playlist.
             val name = (currentSource as? LibrarySource.Playlist)?.name
@@ -692,7 +797,7 @@ class AppModel(
         if (!library.createPlaylist(clean)) return "There's already a playlist called \"$clean\""
         libraryDialog = null
         loadSources()
-        selectSource(sources.first { it is LibrarySource.Playlist && it.name == clean })
+        openLibrary(LibraryView.LIST, sources.first { it is LibrarySource.Playlist && it.name == clean })
         message = "Made \"$clean\". Add videos to it from the history, your likes or Discover."
         return null
     }
@@ -1062,11 +1167,16 @@ class AppModel(
     fun searchVideos(query: String) {
         val q = query.trim()
         if (q.isEmpty()) return
+        if (!hasSearched) {
+            hasSearched = true
+            settings.hasSearched = true
+        }
         val platform = searchPlatform ?: searchPlatforms.firstOrNull()?.first ?: return
         val target = source.forPlatform(platform) ?: return
         searchJob?.cancel()
         searching = true
         searchProblem = null
+        searchResults = emptyList()
         searchJob = ownScope.launch {
             try {
                 val (results, included) = withContext(io) {
@@ -1111,13 +1221,8 @@ class AppModel(
         }
     }
 
-    /** Clears the last search when the dialog closes, so it doesn't greet the next visit. */
     fun closeAddDialog() {
         addDialogOpen = false
-        searchJob?.cancel()
-        searchResults = emptyList()
-        searchProblem = null
-        searching = false
     }
 
     // Topics
@@ -1270,6 +1375,12 @@ class AppModel(
                 if (historySort == HistorySort.RECENT) watched.sortedByDescending { it.lastWatched ?: Instant.MIN } else watched
             }
             is LibrarySource.Playlist -> WatchHistory.select(library.events(s.name))
+            LibrarySource.All -> {
+                val watched = WatchHistory.select(library.events()).associateBy { it.video }
+                library.allVideos().map { v ->
+                    watched[v.id] ?: WatchedVideo(v.id, v.title, v.channel, v.channelName, 0, null, null, v.isShort)
+                }
+            }
             LibrarySource.Liked, LibrarySource.NotInterested -> {
                 val wanted = if (s == LibrarySource.Liked) VideoState.LIKED else VideoState.NOT_INTERESTED
                 val watched = WatchHistory.select(library.events()).associateBy { it.video }
@@ -1280,7 +1391,15 @@ class AppModel(
             }
         }
         val meta = cache.allMetadata()
-        rows = videos.map { v ->
+        rows = toRows(videos, states, meta)
+        // Keep the selection to what still exists in this list.
+        val ids = rows.mapTo(HashSet()) { it.id }
+        selection = selection.filterTo(HashSet()) { it in ids }
+        loadHome(entries, meta)
+    }
+
+    private fun toRows(videos: List<WatchedVideo>, states: Map<PlatformId, VideoState>, meta: Map<PlatformId, forage.core.source.VideoMetadata>) =
+        videos.map { v ->
             val m = meta[v.video]
             val known = if (m == null && (v.title == null || v.channelName == null)) library.video(v.video) else null
             LibraryRow(
@@ -1289,15 +1408,31 @@ class AppModel(
                 channelName = m?.channelName ?: v.channelName ?: known?.channelName ?: m?.extra?.get("performers"),
                 watchCount = v.watchCount,
                 lastSeen = v.lastWatched,
-                durationSeconds = m?.durationSeconds,
+                durationSeconds = m?.durationSeconds ?: known?.durationSeconds,
                 isShort = m?.isShort == true || v.isShort,
                 state = states[v.video],
                 hasMetadata = m != null,
             )
         }
-        // Keep the selection to what still exists in this list.
-        val ids = rows.mapTo(HashSet()) { it.id }
-        selection = selection.filterTo(HashSet()) { it in ids }
+
+    /** What Home and the library's overview show. */
+    private fun loadHome(
+        entries: List<forage.core.profile.ProfileEntry> = profiles.entries(profile),
+        meta: Map<PlatformId, forage.core.source.VideoMetadata> = cache.allMetadata(),
+    ) {
+        val states = entries.associate { it.video to it.state }
+        val watched = WatchHistory.select(library.events())
+        recentlyWatched = toRows(watched.sortedByDescending { it.lastWatched ?: Instant.MIN }.take(HOME_ROW), states, meta)
+        val byVideo = watched.associateBy { it.video }
+        recentlyLiked = toRows(
+            entries.filter { it.state == VideoState.LIKED }.asReversed().take(HOME_ROW).map { e ->
+                byVideo[e.video] ?: WatchedVideo(e.video, null, null, null, 0, null, null, false)
+            },
+            states, meta,
+        )
+        historySize = library.watchedVideoCount()
+        following = library.subscriptions()
+        imported = library.counts().second > 0 || library.playlists().isNotEmpty()
     }
 
     private fun loadPicks() {
@@ -1470,6 +1605,8 @@ class AppModel(
     private companion object {
         /** Likes beyond this many videos without details wait for "Fetch details". */
         const val BACKGROUND_FETCH_LIMIT = 30
+        /** How many videos a row on Home shows. */
+        const val HOME_ROW = 12
         const val MAX_PLAYLIST_NAME = 60
         const val OUT_OF_MEMORY = "Not enough memory on this device to import the dump. Import it on a computer instead, " +
             "then copy catalogues/pornhub.db from its Forage folder here and choose it in Settings."

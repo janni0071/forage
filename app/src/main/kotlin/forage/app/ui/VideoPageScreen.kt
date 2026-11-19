@@ -146,22 +146,7 @@ fun VideoPageScreen(model: AppModel, page: VideoPage) {
 }
 
 @Composable
-private fun BackRow(model: AppModel) {
-    val c = MaterialTheme.colorScheme
-    Row(
-        Modifier
-            .padding(bottom = 8.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = model::closeVideo)
-            .pointerHoverIcon(PointerIcon.Hand)
-            .padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null, tint = c.onSurface, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(10.dp))
-        Text(if (model.videoStack.size > 1) "Back to the previous video" else "Back", style = MaterialTheme.typography.labelLarge, color = c.onSurface)
-    }
-}
+private fun BackRow(model: AppModel) = BackLink(if (model.videoStack.size > 1) "Back to the previous video" else "Back", model::closeVideo)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -340,7 +325,8 @@ private fun CreatorRow(model: AppModel, creator: Creator, following: Boolean) {
             )
         }
         Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f, fill = false)) {
+        // The name takes the room, so Follow buttons line up at the right, one under the other.
+        Column(Modifier.weight(1f)) {
             Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         if (creator.id != null) {

@@ -115,7 +115,8 @@ fun DiscoverScreen(model: AppModel) {
                 text = { Text(if (model.picks.isEmpty()) "Find recommendations" else "New batch") },
                 containerColor = Accent.pastelPink,
                 contentColor = Color(0xFF3E0423),
-                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                // Above the search bar.
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 80.dp),
             )
         }
     }
@@ -162,7 +163,7 @@ private fun TopicStrip(model: AppModel) {
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(container)
-                    .clickable { model.go(forage.app.Screen.TOPICS) }
+                    .clickable { model.openLibrary(forage.app.LibraryView.TASTE) }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }

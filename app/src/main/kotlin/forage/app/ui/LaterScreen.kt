@@ -74,6 +74,7 @@ fun LaterScreen(model: AppModel) {
     Column(Modifier.fillMaxSize().padding(screenPadding())) {
         val total = queue.mapNotNull { it.durationSeconds }.sum()
         val unknown = queue.count { it.durationSeconds == null }
+        BackLink("Library", model::back)
         ScreenHeader(
             "Watch later",
             if (queue.isEmpty()) "Videos you save from Discover wait here"
@@ -353,7 +354,7 @@ private fun EmptyQueue(model: AppModel) {
             color = c.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
         )
-        AccentButton("Go to Discover", Icons.Outlined.AutoAwesome) { model.screen = Screen.DISCOVER }
+        AccentButton("Go to Discover", Icons.Outlined.AutoAwesome) { model.go(Screen.DISCOVER) }
     }
 }
 

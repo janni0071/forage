@@ -103,8 +103,9 @@ class MainActivity : ComponentActivity() {
                 Theme.DARK -> true
                 Theme.SYSTEM -> isSystemInDarkTheme()
             }
-            // The system's back gesture leaves a video page before it leaves the app.
-            BackHandler(enabled = active.videoPage != null) { active.closeVideo() }
+            // The system's back gesture steps back inside the app (a video page, search results, a
+            // library list) before it leaves it.
+            BackHandler(enabled = active.canGoBack) { active.back() }
             ForageTheme(dark = dark) {
                 // Drawn edge to edge; the content keeps clear of the status and navigation bars.
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {

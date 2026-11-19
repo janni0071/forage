@@ -37,6 +37,11 @@ class Settings(private val file: File?, copyOf: Settings? = null) {
         get() = properties.getProperty("history.record", "true").toBoolean()
         set(value) = set("history.record", value.toString())
 
+    /** Whether a search was ever made here, for Home's "Get started". */
+    var hasSearched: Boolean
+        get() = properties.getProperty("search.used", "false").toBoolean()
+        set(value) = set("search.used", value.toString())
+
     var libraryGrid: Boolean
         get() = properties.getProperty("library.grid", "false").toBoolean()
         set(value) = set("library.grid", value.toString())

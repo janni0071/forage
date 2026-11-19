@@ -99,6 +99,12 @@ WHERE id = :id;
 selectLibraryVideos:
 SELECT * FROM library_video;
 
+selectLibraryVideosNewestFirst:
+SELECT * FROM library_video ORDER BY added_at DESC, id;
+
+countWatchedVideos:
+SELECT count(DISTINCT video_id) FROM watch_event;
+
 selectLibraryVideo:
 SELECT * FROM library_video WHERE id = ?;
 

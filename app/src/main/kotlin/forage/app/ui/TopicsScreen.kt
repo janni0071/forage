@@ -63,7 +63,8 @@ import forage.app.AppModel
 @Composable
 fun TopicsScreen(model: AppModel) {
     Column(Modifier.fillMaxSize().padding(screenPadding())) {
-        ScreenHeader("Topics", "What your likes are about. Pin a topic to get picks from it in every batch; mute one to get none.") {
+        BackLink("Library", model::back)
+        ScreenHeader("Your taste", "What your likes are about. Pin a topic to get picks from it in every batch; mute one to get none.") {
             AccentButton(
                 if (model.topics.isEmpty()) "Show topics" else if (model.topicsCurrent) "Refresh" else "Refresh (likes changed)",
                 Icons.Outlined.Refresh, enabled = model.job == null, onClick = model::loadTopics,

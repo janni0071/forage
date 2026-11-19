@@ -26,17 +26,7 @@ fun main(args: Array<String>) {
     fun shot(name: String, dark: Boolean = false, setup: DesktopModel.() -> Unit) {
         model.setup()
         // Load the images up front; the headless renderer doesn't wait for them.
-        val onScreen = when (model.screen) {
-            Screen.LIBRARY -> model.visibleRows.take(14).map { it.id }
-            Screen.DISCOVER -> emptyList()
-            Screen.LATER -> emptyList()
-            Screen.TOPICS -> model.topics.take(4).flatMap { t -> t.videos.take(6).map { it.id } }
-        }
-        runBlocking {
-            onScreen.forEach { model.thumbnails.load(it) }
-            if (model.screen == Screen.DISCOVER) model.picks.take(9).forEach { model.thumbnails.load(it.pick.video, large = true) }
-            if (model.screen == Screen.LATER) model.later.forEach { model.thumbnails.load(it.id, large = true) }
-        }
+        runBlocking { preload(model) }
         val scene = ImageComposeScene(width = 2560, height = 1640, density = Density(2f)) {
             androidx.compose.runtime.CompositionLocalProvider(LocalExtras provides forage.desktop.ui.DesktopExtras) {
                 ForageTheme(dark = dark) { App(model.privateModel ?: model, onImport = {}) }
@@ -51,7 +41,7 @@ fun main(args: Array<String>) {
     }
 
     shot("1-library-watch-later") {
-        screen = Screen.LIBRARY
+        openLibrary(forage.app.LibraryView.LIST)
         selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })
         stateFilter = StateFilter.LIKED
         listOf(1, 3, 4).mapNotNull { visibleRows.getOrNull(it)?.id }.forEach(::toggle)
@@ -61,7 +51,7 @@ fun main(args: Array<String>) {
         message = null
         loadTopics()
         message = null
-        screen = Screen.DISCOVER
+        go(Screen.DISCOVER)
         // Show the feedback states: pick 2 saved, pick 3 liked.
         if (picks.size >= 3 && picks[1].feedback.isEmpty()) {
             feedback(picks[1], Feedback.SAVED)
@@ -71,10 +61,10 @@ fun main(args: Array<String>) {
     shot("4-later") {
         // A fuller queue than the two saved so far, to show the layout.
         picks.drop(3).take(5).forEach { feedback(it, Feedback.SAVED) }
-        screen = Screen.LATER
+        openLibrary(forage.app.LibraryView.LATER)
     }
     shot("7-topics") {
-        screen = Screen.TOPICS
+        openLibrary(forage.app.LibraryView.TASTE)
         loadTopics()
         topics.getOrNull(0)?.let { renameTopic(it, "Speedcubing") }
         renamingTopic = topics.getOrNull(1)?.index
@@ -84,16 +74,16 @@ fun main(args: Array<String>) {
     shot("5-discover-dark", dark = true) {
         renamingTopic = null
         message = null
-        screen = Screen.DISCOVER
+        go(Screen.DISCOVER)
     }
     shot("6-library-dark", dark = true) {
-        screen = Screen.LIBRARY
+        openLibrary(forage.app.LibraryView.LIST)
         selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })
         stateFilter = StateFilter.LIKED
         listOf(1, 3).mapNotNull { visibleRows.getOrNull(it)?.id }.forEach(::toggle)
     }
     shot("8-library-grid") {
-        screen = Screen.LIBRARY
+        openLibrary(forage.app.LibraryView.LIST)
         stateFilter = StateFilter.ALL
         showLibraryAsGrid(true)
         selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })
@@ -102,7 +92,7 @@ fun main(args: Array<String>) {
     }
     shot("9-profile-menu") {
         message = null
-        screen = Screen.DISCOVER
+        go(Screen.DISCOVER)
         if (profileList.none { it.first.name == "Learning" }) profiles.profile("Learning")
         runBlocking { reload() }
         profileMenuOpen = true
@@ -125,7 +115,7 @@ fun main(args: Array<String>) {
     shot("14-private-vault") {
         profileDialog = null
         runBlocking { unlockPrivate("screenshot vault passphrase".toCharArray(), create = true)?.join() }
-        privateModel?.screen = Screen.LIBRARY
+        privateModel?.go(Screen.LIBRARY)
     }
     shot("16-private-settings") {
         privateModel?.settingsOpen = true
@@ -136,13 +126,38 @@ fun main(args: Array<String>) {
         settingsOpen = false
         showLibraryAsGrid(false)
         clearSelection()
-        screen = Screen.LIBRARY
+        openLibrary(forage.app.LibraryView.LIST)
         stateFilter = StateFilter.ALL
         selectSource(LibrarySource.History)
     }
     shot("15-add-search") {
-        addDialogOpen = true
-        searchVideos("hand cut dovetail joint")
+        go(Screen.HOME)
+        searchText = "hand cut dovetail joint"
+        submitSearch()
         runBlocking { searchResults.take(5).forEach { thumbnails.load(it.id) } }
+    }
+}
+
+/** Loads the images a screen shows up front; the headless renderer doesn't wait for them. */
+internal suspend fun preload(model: forage.app.AppModel) {
+    val page = model.videoPage
+    if (page != null) {
+        model.thumbnails.load(page.id, large = true)
+        page.details?.related?.take(8)?.forEach { model.thumbnails.load(it.id) }
+        return
+    }
+    if (model.searchShown) return model.searchResults.take(8).forEach { model.thumbnails.load(it.id) }
+    when (model.screen) {
+        Screen.HOME -> (model.later.take(6).map { it.id } + model.picks.take(6).map { it.pick.video } + model.recentlyWatched.take(6).map { it.id })
+            .forEach { model.thumbnails.load(it) }
+        Screen.DISCOVER -> model.picks.take(9).forEach { model.thumbnails.load(it.pick.video, large = true) }
+        Screen.SUBSCRIPTIONS -> {}
+        Screen.LIBRARY -> when (model.libraryView) {
+            forage.app.LibraryView.HUB -> model.recentlyLiked.take(6).forEach { model.thumbnails.load(it.id) }
+            forage.app.LibraryView.LIST -> model.visibleRows.take(14).forEach { model.thumbnails.load(it.id) }
+            forage.app.LibraryView.LATER -> model.later.take(8).forEach { model.thumbnails.load(it.id, large = true) }
+            forage.app.LibraryView.TASTE -> model.topics.take(4).flatMap { t -> t.videos.take(6) }.forEach { model.thumbnails.load(it.id) }
+            forage.app.LibraryView.PLAYLISTS -> {}
+        }
     }
 }

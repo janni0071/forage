@@ -82,6 +82,11 @@ import forage.core.profile.VideoState
 import forage.app.AppModel
 import forage.app.HistorySort
 import forage.app.LibraryDialog
+import forage.app.LibraryView
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.WatchLater
 import forage.app.LibraryRow
 import forage.app.LibrarySource
 import forage.app.StateFilter
@@ -95,13 +100,22 @@ import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material3.AlertDialog
 
+/** The library tab: its overview, or the list, playlists, queue or topics it leads to. */
 @Composable
 fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
     if (model.addDialogOpen) AddVideosDialog(model)
-    if (model.libraryEmpty) {
-        EmptyLibrary(model, onImport)
-        return
+    when (model.libraryView) {
+        LibraryView.HUB -> if (model.libraryEmpty) EmptyLibrary(model, onImport) else LibraryHub(model)
+        LibraryView.LIST -> LibraryList(model)
+        LibraryView.PLAYLISTS -> PlaylistsScreen(model)
+        LibraryView.LATER -> LaterScreen(model)
+        LibraryView.TASTE -> TopicsScreen(model)
     }
+}
+
+/** One of the library's lists: likes, history, a playlist, what was turned down, or everything. */
+@Composable
+private fun LibraryList(model: AppModel) {
     val visible = model.visibleRows
     val compact = LocalCompact.current
     // On a phone the header scrolls away with the videos, so the list gets the whole screen;
@@ -156,6 +170,7 @@ private fun emptyListText(model: AppModel): String = when {
         if (model.recordHistory) "Your history is empty. Videos you open from Forage show up here."
         else "Your history is empty, and paused: videos you open aren't recorded."
     model.currentSource == LibrarySource.NotInterested -> "Nothing turned down. Videos you mark \"Not interested\" show up here."
+    model.currentSource == LibrarySource.All -> "The library is empty."
     else -> "This playlist is empty. Select videos in your history or likes and choose \"Add to playlist\"."
 }
 
@@ -164,23 +179,24 @@ private fun emptyListText(model: AppModel): String = when {
 private fun LibraryHeader(model: AppModel, visibleCount: Int) {
     val compact = LocalCompact.current
     Column {
-        ScreenHeader("Library", "Your likes, history and playlists") {
+        BackLink("Library", model::back)
+        ScreenHeader(model.currentSource.label, null) {
             if (compact) {
-                // A phone: search, the view switch and adding share one row; fetching gets the next.
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SearchField(model.query, { model.query = it }, "Search", Modifier.weight(1f))
+                // A phone searches with the bar at the bottom; the view switch and adding share a row here.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     ViewToggle(model)
                     OutlinedIconButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.size(ControlHeight)) {
-                        Icon(Icons.Outlined.Add, contentDescription = "Add videos")
+                        Icon(Icons.Outlined.Add, contentDescription = "Add by link")
                     }
                 }
             } else {
                 SearchField(model.query, { model.query = it }, "Search titles and channels", Modifier.width(300.dp))
+
                 ViewToggle(model)
                 OutlinedButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
                     Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Add videos")
+                    Text("Add by link")
                 }
             }
             OutlinedButton(onClick = model::fetchDetails, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
@@ -204,6 +220,7 @@ private fun LibraryHeader(model: AppModel, visibleCount: Int) {
                 PlaylistTools(model, source.name)
                 Filters(model)
             }
+            LibrarySource.All -> Filters(model)
             else -> {}
         }
         ActionBar(model, visibleCount)
@@ -247,8 +264,9 @@ private fun EmptyLibrary(model: AppModel, onImport: () -> Unit) {
         val importLabel = if (model.platform.isMobile) "Import Takeout zip" else "Import Takeout"
         val buttons: @Composable () -> Unit = {
             if (!model.isPrivate) AccentButton(importLabel, Icons.Outlined.CloudDownload, onClick = onImport)
-            if (model.isPrivate) AccentButton("Add videos", Icons.Outlined.Add) { model.addDialogOpen = true }
-            else OutlinedButton(onClick = { model.addDialogOpen = true }, shape = RoundedCornerShape(12.dp)) { Text("Search or add by link", maxLines = 1) }
+            if (model.isPrivate) AccentButton("Search", Icons.Outlined.Search, onClick = model::askForSearch)
+            else OutlinedButton(onClick = model::askForSearch, shape = RoundedCornerShape(12.dp)) { Text("Search for videos", maxLines = 1) }
+            TextButton(onClick = { model.addDialogOpen = true }) { Text("Add by link", maxLines = 1) }
         }
         if (compact) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) { buttons() }
@@ -294,6 +312,7 @@ private fun SourceTabs(model: AppModel) {
                 LibrarySource.History -> "History" to null
                 is LibrarySource.Playlist -> source.name to source.size
                 LibrarySource.NotInterested -> "Not interested" to model.notInterestedSize.toLong()
+                LibrarySource.All -> "All videos" to null
             }
             Row(
                 Modifier
@@ -526,6 +545,7 @@ private fun ActionBar(model: AppModel, visibleCount: Int) {
                 BarButton(Icons.AutoMirrored.Outlined.Undo, "Clear") { model.markSelected(null) }
                 BarButton(Icons.Outlined.RemoveCircleOutline, if (compact) "Remove from playlist" else "Remove") { model.removeFromPlaylist(ids) }
             }
+            LibrarySource.All -> BarButton(Icons.AutoMirrored.Outlined.Undo, "Clear") { model.markSelected(null) }
         }
     }
     Column(
@@ -737,7 +757,7 @@ private fun SelectDot(selected: Boolean, visible: Boolean, modifier: Modifier = 
 
 /** In the liked and not-interested lists every video has the same state, so it isn't labelled. */
 private fun showsStates(model: AppModel) =
-    model.currentSource is LibrarySource.History || model.currentSource is LibrarySource.Playlist
+    model.currentSource is LibrarySource.History || model.currentSource is LibrarySource.Playlist || model.currentSource == LibrarySource.All
 
 @Composable
 private fun StatePill(state: VideoState?, modifier: Modifier = Modifier, solid: Boolean = false) {
@@ -785,5 +805,197 @@ private fun QuickButton(icon: ImageVector, label: String, accent: Boolean = fals
         Icon(icon, contentDescription = null, tint = if (accent) c.onPrimaryContainer else c.onSurfaceVariant, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
         Text(label, style = MaterialTheme.typography.labelMedium, color = if (accent) c.onPrimaryContainer else c.onSurfaceVariant)
+    }
+}
+
+/** The library's overview (SPEC, Direction: Screens): the lists it holds, your taste and recent likes. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LibraryHub(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    val listState = rememberLazyListState()
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize().padding(end = scrollbarGap()),
+            state = listState,
+            contentPadding = PaddingValues(
+                start = if (compact) 16.dp else 32.dp, end = if (compact) 16.dp else 16.dp,
+                top = if (compact) 12.dp else 24.dp, bottom = 120.dp,
+            ),
+        ) {
+            item {
+                ScreenHeader("Library", "Everything you keep") {
+                    // A phone searches with the bar at the bottom.
+                    if (!compact) SearchField(model.query, { model.query = it }, "Search your library", Modifier.width(300.dp), onSearch = model::submitSearch)
+                    OutlinedButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
+                        Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add by link")
+                    }
+                }
+            }
+            item {
+                val total = model.later.mapNotNull { it.durationSeconds }.sum()
+                val playlists = model.sources.filterIsInstance<LibrarySource.Playlist>()
+                val cards = listOf<Triple<ImageVector, String, Pair<String, () -> Unit>>>(
+                    Triple(Icons.Outlined.ThumbUp, "Liked", "%,d videos · your taste".format(model.profileSize) to { model.openLibrary(LibraryView.LIST, LibrarySource.Liked) }),
+                    Triple(Icons.Outlined.WatchLater, "Watch later", ("%,d videos".format(model.later.size) + (if (total > 0) " · ${formatDuration(total)}" else "")) to { model.openLibrary(LibraryView.LATER) }),
+                    Triple(Icons.AutoMirrored.Outlined.PlaylistPlay, "Playlists", (if (playlists.isEmpty()) "None yet" else playlists.joinToString(", ") { it.name }) to { model.openLibrary(LibraryView.PLAYLISTS) }),
+                    Triple(Icons.Outlined.History, "History", ("%,d videos".format(model.historySize) + (if (!model.recordHistory) " · paused" else "")) to { model.openLibrary(LibraryView.LIST, LibrarySource.History) }),
+                )
+                val perRow = if (compact) 2 else 4
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    cards.chunked(perRow).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            row.forEach { (icon, title, rest) -> HubCard(icon, title, rest.first, Modifier.weight(1f), rest.second) }
+                        }
+                    }
+                }
+            }
+            item { TasteCard(model) }
+            item {
+                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { model.openLibrary(LibraryView.LIST, LibrarySource.NotInterested) }) { Text("Not interested · ${model.notInterestedSize}") }
+                    TextButton(onClick = { model.openLibrary(LibraryView.LIST, LibrarySource.All) }) { Text("All videos") }
+                }
+            }
+            if (model.recentlyLiked.isNotEmpty()) {
+                item { SectionTitle("Recently liked", "All ${model.profileSize}") { model.openLibrary(LibraryView.LIST, LibrarySource.Liked) } }
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(model.recentlyLiked, key = { it.id.toString() }) { row ->
+                            VideoTile(model, row.id, row.title, row.channelName, row.durationSeconds, if (compact) 200.dp else 240.dp) { model.showRow(row) }
+                        }
+                    }
+                }
+            }
+        }
+        Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+    }
+}
+
+@Composable
+private fun HubCard(icon: ImageVector, title: String, text: String, modifier: Modifier, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Column(
+        modifier
+            .heightIn(min = 96.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(c.surfaceContainer)
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(14.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = c.primary, modifier = Modifier.size(24.dp))
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Your likes as topics (what used to be the Topics tab), with the pinned ones first. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TasteCard(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    Column(
+        Modifier
+            .padding(top = 10.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(c.surfaceContainer)
+            .clickable { model.openLibrary(LibraryView.TASTE) }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = c.primary, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(10.dp))
+            Text("Your taste", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            val named = model.topics.count { !it.isVaried }
+            Text(
+                if (model.topics.isEmpty()) "What your likes are about" else "$named topics",
+                style = MaterialTheme.typography.bodySmall,
+                color = c.onSurfaceVariant,
+            )
+        }
+        val shown = model.topics.filter { !it.isVaried }
+            .sortedBy { if (it.preference == forage.core.recommend.TopicPreference.PINNED) 0 else 1 }.take(8)
+        if (shown.isNotEmpty()) {
+            FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                shown.forEach { t ->
+                    val pinned = t.preference == forage.core.recommend.TopicPreference.PINNED
+                    val muted = t.preference == forage.core.recommend.TopicPreference.MUTED
+                    Tag(
+                        (if (pinned) "Pinned: " else "") + t.label,
+                        if (pinned) c.primaryContainer else c.surfaceContainerHigh,
+                        if (muted) c.onSurfaceVariant else c.onSurface,
+                    )
+                }
+            }
+        } else {
+            Text(
+                "Open it to group your likes into topics, then rename, pin or mute them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = c.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+    }
+}
+
+/** Every playlist, and making a new one. */
+@Composable
+private fun PlaylistsScreen(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    val playlists = model.sources.filterIsInstance<LibrarySource.Playlist>()
+    val listState = rememberLazyListState()
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize().padding(end = scrollbarGap()),
+            state = listState,
+            contentPadding = PaddingValues(
+                start = if (compact) 16.dp else 32.dp, end = if (compact) 16.dp else 16.dp,
+                top = if (compact) 4.dp else 16.dp, bottom = 120.dp,
+            ),
+        ) {
+            item { BackLink("Library", model::back) }
+            item {
+                ScreenHeader("Playlists", if (playlists.isEmpty()) null else "${playlists.size} playlists") {
+                    OutlinedButton(onClick = { model.libraryDialog = LibraryDialog.NewPlaylist }, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
+                        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("New playlist")
+                    }
+                }
+            }
+            if (playlists.isEmpty()) {
+                item {
+                    Text(
+                        "No playlists yet. Make one here, or add videos to a new one from their page.",
+                        color = c.onSurfaceVariant,
+                    )
+                }
+            }
+            items(playlists, key = { it.name }) { p ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 720.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { model.openLibrary(LibraryView.LIST, p) }
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .padding(horizontal = 8.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.AutoMirrored.Outlined.PlaylistPlay, contentDescription = null, tint = c.primary, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(14.dp))
+                    Text(p.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text("%,d videos".format(p.size), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant)
+                }
+            }
+        }
+        Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
     }
 }

@@ -228,5 +228,16 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
         }
     }
 
+    /** Every video the library knows, the most recently added first. */
+    fun allVideos(): List<LibraryVideo> = queries.selectLibraryVideosNewestFirst().executeAsList().map {
+        LibraryVideo(
+            PlatformId.parse(it.id), it.title, it.channel_id?.let(PlatformId::parse), it.channel_name, it.is_short,
+            it.duration_seconds, it.uploaded_at?.let(Instant::ofEpochSecond),
+        )
+    }
+
+    /** How many different videos the history holds. */
+    fun watchedVideoCount(): Long = queries.countWatchedVideos().executeAsOne()
+
     fun counts(): Pair<Long, Long> = queries.countLibraryVideos().executeAsOne() to queries.countWatchEvents().executeAsOne()
 }

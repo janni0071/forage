@@ -65,114 +65,38 @@ import androidx.compose.ui.unit.dp
 import forage.core.source.VideoStub
 import forage.app.AppModel
 
-/** Adding videos to the profile: by searching (SPEC, Manual add) or by pasting links. */
+/** Adding videos by their links (SPEC, Manual add); searching happens in the search bar. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddVideosDialog(model: AppModel) {
     val c = MaterialTheme.colorScheme
-    var tab by remember { mutableStateOf(if (model.searchPlatforms.isEmpty()) Tab.LINKS else Tab.SEARCH) }
     val compact = LocalCompact.current
     // On a phone the dialog takes the whole width; the system's default leaves a quarter of it empty.
     BasicAlertDialog(onDismissRequest = model::closeAddDialog, properties = DialogProperties(usePlatformDefaultWidth = !compact)) {
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = c.surfaceContainerLow,
-            modifier = if (compact) Modifier.fillMaxWidth().padding(horizontal = 12.dp) else Modifier.width(720.dp),
+            modifier = if (compact) Modifier.fillMaxWidth().padding(horizontal = 12.dp) else Modifier.width(640.dp),
         ) {
-            Column(Modifier.padding(if (LocalCompact.current) 20.dp else 28.dp)) {
+            Column(Modifier.padding(if (compact) 20.dp else 28.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Add videos", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text("Add by link", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     IconButton(onClick = model::closeAddDialog) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
                 }
                 Text(
-                    "Like what you find: recommendations for \"${model.profile.name}\" come from what you like.",
+                    "The videos are liked in \"${model.profile.name}\". To find videos instead, use the search bar.",
                     color = c.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp, bottom = 16.dp),
                 )
-                if (model.searchPlatforms.isNotEmpty()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 16.dp)) {
-                        ToggleChip("Search", tab == Tab.SEARCH) { tab = Tab.SEARCH }
-                        ToggleChip("Paste links", tab == Tab.LINKS) { tab = Tab.LINKS }
-                    }
-                }
-                when (tab) {
-                    Tab.SEARCH -> SearchTab(model)
-                    Tab.LINKS -> LinksTab(model)
-                }
+                LinksTab(model)
             }
         }
     }
 }
 
-private enum class Tab { SEARCH, LINKS }
-
+/** One search result: tap it for its page, or like it straight away. */
 @Composable
-private fun SearchTab(model: AppModel) {
-    val c = MaterialTheme.colorScheme
-    var query by remember { mutableStateOf("") }
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-    val platform = model.searchPlatform ?: model.searchPlatforms.first().first
-
-    if (model.searchPlatforms.size > 1) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
-            Text("Search on", style = MaterialTheme.typography.labelLarge, color = c.onSurfaceVariant)
-            for ((id, name) in model.searchPlatforms) {
-                ToggleChip(name, id == platform) {
-                    if (id != platform) {
-                        model.searchPlatform = id
-                        model.searchVideos(query)
-                    }
-                }
-            }
-        }
-    }
-    // Searching puts the keyboard away, so the results have the screen.
-    val keyboard = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
-    fun search() {
-        keyboard?.hide()
-        focusManager.clearFocus()
-        model.searchVideos(query)
-    }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = { Text("What are you looking for?") },
-            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { search() }),
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.weight(1f).focusRequester(focus).onPreviewKeyEvent {
-                if (it.type == KeyEventType.KeyDown && (it.key == Key.Enter || it.key == Key.NumPadEnter)) {
-                    search()
-                    true
-                } else false
-            },
-        )
-        // On a phone the keyboard's search key does this, and the field needs the room.
-        if (!LocalCompact.current) AccentButton("Search", null, enabled = query.isNotBlank() && !model.searching) { search() }
-    }
-
-    Box(Modifier.fillMaxWidth().height(440.dp).padding(top = 12.dp)) {
-        when {
-            model.searching -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-            model.searchResults.isNotEmpty() -> LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxSize()) {
-                items(model.searchResults, key = { it.id.toString() }) { stub -> SearchRow(model, stub) }
-            }
-            else -> Text(
-                model.searchProblem ?: "Search for videos to add, like you would on the site itself.",
-                color = c.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.Center).padding(24.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun SearchRow(model: AppModel, stub: VideoStub) {
+internal fun SearchResultRow(model: AppModel, stub: VideoStub) {
     val c = MaterialTheme.colorScheme
     val liked = stub.id in model.searchLiked
     val compact = LocalCompact.current
@@ -183,7 +107,7 @@ private fun SearchRow(model: AppModel, stub: VideoStub) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp),
     ) {
-        Box(Modifier.clickable { model.showVideo(stub, fromSearch = true) }.pointerHoverIcon(PointerIcon.Hand)) {
+        Box(Modifier.clickable { model.showVideo(stub) }.pointerHoverIcon(PointerIcon.Hand)) {
             Thumbnail(model, stub.id, if (compact) 112.dp else 160.dp)
             formatDuration(stub.durationSeconds)?.let {
                 Text(
