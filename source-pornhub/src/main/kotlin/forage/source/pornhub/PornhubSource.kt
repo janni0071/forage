@@ -221,6 +221,14 @@ class PornhubSource(
 
     companion object {
         const val PLATFORM = "pornhub"
+
+        /**
+         * A performer as something to follow: the site has no ids for them in its API, only names,
+         * and its performer pages are named after them ("pornstar/first-last").
+         */
+        fun performerId(name: String): PlatformId =
+            PlatformId(PLATFORM, "pornstar/" + name.trim().lowercase(java.util.Locale.ROOT).replace(Regex("[^\\p{L}\\p{N}]+"), "-").trim('-'))
+
         private const val SITE = "https://www.pornhub.com"
         private val THUMB_MAX_AGE = Duration.ofHours(6)
         private const val MAX_NAMED_PERFORMERS = 2

@@ -75,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import forage.app.AppModel
+import forage.app.Creator
 import forage.app.VideoPage
 import forage.core.profile.VideoState
 import forage.core.source.VideoStub
@@ -313,12 +314,23 @@ private fun BigVideoThumbnail(model: AppModel, page: VideoPage) {
     }
 }
 
-/** The channel (or, on platforms without channels, the performers) with Follow. */
+/** The channel, or on platforms without channels each performer, with Follow. */
 @Composable
 private fun ChannelRow(model: AppModel, page: VideoPage) {
+    val creators = page.creators.take(MAX_CREATORS)
+    if (creators.isEmpty()) return
+    Column(Modifier.padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        creators.forEach { CreatorRow(model, it, following = it.id in page.following) }
+    }
+}
+
+private const val MAX_CREATORS = 6
+
+@Composable
+private fun CreatorRow(model: AppModel, creator: Creator, following: Boolean) {
     val c = MaterialTheme.colorScheme
-    val name = page.shownChannelName ?: page.details?.metadata?.extra?.get("performers") ?: return
-    Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    val name = creator.name
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(c.secondaryContainer), contentAlignment = Alignment.Center) {
             Text(
                 name.trim().take(1).uppercase(),
@@ -331,23 +343,23 @@ private fun ChannelRow(model: AppModel, page: VideoPage) {
         Column(Modifier.weight(1f, fill = false)) {
             Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        if (page.shownChannel != null) {
+        if (creator.id != null) {
             Spacer(Modifier.width(16.dp))
             Box(
                 Modifier
                     .height(36.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(if (page.following) c.surfaceContainerHigh else c.onSurface)
-                    .clickable(onClick = model::toggleFollow)
+                    .background(if (following) c.surfaceContainerHigh else c.onSurface)
+                    .clickable { model.toggleFollow(creator) }
                     .pointerHoverIcon(PointerIcon.Hand)
                     .padding(horizontal = 18.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    if (page.following) "Following" else "Follow",
+                    if (following) "Following" else "Follow",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (page.following) c.onSurface else c.surface,
+                    color = if (following) c.onSurface else c.surface,
                 )
             }
         }

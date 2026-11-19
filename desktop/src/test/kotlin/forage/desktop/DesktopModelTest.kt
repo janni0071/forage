@@ -376,8 +376,9 @@ class DesktopModelTest {
         assertTrue(model.videoPage!!.inLibrary.savedForLater)
         assertEquals(listOf(id("b")), model.later.map { it.id })
 
-        model.toggleFollow()
-        assertTrue(model.videoPage!!.following)
+        assertEquals(listOf(Creator(id("UCbread"), "Channel UCbread")), model.videoPage!!.creators)
+        model.toggleFollow(model.videoPage!!.creators.single())
+        assertEquals(setOf(id("UCbread")), model.videoPage!!.following)
         assertTrue(model.library.follows(id("UCbread")))
 
         model.addToPlaylist("Bread", listOf(id("b")))
@@ -407,5 +408,29 @@ class DesktopModelTest {
         model.go(Screen.DISCOVER)
         assertNull(model.videoPage)
         assertEquals(Screen.DISCOVER, model.screen)
+    }
+
+    @Test
+    fun `performers on a platform without channels are followed one by one`() {
+        val video = PlatformId("pornhub", "ph0001")
+        model.cache.put(
+            VideoDetails(
+                forage.core.source.VideoMetadata(
+                    video, "A video", "", emptyList(), 600, null, "Performer A, Performer B", null, null, null, false,
+                    extra = mapOf("performers" to "Performer A, Performer B, Third Name"),
+                ),
+                emptyList(),
+            )
+        )
+        model.showVideo(video, "A video", channelName = "Performer A, Performer B")
+        val creators = model.videoPage!!.creators
+        assertEquals(listOf("Performer A", "Performer B", "Third Name"), creators.map { it.name })
+        assertEquals(PlatformId("pornhub", "pornstar/performer-b"), creators[1].id)
+        model.toggleFollow(creators[1])
+        assertEquals(setOf(creators[1].id), model.videoPage!!.following)
+        assertTrue(model.library.follows(PlatformId("pornhub", "pornstar/performer-b")))
+        assertEquals(false, model.library.follows(PlatformId("pornhub", "pornstar/performer-a")))
+        model.toggleFollow(creators[1])
+        assertEquals(emptySet(), model.videoPage!!.following)
     }
 }

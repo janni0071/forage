@@ -139,7 +139,8 @@ data class VideoPage(
     val gone: Boolean = false,
     val state: VideoState? = null,
     val inLibrary: VideoInLibrary = VideoInLibrary(),
-    val following: Boolean = false,
+    /** Which of [creators] the library follows. */
+    val following: Set<PlatformId> = emptySet(),
     /** Opened from the search dialog, which comes back when the page closes. */
     val fromSearch: Boolean = false,
 ) {
@@ -148,7 +149,28 @@ data class VideoPage(
     val shownChannelName: String? get() = details?.metadata?.channelName ?: channelName
     val shownDuration: Long? get() = details?.metadata?.durationSeconds ?: durationSeconds
     val shownUploadedAt: Instant? get() = details?.metadata?.uploadedAt ?: uploadedAt
+
+    /**
+     * Who the video is by: its channel, or on a platform without channels (the private one) each
+     * performer, so they can be followed one by one.
+     */
+    val creators: List<Creator>
+        get() {
+            val channel = shownChannel
+            val name = shownChannelName
+            if (channel != null) return listOf(Creator(channel, name ?: "Channel"))
+            if (id.platform == PornhubSource.PLATFORM) {
+                // The details list every performer; lists before them carry the first two.
+                val performers = (details?.metadata?.extra?.get("performers") ?: name).orEmpty()
+                return performers.split(", ").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                    .map { Creator(PornhubSource.performerId(it), it) }
+            }
+            return listOfNotNull(name?.let { Creator(null, it) })
+        }
 }
+
+/** Someone a video is by; [id] is null where they can't be followed. */
+data class Creator(val id: PlatformId?, val name: String)
 
 /** A long-running task. [total] is null when progress can't be counted. */
 data class Job(val label: String, val done: Int = 0, val total: Int? = null, val detail: String = "")
@@ -357,7 +379,7 @@ class AppModel(
                 inLibrary = library.about(id),
             )
         }
-        updatePage(id) { it.copy(following = it.shownChannel?.let(library::follows) == true) }
+        updatePage(id) { it.copy(following = followed(it)) }
         if (!fetch || videoStack.none { it.id == id && it.details == null }) {
             updatePage(id) { it.copy(loading = false) }
             return
@@ -371,8 +393,10 @@ class AppModel(
                 is FetchOutcome.Failed -> page.copy(loading = false, problem = outcome.error.message ?: "The platform didn't answer")
             }
         }
-        updatePage(id) { it.copy(following = it.shownChannel?.let(library::follows) == true) }
+        updatePage(id) { it.copy(following = followed(it)) }
     }
+
+    private fun followed(page: VideoPage): Set<PlatformId> = page.creators.mapNotNull { it.id }.filterTo(HashSet(), library::follows)
 
     /** Keeps what the page shows about its video in the library, so lists show it before any fetch. */
     private fun rememberPage(page: VideoPage) = library.remember(
@@ -403,17 +427,21 @@ class AppModel(
         }
     }
 
-    fun toggleFollow() {
+    /** Follows a channel or performer of the video on screen, or stops following them. */
+    fun toggleFollow(creator: Creator) {
         val page = videoPage ?: return
-        val channel = page.shownChannel ?: return
-        val follow = !page.following
-        updatePage(page.id) { it.copy(following = follow) }
+        val id = creator.id ?: return
+        val follow = id !in page.following
+        // Every open page with them follows along.
+        fun apply() {
+            videoStack = videoStack.map { p ->
+                if (p.creators.none { it.id == id }) p else p.copy(following = if (follow) p.following + id else p.following - id)
+            }
+        }
+        apply()
         launchQuiet {
-            if (follow) library.follow(channel, page.shownChannelName) else library.unfollow(channel)
-            // Every open page of that channel follows along.
-            videoStack = videoStack.map { if (it.shownChannel == channel) it.copy(following = follow) else it }
-            val name = page.shownChannelName ?: "the channel"
-            message = if (follow) "Following $name" else "Stopped following $name"
+            if (follow) library.follow(id, creator.name) else library.unfollow(id)
+            message = if (follow) "Following ${creator.name}" else "Stopped following ${creator.name}"
         }
     }
 
