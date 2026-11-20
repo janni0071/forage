@@ -92,16 +92,31 @@ fun SettingsDialog(model: AppModel) {
                     }
                 }
 
-                Section("Appearance", null)
-                Segmented(
-                    options = listOf(
-                        Triple(Theme.SYSTEM, "System", Icons.Outlined.BrightnessAuto),
-                        Triple(Theme.LIGHT, "Light", Icons.Outlined.LightMode),
-                        Triple(Theme.DARK, "Dark", Icons.Outlined.DarkMode),
-                    ),
-                    selected = model.theme,
-                    onSelect = model::changeTheme,
-                )
+                val look = model.vaultLook
+                if (look != null) {
+                    // The private vault wears a look of its own, always dark, kept inside the vault.
+                    Section("Look", "The private vault's own colours, apart from the rest of Forage.")
+                    Segmented(
+                        options = listOf(
+                            Triple(forage.app.VaultLook.NEON, "Neon", null),
+                            Triple(forage.app.VaultLook.VELVET, "Velvet", null),
+                            Triple(forage.app.VaultLook.NOIR, "Noir", null),
+                        ),
+                        selected = look,
+                        onSelect = model::changeVaultLook,
+                    )
+                } else {
+                    Section("Appearance", null)
+                    Segmented(
+                        options = listOf(
+                            Triple(Theme.SYSTEM, "System", Icons.Outlined.BrightnessAuto),
+                            Triple(Theme.LIGHT, "Light", Icons.Outlined.LightMode),
+                            Triple(Theme.DARK, "Dark", Icons.Outlined.DarkMode),
+                        ),
+                        selected = model.theme,
+                        onSelect = model::changeTheme,
+                    )
+                }
 
                 if (!model.isPrivate && !model.platform.isMobile) {
                     SwitchRow(
@@ -156,9 +171,9 @@ fun SettingsDialog(model: AppModel) {
                 if (model.offersCatalogue) {
                     Section(
                         "Catalogue",
-                        "The site's embed dump, imported once: Discover then matches your topics against all its videos " +
-                            "instead of a few searches, and previews load from it. Kept unencrypted in Forage's data folder; " +
-                            "it holds only the site's public catalogue, nothing about you.",
+                        "The site's public list of all its videos (its \"embed dump\"), imported once: Discover then matches " +
+                            "your taste against millions of videos instead of a few searches, and related videos and previews come " +
+                            "from it. Kept unencrypted in Forage's data folder; it holds only the site's catalogue, nothing about you.",
                     )
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(16.dp)) {
                         Text(model.catalogueInfo ?: "Not imported yet", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)

@@ -245,6 +245,11 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
         )
     }
 
+    /** One of the vault's own preferences (kept inside the vault, so encrypted with a private one). */
+    fun preference(key: String): String? = queries.selectPreference(key).executeAsOneOrNull()
+
+    fun setPreference(key: String, value: String) = queries.setPreference(key, value)
+
     /** A channel's picture as last looked up: null if never, an empty string if it had none. */
     fun channelPicture(channel: PlatformId): Pair<String?, Instant>? =
         queries.selectChannelPicture(channel.toString()).executeAsOneOrNull()?.let { it.url to Instant.ofEpochSecond(it.checked_at) }

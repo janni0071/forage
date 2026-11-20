@@ -1,0 +1,6 @@
+-- Version 15 keeps a vault's own preferences inside it (encrypted with it, for the private
+-- vault), e.g. its look, where the settings file would keep them in the clear.
+CREATE TABLE preference (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);

@@ -98,7 +98,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             val model = app.model ?: return@setContent
             val active = model.privateModel ?: model
-            val dark = when (active.theme) {
+            // The private vault's look is always dark.
+            val dark = active.vaultLook != null || when (active.theme) {
                 Theme.LIGHT -> false
                 Theme.DARK -> true
                 Theme.SYSTEM -> isSystemInDarkTheme()
@@ -106,7 +107,7 @@ class MainActivity : ComponentActivity() {
             // The system's back gesture steps back inside the app (a video page, search results, a
             // library list) before it leaves it.
             BackHandler(enabled = active.canGoBack) { active.back() }
-            ForageTheme(dark = dark) {
+            ForageTheme(dark = dark, vault = active.vaultLook) {
                 // Drawn edge to edge; the content keeps clear of the status and navigation bars.
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
                     App(active, onImport = { pickImport.launch(arrayOf("application/zip", "application/x-sqlite3", "application/octet-stream", "*/*")) })

@@ -197,32 +197,69 @@ fun Initial(name: String, size: androidx.compose.ui.unit.Dp) {
  */
 @Composable
 private fun GetStarted(model: AppModel, onImport: () -> Unit) {
+    var confirmDownload by remember { mutableStateOf(false) }
     val steps = buildList {
-        if (!model.isPrivate) add(Step("Import your YouTube history from Google Takeout", model.imported, "Import", onImport))
-        add(Step("Search for videos you enjoy", model.hasSearched, "Search", model::askForSearch))
-        add(
-            Step(
-                "Like a few videos: recommendations come from what you like", model.profileSize >= 3,
-                if (model.historySize > 0) "Your history" else null,
-            ) { model.openLibrary(LibraryView.LIST, LibrarySource.History) }
+        if (model.isPrivate) {
+            // The private vault starts empty, with the site to search and its catalogue to fetch.
+            add(Step("Find videos with the search bar", model.hasSearched, "Search", model::askForSearch,
+                "It searches the site. Tap a result to open it; Play hands it to your player."))
+            add(Step("Like a few videos", model.profileSize >= 3, null, {},
+                "Discover recommends from what you like, and nothing else."))
+            add(Step("Follow your favourite performers", model.following.isNotEmpty(), null, {},
+                "Tap Follow on a video's page, or tap a tag with their name. Their new videos show under Subscriptions."))
+            if (model.offersCatalogue) {
+                add(Step("Download the catalogue (optional)", model.catalogueInfo != null, "Download", { confirmDownload = true },
+                    "The site's public list of all its videos, about 1.6 GB to download and 1.3 GB on this device. With it, " +
+                        "Discover matches your taste against millions of videos instead of a few searches, and related videos " +
+                        "and previews come from it. It holds nothing about you."))
+            }
+        } else {
+            add(Step("Import your YouTube history from Google Takeout", model.imported, "Import", onImport))
+            add(Step("Search for videos you enjoy", model.hasSearched, "Search", model::askForSearch))
+            add(
+                Step(
+                    "Like a few videos: recommendations come from what you like", model.profileSize >= 3,
+                    if (model.historySize > 0) "Your history" else null,
+                    { model.openLibrary(LibraryView.LIST, LibrarySource.History) },
+                )
+            )
+        }
+    }
+    if (model.guideHidden || steps.all { it.done }) return
+    if (confirmDownload) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDownload = false },
+            title = { Text("Download the catalogue?") },
+            text = {
+                Text(
+                    "About 1.6 GB, best on Wi-Fi. Forage imports it in a few minutes and then deletes the download; " +
+                        "if it breaks off, starting again continues where it stopped. You can also do this later in Settings."
+                )
+            },
+            confirmButton = { TextButton(onClick = { confirmDownload = false; model.downloadCatalogue() }) { Text("Download") } },
+            dismissButton = { TextButton(onClick = { confirmDownload = false }) { Text("Not now") } },
         )
     }
-    if (steps.all { it.done }) return
     val c = MaterialTheme.colorScheme
     Column(
         Modifier.fillMaxWidth().widthIn(max = 720.dp).clip(RoundedCornerShape(20.dp)).background(c.surfaceContainer).padding(18.dp),
     ) {
-        Text("Get started", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Get started", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            // Optional steps can stay undone for good; the card can go anyway.
+            TextButton(onClick = model::hideGuide) { Text("Hide") }
+        }
         Text(
-            "Forage keeps your likes, history and playlists on this device, with no account anywhere.",
+            if (model.isPrivate) "This vault is encrypted and kept apart from everything else in Forage. A few steps to fill it:"
+            else "Forage keeps your likes, history and playlists on this device, with no account anywhere.",
             style = MaterialTheme.typography.bodyMedium,
             color = c.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
         )
         steps.forEach { step ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
                 Box(
-                    Modifier.size(26.dp).clip(CircleShape)
+                    Modifier.padding(top = 2.dp).size(26.dp).clip(CircleShape)
                         .background(if (step.done) Accent.pastelPink else Color.Transparent)
                         .border(2.dp, if (step.done) Accent.pastelPink else c.outline, CircleShape),
                     contentAlignment = Alignment.Center,
@@ -230,19 +267,19 @@ private fun GetStarted(model: AppModel, onImport: () -> Unit) {
                     if (step.done) Icon(Icons.Filled.Check, contentDescription = "Done", tint = Accent.onAccent, modifier = Modifier.size(16.dp))
                 }
                 Spacer(Modifier.width(12.dp))
-                Text(
-                    step.text,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (step.done) c.onSurfaceVariant else c.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(Modifier.weight(1f)) {
+                    Text(step.text, style = MaterialTheme.typography.bodyLarge, color = if (step.done) c.onSurfaceVariant else c.onSurface)
+                    if (!step.done && step.detail != null) {
+                        Text(step.detail, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
                 if (!step.done && step.action != null) TextButton(onClick = step.onClick) { Text(step.action) }
             }
         }
     }
 }
 
-private class Step(val text: String, val done: Boolean, val action: String?, val onClick: () -> Unit)
+private class Step(val text: String, val done: Boolean, val action: String?, val onClick: () -> Unit, val detail: String? = null)
 
 @Composable
 private fun DiscoverInvite(model: AppModel) {

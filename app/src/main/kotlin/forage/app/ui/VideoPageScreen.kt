@@ -188,6 +188,7 @@ private fun Main(model: AppModel, page: VideoPage, maxWidth: Dp) {
                 Modifier
                     .then(if (compact) Modifier.fillMaxWidth() else Modifier.width(220.dp))
                     .height(48.dp)
+                    .accentGlow(RoundedCornerShape(14.dp))
                     .clip(RoundedCornerShape(14.dp))
                     .background(Accent.pastelPink)
                     .clickable(onClick = model::playPage)
@@ -366,7 +367,8 @@ private fun PageAction(icon: ImageVector, label: String, active: Boolean, onClic
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            Modifier.size(44.dp).clip(CircleShape).background(if (active) Accent.pastelPink else c.surfaceContainerHigh),
+            Modifier.size(44.dp).then(if (active) Modifier.accentGlow(CircleShape, 10.dp) else Modifier)
+                .clip(CircleShape).background(if (active) Accent.pastelPink else c.surfaceContainerHigh),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = null, tint = if (active) Accent.onAccent else c.onSurface, modifier = Modifier.size(21.dp))

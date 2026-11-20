@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Subscriptions
+import androidx.compose.material.icons.outlined.Face3
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.text.BasicTextField
@@ -154,7 +155,8 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
                 StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = clear))
             }
             NavigationBar(containerColor = c.surfaceContainerLow) {
-                for ((screen, icon, label) in TABS) {
+                for ((screen, tabIcon, label) in TABS) {
+                    val icon = if (screen == Screen.SUBSCRIPTIONS) subscriptionsIcon(model) else tabIcon
                     NavigationBarItem(
                         selected = model.screen == screen,
                         onClick = { model.go(screen) },
@@ -184,6 +186,9 @@ private val TABS = listOf(
     Triple(Screen.SUBSCRIPTIONS, Icons.Outlined.Subscriptions, "Subscriptions"),
     Triple(Screen.LIBRARY, Icons.Outlined.VideoLibrary, "Library"),
 )
+
+/** The subscriptions' icon: in the private vault a face, as it's where the performers you follow are. */
+private fun subscriptionsIcon(model: AppModel) = if (model.isPrivate) Icons.Outlined.Face3 else Icons.Outlined.Subscriptions
 
 @Composable
 private fun Screens(model: AppModel, onImport: () -> Unit) {
@@ -328,7 +333,7 @@ private fun Sidebar(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
         NavItem(Icons.Outlined.AutoAwesome, "Discover", model.screen == Screen.DISCOVER, count = model.picks.size.takeIf { it > 0 }) {
             model.go(Screen.DISCOVER)
         }
-        NavItem(Icons.Outlined.Subscriptions, "Subscriptions", model.screen == Screen.SUBSCRIPTIONS, count = model.newUploads.takeIf { it > 0 }) {
+        NavItem(subscriptionsIcon(model), "Subscriptions", model.screen == Screen.SUBSCRIPTIONS, count = model.newUploads.takeIf { it > 0 }) {
             model.go(Screen.SUBSCRIPTIONS)
         }
         NavItem(Icons.Outlined.VideoLibrary, "Library", model.screen == Screen.LIBRARY) { model.go(Screen.LIBRARY) }
@@ -361,6 +366,7 @@ private fun NavItem(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .height(44.dp)
+            .then(if (selected) Modifier.accentGlow(RoundedCornerShape(12.dp), 10.dp) else Modifier)
             .clip(RoundedCornerShape(12.dp))
             .background(if (selected) c.primaryContainer else Color.Transparent)
             .clickable(enabled = enabled, onClick = onClick)

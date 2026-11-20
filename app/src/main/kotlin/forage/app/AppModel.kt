@@ -986,6 +986,27 @@ class AppModel(
 
     private val autoUiScale by lazy { platform.automaticUiScale() }
 
+    /** The private vault's look, kept inside the vault; null in the normal library, which follows [theme]. */
+    var vaultLook by mutableStateOf(
+        if (!isPrivate) null else library.preference(VAULT_LOOK)?.let { n -> VaultLook.entries.firstOrNull { it.name == n } } ?: VaultLook.NEON
+    )
+        private set
+
+    fun changeVaultLook(look: VaultLook) {
+        if (!isPrivate) return
+        library.setPreference(VAULT_LOOK, look.name)
+        vaultLook = look
+    }
+
+    /** True once Home's "Get started" was put away, kept per vault. */
+    var guideHidden by mutableStateOf(library.preference(GUIDE_HIDDEN) == "true")
+        private set
+
+    fun hideGuide() {
+        library.setPreference(GUIDE_HIDDEN, "true")
+        guideHidden = true
+    }
+
     fun changeTheme(value: Theme) {
         settings.theme = value
         theme = value
@@ -2035,6 +2056,8 @@ class AppModel(
         private const val BACKGROUND_FETCH_LIMIT = 30
         /** How many videos a row on Home shows. */
         private const val HOME_ROW = 12
+        private const val VAULT_LOOK = "vault.look"
+        private const val GUIDE_HIDDEN = "home.guideHidden"
         /** How many related videos a page shows where Forage finds them itself. */
         private const val RELATED_COUNT = 20
         /** Subscriptions are checked at most this often, unless asked. */

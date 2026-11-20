@@ -116,7 +116,7 @@ fun DiscoverScreen(model: AppModel) {
                 containerColor = Accent.pastelPink,
                 contentColor = Accent.onAccent,
                 // Above the search bar.
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 80.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 80.dp).accentGlow(RoundedCornerShape(16.dp)),
             )
         }
     }

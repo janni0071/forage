@@ -6,6 +6,10 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.unit.dp
+import forage.app.VaultLook
 import androidx.compose.ui.graphics.Color
 
 /**
@@ -20,15 +24,21 @@ object Accent {
     val onAccent: Color @Composable get() = LocalAccent.current.onFill
 }
 
-/** The accent colours of a theme. */
-data class AccentColors(val fill: Color, val onFill: Color, val second: Color)
+/** The accent colours of a theme; [glow] lights the accent's buttons from behind, as neon does. */
+data class AccentColors(val fill: Color, val onFill: Color, val second: Color, val glow: Boolean = false)
 
 private val PastelAccent = AccentColors(Color(0xFFF7B6CF), Color(0xFF3E0423), Color(0xFFCDB8F5))
 
+/** A soft glow in the accent's colour around something filled with it, where the theme has one (Neon). */
+@Composable
+fun Modifier.accentGlow(shape: androidx.compose.ui.graphics.Shape, strength: androidx.compose.ui.unit.Dp = 14.dp): Modifier {
+    val accent = LocalAccent.current
+    if (!accent.glow) return this
+    return shadow(strength, shape, clip = false, ambientColor = accent.fill, spotColor = accent.fill)
+}
+
 val LocalAccent = staticCompositionLocalOf { PastelAccent }
 
-/** Looks the private vault can wear instead of the normal pastel theme; each is always dark. */
-enum class VaultLook(val label: String) { VELVET("Velvet"), NEON("Neon"), NOIR("Noir") }
 
 private val Light = lightColorScheme(
     primary = Color(0xFF9E3D68),
@@ -171,7 +181,7 @@ private val Neon = darkColorScheme(
     inverseOnSurface = Color(0xFF2A1F38),
     inversePrimary = Color(0xFFB0247F),
 )
-private val NeonAccent = AccentColors(Color(0xFFFF3DB4), Color(0xFF2B0020), Color(0xFF8B5CFF))
+private val NeonAccent = AccentColors(Color(0xFFFF3DB4), Color(0xFF2B0020), Color(0xFF8B5CFF), glow = true)
 
 /** Graphite, nearly without colour, and one crimson accent. */
 private val Noir = darkColorScheme(

@@ -48,6 +48,12 @@ CREATE TABLE subscription (
     gone TEXT                -- why the platform no longer has the channel, when it doesn't
 );
 
+-- A vault's own preferences, kept inside it (encrypted with the private vault).
+CREATE TABLE preference (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- Channels' pictures for video pages, also of channels nobody follows.
 CREATE TABLE channel_picture (
     channel_id TEXT NOT NULL PRIMARY KEY,
@@ -245,6 +251,12 @@ WHERE channel_id = :channel_id;
 
 markSubscriptionGone:
 UPDATE subscription SET gone = :reason, checked_at = :now WHERE channel_id = :channel_id;
+
+selectPreference:
+SELECT value FROM preference WHERE key = ?;
+
+setPreference:
+INSERT OR REPLACE INTO preference VALUES (?, ?);
 
 selectChannelPicture:
 SELECT * FROM channel_picture WHERE channel_id = ?;

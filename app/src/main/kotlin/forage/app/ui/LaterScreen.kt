@@ -590,6 +590,7 @@ internal fun RoundAction(icon: ImageVector, hint: String, filled: Boolean = fals
         Box(
             Modifier
                 .size(40.dp)
+                .then(if (filled) Modifier.accentGlow(CircleShape, 10.dp) else Modifier)
                 .clip(CircleShape)
                 .background(if (filled) Accent.pastelPink else c.surfaceContainerHigh)
                 .clickable(onClick = onClick)

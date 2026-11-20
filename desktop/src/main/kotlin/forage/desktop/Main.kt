@@ -120,7 +120,7 @@ fun main(args: Array<String>) {
                 LocalDensity provides Density(base.density * active.effectiveUiScale, base.fontScale),
                 LocalExtras provides DesktopExtras,
             ) {
-            ForageTheme(dark = dark) {
+            ForageTheme(dark = dark, vault = active.vaultLook) {
                 val chrome = frame?.let { f ->
                     WindowChrome(titleBar = { TitleBar(f) }, dragArea = Modifier.moveWindow(f), overlay = { ResizeEdges(f) }, outlined = !f.maximized)
                 }

@@ -128,6 +128,8 @@ Order of work, each step usable on its own:
 
 Sync (M4) follows after these.
 
+**The private vault's look (Nov 2026):** the vault wears a look of its own, always dark and kept inside the vault (database version 15 adds a preference table, encrypted with the vault): Neon by default (near-black, hot pink and violet, with a soft glow around the accent's buttons), or Velvet (wine and rose-red with gold) or Noir (graphite and crimson), chosen in its Settings. The accent and the text on it now come from the theme. In the vault the Subscriptions tab shows a face, as it's where the performers you follow are, and Home's "Get started" walks through searching, liking, following performers and (optionally) the catalogue, saying what the catalogue is for; the card can be hidden.
+
 ## Build order
 
 Test recommendation quality first, with no UI. Everything after that is packaging.

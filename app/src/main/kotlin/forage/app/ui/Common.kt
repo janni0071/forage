@@ -150,6 +150,7 @@ fun AccentButton(label: String, icon: ImageVector?, enabled: Boolean = true, onC
         shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Accent.pastelPink, contentColor = Accent.onAccent),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+        modifier = if (enabled) Modifier.accentGlow(RoundedCornerShape(12.dp), 10.dp) else Modifier,
     ) {
         icon?.let {
             Icon(it, contentDescription = null, modifier = Modifier.size(18.dp))

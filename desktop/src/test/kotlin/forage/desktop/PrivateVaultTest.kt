@@ -140,4 +140,22 @@ class PrivateVaultTest {
         assertNull(model.privateModel)
         assertEquals("Nothing unlocks with that PIN", model.privateError)
     }
+
+    @Test
+    fun `the vault wears Neon until another look is chosen, and keeps it inside the vault`() {
+        assertEquals(null, model.vaultLook)
+        unlock("123456", create = true)
+        val vault = assertNotNull(model.privateModel, model.privateError)
+        assertEquals(forage.app.VaultLook.NEON, vault.vaultLook)
+        vault.changeVaultLook(forage.app.VaultLook.NOIR)
+        vault.hideGuide()
+        lock()
+        unlock("123456")
+        val again = assertNotNull(model.privateModel, model.privateError)
+        assertEquals(forage.app.VaultLook.NOIR, again.vaultLook)
+        assertEquals(true, again.guideHidden)
+        // The normal library's own guide is untouched.
+        assertEquals(false, model.guideHidden)
+        lock()
+    }
 }
