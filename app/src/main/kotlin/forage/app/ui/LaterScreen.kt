@@ -386,7 +386,7 @@ private fun UpNextCompact(model: AppModel, item: LaterItem, actions: QueueAction
             Button(
                 onClick = { model.open(item.id) },
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Accent.pastelPink, contentColor = Color(0xFF3E0423)),
+                colors = ButtonDefaults.buttonColors(containerColor = Accent.pastelPink, contentColor = Accent.onAccent),
                 contentPadding = PaddingValues(horizontal = 8.dp),
                 modifier = Modifier.weight(1f).height(ControlHeight),
             ) {
@@ -596,7 +596,7 @@ internal fun RoundAction(icon: ImageVector, hint: String, filled: Boolean = fals
                 .pointerHoverIcon(PointerIcon.Hand),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = hint, tint = if (filled) c.onPrimaryContainer else c.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = hint, tint = if (filled) Accent.onAccent else c.onSurfaceVariant, modifier = Modifier.size(20.dp))
         }
     }
 }

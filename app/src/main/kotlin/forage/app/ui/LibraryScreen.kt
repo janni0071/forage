@@ -749,7 +749,7 @@ private fun showsStates(model: AppModel) =
 private fun StatePill(state: VideoState?, modifier: Modifier = Modifier, solid: Boolean = false) {
     val c = MaterialTheme.colorScheme
     val (label, container, content) = when (state) {
-        VideoState.LIKED -> Triple("Liked", if (solid) Accent.pastelPink else c.primaryContainer, c.onPrimaryContainer)
+        VideoState.LIKED -> Triple("Liked", if (solid) Accent.pastelPink else c.primaryContainer, if (solid) Accent.onAccent else c.onPrimaryContainer)
         VideoState.NOT_INTERESTED -> Triple("Not interested", c.errorContainer, c.onErrorContainer)
         null -> return
     }
@@ -788,9 +788,9 @@ private fun QuickButton(icon: ImageVector, label: String, accent: Boolean = fals
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = if (accent) c.onPrimaryContainer else c.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        Icon(icon, contentDescription = null, tint = if (accent) Accent.onAccent else c.onSurfaceVariant, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium, color = if (accent) c.onPrimaryContainer else c.onSurfaceVariant)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = if (accent) Accent.onAccent else c.onSurfaceVariant)
     }
 }
 

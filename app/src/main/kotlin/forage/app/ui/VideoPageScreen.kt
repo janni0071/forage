@@ -195,9 +195,9 @@ private fun Main(model: AppModel, page: VideoPage, maxWidth: Dp) {
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color(0xFF3E0423), modifier = Modifier.size(24.dp))
+                Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Accent.onAccent, modifier = Modifier.size(24.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Play", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Color(0xFF3E0423))
+                Text("Play", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Accent.onAccent)
             }
         }
         val liked = page.state == VideoState.LIKED
@@ -369,7 +369,7 @@ private fun PageAction(icon: ImageVector, label: String, active: Boolean, onClic
             Modifier.size(44.dp).clip(CircleShape).background(if (active) Accent.pastelPink else c.surfaceContainerHigh),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = if (active) Color(0xFF3E0423) else c.onSurface, modifier = Modifier.size(21.dp))
+            Icon(icon, contentDescription = null, tint = if (active) Accent.onAccent else c.onSurface, modifier = Modifier.size(21.dp))
         }
         Text(
             label,

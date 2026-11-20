@@ -162,7 +162,7 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
                             // How many new uploads wait in the subscriptions.
                             val count = if (screen == Screen.SUBSCRIPTIONS) model.newUploads else 0
                             if (count > 0) {
-                                BadgedBox(badge = { Badge(containerColor = Accent.pastelPink, contentColor = Color(0xFF3E0423)) { Text(if (count > 99) "99+" else "$count") } }) {
+                                BadgedBox(badge = { Badge(containerColor = Accent.pastelPink, contentColor = Accent.onAccent) { Text(if (count > 99) "99+" else "$count") } }) {
                                     Icon(icon, contentDescription = null)
                                 }
                             } else {
@@ -309,7 +309,7 @@ private fun Sidebar(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
                 Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).background(Brush.linearGradient(listOf(Accent.pastelPink, Accent.lavender))),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Color(0xFF3E0423), modifier = Modifier.size(20.dp))
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Accent.onAccent, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(12.dp))
             Column {

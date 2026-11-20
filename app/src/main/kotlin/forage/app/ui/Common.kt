@@ -143,16 +143,12 @@ fun ToggleChip(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
 /** The screen's main call to action, filled with the pastel accent. */
 @Composable
 fun AccentButton(label: String, icon: ImageVector?, enabled: Boolean = true, onClick: () -> Unit) {
-    val c = MaterialTheme.colorScheme
-    val dark = c.background.luminance() < 0.5f
+    // The theme's accent and its own text colour, like the Play button, in every theme.
     Button(
         onClick = onClick,
         enabled = enabled,
         shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (dark) c.primary else Accent.pastelPink,
-            contentColor = if (dark) c.onPrimary else c.onPrimaryContainer,
-        ),
+        colors = ButtonDefaults.buttonColors(containerColor = Accent.pastelPink, contentColor = Accent.onAccent),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
     ) {
         icon?.let {

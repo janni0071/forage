@@ -114,7 +114,7 @@ fun DiscoverScreen(model: AppModel) {
                 icon = { Icon(Icons.Filled.AutoAwesome, contentDescription = null) },
                 text = { Text(if (model.picks.isEmpty()) "Find recommendations" else "New batch") },
                 containerColor = Accent.pastelPink,
-                contentColor = Color(0xFF3E0423),
+                contentColor = Accent.onAccent,
                 // Above the search bar.
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 80.dp),
             )
@@ -202,8 +202,8 @@ private fun PickCard(model: AppModel, view: PickView) {
             }
             Row(Modifier.align(Alignment.TopStart).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (pick.exploration) Badge("Exploration", background = MaterialTheme.colorScheme.tertiary, content = MaterialTheme.colorScheme.onTertiary)
-                if (Feedback.SAVED in view.feedback) Badge("Saved", background = Accent.pastelPink, content = MaterialTheme.colorScheme.onPrimaryContainer)
-                if (Feedback.LIKE in view.feedback) Badge("Liked", background = Accent.pastelPink, content = MaterialTheme.colorScheme.onPrimaryContainer)
+                if (Feedback.SAVED in view.feedback) Badge("Saved", background = Accent.pastelPink, content = Accent.onAccent)
+                if (Feedback.LIKE in view.feedback) Badge("Liked", background = Accent.pastelPink, content = Accent.onAccent)
             }
         }
 

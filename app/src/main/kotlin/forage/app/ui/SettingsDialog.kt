@@ -262,7 +262,7 @@ private fun PlayerCard(player: Player, problem: String?, selected: Boolean, modi
                     contentDescription = null,
                     // The pastel circle is light in both themes, so the icon on it stays dark.
                     tint = when {
-                        selected -> Color(0xFF3E0423)
+                        selected -> Accent.onAccent
                         usable -> c.onSurface
                         else -> c.onSurfaceVariant.copy(alpha = 0.5f)
                     },

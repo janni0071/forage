@@ -227,7 +227,7 @@ private fun GetStarted(model: AppModel, onImport: () -> Unit) {
                         .border(2.dp, if (step.done) Accent.pastelPink else c.outline, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (step.done) Icon(Icons.Filled.Check, contentDescription = "Done", tint = Color(0xFF3E0423), modifier = Modifier.size(16.dp))
+                    if (step.done) Icon(Icons.Filled.Check, contentDescription = "Done", tint = Accent.onAccent, modifier = Modifier.size(16.dp))
                 }
                 Spacer(Modifier.width(12.dp))
                 Text(
