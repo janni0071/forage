@@ -40,6 +40,8 @@ data class FollowedChannel(
     val seenAt: Instant? = null,
     /** Why the platform no longer has them, if it doesn't. */
     val gone: String? = null,
+    /** When they were followed (imported ones: when imported). */
+    val followedAt: Instant? = null,
 )
 
 /** One upload of someone followed, and whether it came after their uploads were last seen. */
@@ -239,8 +241,16 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
         FollowedChannel(
             PlatformId.parse(it.channel_id), it.name, it.avatar_url,
             it.checked_at?.let(Instant::ofEpochSecond), it.seen_at?.let(Instant::ofEpochSecond), it.gone,
+            Instant.ofEpochSecond(it.added_at),
         )
     }
+
+    /** A channel's picture as last looked up: null if never, an empty string if it had none. */
+    fun channelPicture(channel: PlatformId): Pair<String?, Instant>? =
+        queries.selectChannelPicture(channel.toString()).executeAsOneOrNull()?.let { it.url to Instant.ofEpochSecond(it.checked_at) }
+
+    fun rememberChannelPicture(channel: PlatformId, url: String?) =
+        queries.upsertChannelPicture(channel.toString(), url, clock().epochSecond)
 
     /** Notes that the platform no longer has a channel (removed, terminated), so it isn't asked again soon. */
     fun markGone(channel: PlatformId, reason: String) = queries.markSubscriptionGone(reason, clock().epochSecond, channel.toString())

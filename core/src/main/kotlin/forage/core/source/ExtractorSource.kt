@@ -59,6 +59,9 @@ interface ExtractorSource {
     fun channelFeed(channel: PlatformId, name: String?): ChannelFeed =
         throw SourceException("$displayName can't list a channel's uploads")
 
+    /** A channel's picture, for a video page; null where the platform has none. May ask the platform. */
+    fun channelPicture(channel: PlatformId): String? = null
+
     /** The video a pasted link (or bare ID) points to, if it is one of this platform's. */
     fun parseLink(text: String): PlatformId? = null
 

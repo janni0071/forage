@@ -3,6 +3,7 @@ package forage.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -89,7 +90,7 @@ fun SubscriptionsScreen(model: AppModel) {
                 }
                 model.managingFollowing -> item { ManageList(model) }
                 else -> {
-                    item { People(model, following) }
+                    item { People(model) }
                     if (shown.isEmpty()) {
                         item {
                             Text(
@@ -151,12 +152,11 @@ private fun Header(model: AppModel) {
 
 /** Everyone followed, along the top: a dot for new uploads; tap one to see only theirs. */
 @Composable
-private fun People(model: AppModel, following: List<FollowedChannel>) {
+private fun People(model: AppModel) {
     val c = MaterialTheme.colorScheme
     val withNew = model.uploads.filter { it.isNew }.mapNotNullTo(HashSet()) { it.video.channel }
-    // Those with something new first, then by name.
-    // Those that are gone stay out: they have nothing to show. Manage lists them.
-    val ordered = following.filter { it.gone == null }.sortedWith(compareBy({ it.channel !in withNew }, { it.name?.lowercase() ?: "" }))
+    // In the order chosen in Manage. Those that are gone stay out: they have nothing to show.
+    val ordered = model.sortedFollowing.filter { it.gone == null }
     LazyRow(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         items(ordered, key = { it.channel.toString() }) { f ->
             val selected = model.feedChannel == f.channel
@@ -214,9 +214,26 @@ private fun ManageList(model: AppModel) {
         shown = shown + following.filter { it.channel !in known }
     }
     val followed = following.mapTo(HashSet()) { it.channel }
+    // The chosen order; someone unfollowed just now keeps their place until the next visit.
+    val order = model.sortedFollowing.map { it.channel }.withIndex().associate { (i, ch) -> ch to i }
     Column {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Order", style = MaterialTheme.typography.labelLarge, color = c.onSurfaceVariant)
+            for (sort in forage.app.FollowSort.entries) {
+                androidx.compose.material3.FilterChip(
+                    selected = model.followSort == sort,
+                    onClick = { model.sortFollowing(sort) },
+                    label = { Text(sort.label, maxLines = 1) },
+                    shape = RoundedCornerShape(10.dp),
+                )
+            }
+        }
         // The ones that are gone first: they're the ones to unfollow.
-        shown.sortedWith(compareBy({ it.gone == null }, { it.name?.lowercase() ?: "" })).forEach { s ->
+        shown.sortedWith(compareBy({ it.gone == null }, { order[it.channel] ?: Int.MAX_VALUE })).forEach { s ->
             Row(
                 Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,

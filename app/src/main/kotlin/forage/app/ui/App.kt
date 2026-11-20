@@ -62,6 +62,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
@@ -188,13 +189,19 @@ private val TABS = listOf(
 private fun Screens(model: AppModel, onImport: () -> Unit) {
     // The library's dialogs open from video pages and other screens too.
     LibraryDialogs(model)
+    // Each screen keeps its scroll position while a video page or another screen is in front.
+    val saved = rememberSaveableStateHolder()
     model.videoPage?.let { return VideoPageScreen(model, it) }
-    if (model.searchShown) return SearchScreen(model)
-    when (model.screen) {
-        Screen.HOME -> HomeScreen(model, onImport)
-        Screen.DISCOVER -> DiscoverScreen(model)
-        Screen.SUBSCRIPTIONS -> SubscriptionsScreen(model)
-        Screen.LIBRARY -> LibraryScreen(model, onImport)
+    val vault = if (model.isPrivate) "private" else "plain"
+    if (model.searchShown) return saved.SaveableStateProvider("$vault/search") { SearchScreen(model) }
+    val key = vault + "/" + if (model.screen == Screen.LIBRARY) "library/${model.libraryView}/${model.currentSource.label}/${model.openPlaylistName}" else model.screen.name
+    saved.SaveableStateProvider(key) {
+        when (model.screen) {
+            Screen.HOME -> HomeScreen(model, onImport)
+            Screen.DISCOVER -> DiscoverScreen(model)
+            Screen.SUBSCRIPTIONS -> SubscriptionsScreen(model)
+            Screen.LIBRARY -> LibraryScreen(model, onImport)
+        }
     }
 }
 

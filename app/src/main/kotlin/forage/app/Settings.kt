@@ -42,6 +42,11 @@ class Settings(private val file: File?, copyOf: Settings? = null) {
         get() = properties.getProperty("search.used", "false").toBoolean()
         set(value) = set("search.used", value.toString())
 
+    /** How the people you follow are ordered, by [FollowSort] name. */
+    var followSort: String?
+        get() = properties.getProperty("subscriptions.sort")
+        set(value) = if (value == null) Unit.also { remove("subscriptions.sort") } else set("subscriptions.sort", value)
+
     var libraryGrid: Boolean
         get() = properties.getProperty("library.grid", "false").toBoolean()
         set(value) = set("library.grid", value.toString())

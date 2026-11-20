@@ -131,6 +131,9 @@ data class LaterItem(
     val savedAt: Instant,
 )
 
+/** How the people you follow are ordered, along the top of the subscriptions and in Manage. */
+enum class FollowSort(val label: String) { NAME("Name"), LATEST("Latest upload"), FOLLOWED("Recently followed") }
+
 /** How a playlist is ordered: its own order (which can be changed), or by when added or length. */
 enum class PlaylistSort(val label: String, val shortLabel: String) {
     CUSTOM("Your order", "Order"), RECENT("Recently added", "Recent"), SHORTEST("Shortest first", "Shortest"),
@@ -352,6 +355,59 @@ class AppModel(
         private set
     var checkingFeeds by mutableStateOf(false)
         private set
+    var followSort by mutableStateOf(settings.followSort?.let { n -> FollowSort.entries.firstOrNull { it.name == n } } ?: FollowSort.NAME)
+        private set
+
+    fun sortFollowing(sort: FollowSort) {
+        settings.followSort = sort.name
+        followSort = sort
+    }
+
+    /** Everyone followed, in the chosen order. */
+    val sortedFollowing: List<FollowedChannel>
+        get() = when (followSort) {
+            FollowSort.NAME -> following.sortedBy { it.name?.lowercase() ?: "" }
+            FollowSort.FOLLOWED -> following.sortedByDescending { it.followedAt ?: Instant.MIN }
+            FollowSort.LATEST -> {
+                val latest = HashMap<PlatformId, Instant>()
+                for (u in uploads) {
+                    val c = u.video.channel ?: continue
+                    val at = u.video.uploadedAt ?: u.foundAt
+                    if (latest[c]?.isBefore(at) != false) latest[c] = at
+                }
+                following.sortedWith(compareByDescending<FollowedChannel> { latest[it.channel] ?: Instant.MIN }.thenBy { it.name?.lowercase() ?: "" })
+            }
+        }
+
+    /** Pictures of channels on video pages, also of ones nobody follows, as looked up. */
+    var channelPictures by mutableStateOf<Map<PlatformId, String?>>(emptyMap())
+        private set
+
+    /** The picture of a channel, if one is known: from following it, or looked up for a video page. */
+    fun pictureOf(channel: PlatformId?): String? =
+        channel?.let { c -> following.firstOrNull { it.channel == c }?.avatarUrl ?: channelPictures[c] }
+
+    /** Looks up the pictures of a video page's channels that aren't known yet, once a week at most. */
+    private fun lookUpPictures(page: VideoPage) {
+        val wanted = page.creators.mapNotNull { it.id }.filter { c ->
+            following.none { it.channel == c && it.avatarUrl != null } && c !in channelPictures
+        }
+        for (c in wanted) {
+            val known = library.channelPicture(c)
+            if (known != null && known.second.isAfter(Instant.now().minus(java.time.Duration.ofDays(7)))) {
+                channelPictures = channelPictures + (c to known.first)
+                continue
+            }
+            val url = try {
+                source.channelPicture(c)
+            } catch (e: SourceException) {
+                known?.first
+            }
+            library.rememberChannelPicture(c, url)
+            channelPictures = channelPictures + (c to url)
+        }
+    }
+
     /** The channel the subscriptions are narrowed to, if any. */
     var feedChannel by mutableStateOf<PlatformId?>(null)
     /** True while the subscriptions show the list of who you follow, to change it. */
@@ -658,6 +714,7 @@ class AppModel(
         updatePage(id) { it.copy(following = followed(it)) }
         if (!fetch || videoStack.none { it.id == id && it.details == null }) {
             updatePage(id) { it.copy(loading = false) }
+            videoStack.lastOrNull { it.id == id }?.let(::lookUpPictures)
             return
         }
         val outcome = MetadataFetcher(source, cache).fetch(id)
@@ -670,6 +727,7 @@ class AppModel(
             }
         }
         updatePage(id) { it.copy(following = followed(it)) }
+        videoStack.lastOrNull { it.id == id }?.let(::lookUpPictures)
     }
 
     private fun followed(page: VideoPage): Set<PlatformId> = page.creators.mapNotNull { it.id }.filterTo(HashSet(), library::follows)

@@ -115,6 +115,7 @@ fun LaterScreen(model: AppModel) {
         }
         Box(Modifier.weight(1f)) {
             val listState = rememberLazyListState()
+            ScrollToTopOn(model.laterSort, listState)
             // Room for the scrollbar in a window; a phone has none.
             val end = if (LocalCompact.current) 0.dp else 16.dp
             LazyColumn(state = listState, contentPadding = PaddingValues(end = end, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -187,6 +188,7 @@ fun PlaylistScreen(model: AppModel) {
                 ReorderList(model, items)
             } else {
                 val listState = rememberLazyListState()
+                ScrollToTopOn(model.playlistSort, listState)
                 LazyColumn(state = listState, contentPadding = PaddingValues(end = scrollbarGap(), bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     itemsIndexed(items, key = { _, it -> it.id.toString() }) { index, item ->
                         val actions = QueueActions.playlist(model, item)

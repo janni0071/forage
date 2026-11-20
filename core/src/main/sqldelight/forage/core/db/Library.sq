@@ -48,6 +48,13 @@ CREATE TABLE subscription (
     gone TEXT                -- why the platform no longer has the channel, when it doesn't
 );
 
+-- Channels' pictures for video pages, also of channels nobody follows.
+CREATE TABLE channel_picture (
+    channel_id TEXT NOT NULL PRIMARY KEY,
+    url TEXT,                -- null when the platform had none
+    checked_at INTEGER NOT NULL
+);
+
 -- The latest uploads of each followed channel, as its feed listed them.
 CREATE TABLE subscription_video (
     channel_id TEXT NOT NULL,
@@ -238,6 +245,12 @@ WHERE channel_id = :channel_id;
 
 markSubscriptionGone:
 UPDATE subscription SET gone = :reason, checked_at = :now WHERE channel_id = :channel_id;
+
+selectChannelPicture:
+SELECT * FROM channel_picture WHERE channel_id = ?;
+
+upsertChannelPicture:
+INSERT OR REPLACE INTO channel_picture VALUES (?, ?, ?);
 
 markSubscriptionsSeen:
 UPDATE subscription SET seen_at = ? WHERE checked_at IS NOT NULL;

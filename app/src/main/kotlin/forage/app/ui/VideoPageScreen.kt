@@ -317,7 +317,7 @@ private fun CreatorRow(model: AppModel, creator: Creator, following: Boolean) {
     val name = creator.name
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         // Their picture where it's known: for those you follow, from their channel page.
-        Avatar(model, name, model.following.firstOrNull { it.channel == creator.id }?.avatarUrl, 40.dp)
+        Avatar(model, name, model.pictureOf(creator.id), 40.dp)
         Spacer(Modifier.width(12.dp))
         // The name takes the room, so Follow buttons line up at the right, one under the other.
         Column(Modifier.weight(1f)) {

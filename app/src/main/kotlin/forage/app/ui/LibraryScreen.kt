@@ -139,6 +139,7 @@ private fun LibraryList(model: AppModel) {
             } else if (bigRows(model)) {
                 // Liked and the history are for playing and keeping: big rows with those buttons.
                 val listState = rememberLazyListState()
+                ScrollToTopOn("${model.listSort}/${model.stateFilter}/${model.query}", listState)
                 val history = model.currentSource == LibrarySource.History
                 LazyColumn(
                     state = listState,
@@ -158,6 +159,7 @@ private fun LibraryList(model: AppModel) {
                 Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             } else if (model.libraryGrid) {
                 val gridState = rememberLazyGridState()
+                ScrollToTopOn("${model.listSort}/${model.stateFilter}/${model.query}", gridState)
                 LazyVerticalGrid(
                     // Two columns on a phone, as many as fit in a window.
                     columns = GridCells.Adaptive(minSize = if (compact) 150.dp else 210.dp),
@@ -174,6 +176,7 @@ private fun LibraryList(model: AppModel) {
                 Scrollbar(gridState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             } else {
                 val listState = rememberLazyListState()
+                ScrollToTopOn("${model.listSort}/${model.stateFilter}/${model.query}", listState)
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(end = scrollbarGap()), contentPadding = PaddingValues(bottom = 96.dp)) {
                     if (compact) item { header() }
                     items(visible, key = { it.id.toString() }) { row -> VideoRow(model, row) }

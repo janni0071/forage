@@ -115,7 +115,10 @@ Order of work, each step usable on its own:
    - **When:** opening Home or Subscriptions checks the channels not checked in the last half hour, one after another with a short pause, in the background; Refresh checks all. A channel the platform has removed is marked gone and asked again weekly.
    - **New:** an upload found after the subscriptions were last visited (not by its upload date, which YouTube gives roughly). A channel's first check only fills its list, so a whole back catalogue never arrives as new. Leaving the tab marks everything seen.
    - **Screens:** Subscriptions lists everyone's uploads newest first, with no ranking, split into New and Earlier; each with Play, Add to playlist and Save for later. The people along the top, with a dot for new uploads, narrow the list to one. Manage lists who you follow, the gone ones first, to unfollow (or follow again). Home shows the newest uploads in a row; the tab shows how many are new.
-   - **Pictures:** YouTube avatars from the channel page, on Subscriptions, Home and video pages. Performer pictures are still initials: the site's performer list needs trying first.
+   - **Pictures:** YouTube avatars from the channel page, on Subscriptions, Home and video pages; for channels nobody follows, a video page looks the picture up (remembered for a week; database version 14). Performer pictures are still initials: the site's performer list needs trying first.
+   - **Order:** the people along the top and in Manage follow a chosen order: by name, by latest upload, or most recently followed (kept in settings).
+   - **Performers the API doesn't list** (amateur models are often only in their videos' tags): after the performer filter, a name search by newest and by relevance, keeping videos that list the performer or carry their name as a tag.
+   - Lists keep their scroll position while a video page is in front, and start at the top when their order or filter changes.
 
 Sync (M4) follows after these.
 

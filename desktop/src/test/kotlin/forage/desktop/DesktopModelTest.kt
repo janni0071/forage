@@ -525,4 +525,34 @@ class DesktopModelTest {
             m.close()
         }
     }
+
+    @Test
+    fun `the people you follow can be ordered, and video pages look up channel pictures`() {
+        var asked = 0
+        val pictures = object : ExtractorSource by offline {
+            override fun channelPicture(channel: PlatformId): String? = "https://img/${channel.id}.jpg".also { asked++ }
+        }
+        val m = DesktopModel(dir.resolve("pictures"), CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined) { pictures }
+        try {
+            m.library.follow(id("UCbee"), "Bee")
+            Thread.sleep(1_100)
+            m.library.follow(id("UCant"), "Ant")
+            runBlocking { m.reload() }
+            assertEquals(listOf("Ant", "Bee"), m.sortedFollowing.map { it.name })
+            m.sortFollowing(FollowSort.FOLLOWED)
+            assertEquals(listOf("Ant", "Bee"), m.sortedFollowing.map { it.name })
+            m.sortFollowing(FollowSort.NAME)
+            assertEquals("NAME", Settings(dir.resolve("pictures/settings.properties")).followSort)
+
+            // A channel nobody follows gets its picture looked up once, then remembered.
+            m.cache.put(VideoDetails(forage.core.source.VideoMetadata(id("v1"), "A video", "", emptyList(), 60, id("UCnew"), "New channel", null, null, null, false), emptyList()))
+            m.showVideo(id("v1"))
+            assertEquals("https://img/UCnew.jpg", m.pictureOf(id("UCnew")))
+            m.closeVideo()
+            m.showVideo(id("v1"))
+            assertEquals(1, asked)
+        } finally {
+            m.close()
+        }
+    }
 }

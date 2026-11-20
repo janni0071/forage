@@ -510,3 +510,30 @@ fun formatTotal(seconds: Long): String {
     val m = (seconds % 3600 + 59) / 60
     return if (h > 0) "$h h $m min" else "$m min"
 }
+
+/**
+ * Starts a list at the top when [order] changes (another sort or filter): left alone, a list keeps
+ * the video that was at the top in view, wherever the new order puts it. Coming back to a list
+ * keeps its place.
+ */
+@Composable
+fun ScrollToTopOn(order: Any, state: androidx.compose.foundation.lazy.LazyListState) {
+    var last by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(order.toString()) }
+    LaunchedEffect(order) {
+        if (order.toString() != last) {
+            last = order.toString()
+            state.scrollToItem(0)
+        }
+    }
+}
+
+@Composable
+fun ScrollToTopOn(order: Any, state: androidx.compose.foundation.lazy.grid.LazyGridState) {
+    var last by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(order.toString()) }
+    LaunchedEffect(order) {
+        if (order.toString() != last) {
+            last = order.toString()
+            state.scrollToItem(0)
+        }
+    }
+}

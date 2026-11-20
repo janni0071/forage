@@ -97,27 +97,41 @@ class PornhubSource(
     }
 
     /**
-     * A performer's newest videos: the API's performer filter sorted by newest, keeping only
-     * videos that list them (a name search also finds videos that merely mention it). Where the
-     * filter finds nothing, a plain search for the name, filtered the same way.
+     * A performer's newest videos. The API's performer filter covers listed pornstars; amateur
+     * models are often only in their videos' tags. So: the filter sorted by newest, then a search
+     * for the name by newest and by relevance (a name of common words finds mostly others' videos
+     * among the newest), keeping only videos that list the performer or carry their name as a tag.
      */
     override fun channelFeed(channel: PlatformId, name: String?): ChannelFeed {
         require(channel.platform == platform) { "Not a $displayName performer: $channel" }
         val performer = name?.trim()?.takeIf { it.isNotEmpty() }
             ?: throw SourceException("Following someone on $displayName needs their name")
+        val wanted = performer.lowercase()
+        val asTag = setOf(wanted, wanted.replace(' ', '-'), wanted.replace(" ", ""))
         fun find(vararg params: Pair<String, String>): List<VideoStub> {
-            val json = request("videos of $performer", "search", *params, "ordering" to "newest")
+            val json = request("videos of $performer", "search", *params)
             val videos = json["videos"] as? JsonArray ?: run {
                 if (isNotFound(json)) return emptyList()
                 throw apiError(json, "videos of $performer", notFoundIsGone = false)
             }
             return videos.mapNotNull { (it as? JsonObject) }
-                .filter { v -> v.names("pornstars", "pornstar_name").any { it.equals(performer, ignoreCase = true) } }
+                .filter { v ->
+                    v.names("pornstars", "pornstar_name").any { it.lowercase() == wanted } ||
+                        v.names("tags", "tag_name").any { it.lowercase() in asTag }
+                }
                 .mapNotNull(::parse)
-                .map { VideoStub(it.id, it.title, channel = null, it.channelName, it.durationSeconds, isShort = false, it.uploadedAt, it.tags) }
+                .map { VideoStub(it.id, it.title, channel = null, it.channelName ?: performer, it.durationSeconds, isShort = false, it.uploadedAt, it.tags) }
         }
-        val videos = find("stars[]" to performer).ifEmpty { find("search" to performer) }
-        return ChannelFeed(videos.sortedByDescending { it.uploadedAt }, name = performer)
+        val found = LinkedHashMap<PlatformId, VideoStub>()
+        fun add(videos: List<VideoStub>) = videos.forEach { found.putIfAbsent(it.id, it) }
+        add(find("stars[]" to performer, "ordering" to "newest"))
+        if (found.size < ENOUGH_UPLOADS) add(find("search" to performer, "ordering" to "newest"))
+        var page = 1
+        while (found.size < ENOUGH_UPLOADS && page <= RELEVANCE_PAGES) {
+            add(find("search" to performer, "page" to "$page"))
+            page++
+        }
+        return ChannelFeed(found.values.sortedByDescending { it.uploadedAt }, name = performer)
     }
 
     override fun watchUrl(id: PlatformId): String {
@@ -246,6 +260,12 @@ class PornhubSource(
 
     companion object {
         const val PLATFORM = "pornhub"
+
+        /** A performer's feed stops looking once it has this many videos. */
+        private const val ENOUGH_UPLOADS = 20
+
+        /** How many pages of a name search by relevance a performer's feed may look through. */
+        private const val RELEVANCE_PAGES = 2
 
         /**
          * A performer as something to follow: the site has no ids for them in its API, only names,

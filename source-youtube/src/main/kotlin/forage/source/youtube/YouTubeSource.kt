@@ -78,10 +78,19 @@ class YouTubeSource : ExtractorSource {
         ChannelFeed(
             videos = videos.map { it.copy(channel = it.channel ?: channel, channelName = it.channelName ?: info.name) },
             name = info.name?.takeIf { it.isNotBlank() },
-            // A small picture is plenty for a round badge.
-            avatarUrl = info.avatars.filter { it.width in 1..240 }.maxByOrNull { it.width }?.url ?: info.avatars.firstOrNull()?.url,
+            avatarUrl = smallest(info.avatars),
         )
     }
+
+    /** The channel page, for its picture alone. */
+    override fun channelPicture(channel: PlatformId): String? = guarded("channel ${channel.id}") {
+        if (channel.platform != platform) return@guarded null
+        smallest(ChannelInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/channel/${channel.id}").avatars)
+    }
+
+    /** A small picture is plenty for a round badge. */
+    private fun smallest(images: List<org.schabi.newpipe.extractor.Image>): String? =
+        images.filter { it.width in 1..240 }.maxByOrNull { it.width }?.url ?: images.firstOrNull()?.url
 
     /** A link in any of YouTube's shapes, a bare 11-character ID, or `youtube:<id>`. */
     override fun parseLink(text: String): PlatformId? {
