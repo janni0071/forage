@@ -559,4 +559,34 @@ class DesktopModelTest {
             m.close()
         }
     }
+
+    @Test
+    fun `a followed performer named only in a video's tags is credited, and missing pictures say why`() {
+        val noPage = object : ExtractorSource by offline {
+            override fun channelPicture(channel: PlatformId): String? = throw SourceException.NotAvailable("No profile page found")
+        }
+        val m = DesktopModel(dir.resolve("tags"), CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined) { noPage }
+        try {
+            val performer = forage.source.pornhub.PornhubSource.performerId("Candy Love")
+            m.library.follow(performer, "Candy Love")
+            runBlocking { m.reload() }
+            val video = PlatformId("pornhub", "ph0002")
+            m.cache.put(
+                VideoDetails(
+                    forage.core.source.VideoMetadata(video, "A video", "", listOf("pov", "candy love"), 600, null, null, null, null, null, false),
+                    emptyList(),
+                )
+            )
+            m.showVideo(video, "A video")
+            assertEquals(listOf(Creator(performer, "Candy Love")), m.videoPage!!.creators)
+            assertEquals(setOf(performer), m.videoPage!!.following)
+            assertEquals("no profile page found for them", m.missingPicture(performer))
+
+            m.mark(listOf(video), VideoState.LIKED)
+            m.selectSource(LibrarySource.Liked)
+            assertEquals("Candy Love", m.rows.single().channelName)
+        } finally {
+            m.close()
+        }
+    }
 }

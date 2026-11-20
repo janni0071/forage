@@ -242,11 +242,13 @@ private fun ManageList(model: AppModel) {
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(s.name ?: s.channel.id, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // Why someone shows a letter, where Forage knows: the way to tell what to fix.
+                    val missing = if (s.gone == null) model.missingPicture(s.channel) else null
                     Text(
                         when {
                             s.gone != null -> goneText(s.gone.orEmpty())
-                            s.channel.id.startsWith("pornstar/") -> "Performer"
-                            else -> "Channel"
+                            else -> (if (s.channel.id.startsWith("pornstar/")) "Performer" else "Channel") +
+                                (missing?.let { " · no picture: $it" } ?: "")
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = if (s.gone != null) c.error else c.onSurfaceVariant,

@@ -72,18 +72,47 @@ class Thumbnails(
     private val frames = Collections.synchronizedMap(object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>) = size > 160
     })
-    private val failedFrames = Collections.synchronizedSet(HashSet<String>())
+    /** When each failed image (by address) may be tried again, in [clock] time. */
+    private val failedFrames = Collections.synchronizedMap(HashMap<String, Long>())
 
-    /** One preview frame by its address, kept in memory only; null when it won't load. */
+    /** Why an image by address didn't load, e.g. "the image server refused it (HTTP 403 from img.example)". */
+    private val frameProblems = androidx.compose.runtime.mutableStateMapOf<String, String>()
+
+    fun pictureProblem(url: String): String? = frameProblems[url]
+
+    /**
+     * One image by its address (a preview frame, someone's picture), kept in memory only; null
+     * when it won't load. A failed one rests for [retryAfter], then may be tried again.
+     */
     suspend fun frame(url: String): ImageBitmap? {
         frames[url]?.let { return it }
-        if (url in failedFrames) return null
+        failedFrames[url]?.let { until -> if (clock() < until) return null }
+        var problem: String? = null
         val image = permits.withPermit {
             withContext(Dispatchers.IO) {
-                runCatching { get(url, 15_000).second?.let(decodeImage) }.getOrNull()
+                try {
+                    val (status, bytes) = get(url, 15_000)
+                    if (bytes == null) {
+                        problem = (if (status == 403 || status == 401) "the image server refused it" else "the image server answered") +
+                            " (HTTP $status from ${host(url) ?: "?"})"
+                        null
+                    } else {
+                        runCatching { decodeImage(bytes) }.getOrElse { problem = "it isn't an image this device can show"; null }
+                    }
+                } catch (e: Exception) {
+                    problem = "${host(url) ?: "the image server"} couldn't be reached"
+                    null
+                }
             }
         }
-        if (image == null) failedFrames += url else frames[url] = image
+        if (image == null) {
+            failedFrames[url] = clock() + retryAfter.toNanos()
+            problem?.let { frameProblems[url] = it }
+        } else {
+            frames[url] = image
+            failedFrames -= url
+            frameProblems -= url
+        }
         return image
     }
 

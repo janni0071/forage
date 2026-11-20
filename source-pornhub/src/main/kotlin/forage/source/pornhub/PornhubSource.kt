@@ -142,6 +142,7 @@ class PornhubSource(
     override fun channelPicture(channel: PlatformId): String? {
         if (channel.platform != platform || !channel.id.startsWith("pornstar/")) return null
         val slug = channel.id.removePrefix("pornstar/")
+        var pageFound = false
         for (kind in listOf("pornstar", "model", "channels")) {
             waitForTurn()
             val response = try {
@@ -153,8 +154,10 @@ class PornhubSource(
                 throw SourceException.Blocked("$displayName refused the page of $slug (HTTP ${response.status})")
             }
             if (response.status != 200) continue
+            pageFound = true
             pictureIn(response.body)?.let { return it }
         }
+        if (!pageFound) throw SourceException.NotAvailable("No profile page found for $slug")
         return null
     }
 

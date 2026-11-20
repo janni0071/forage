@@ -163,6 +163,8 @@ data class VideoPage(
     /** True when the platform says the video is gone. */
     val gone: Boolean = false,
     val state: VideoState? = null,
+    /** Performers you follow whose name is only among the video's tags (amateur models often are). */
+    val taggedCreators: List<Creator> = emptyList(),
     val inLibrary: VideoInLibrary = VideoInLibrary(),
     /** Which of [creators] the library follows. */
     val following: Set<PlatformId> = emptySet(),
@@ -185,8 +187,9 @@ data class VideoPage(
             if (id.platform == PornhubSource.PLATFORM) {
                 // The details list every performer; lists before them carry the first two.
                 val performers = (details?.metadata?.extra?.get("performers") ?: name).orEmpty()
-                return performers.split(", ").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                val listed = performers.split(", ").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
                     .map { Creator(PornhubSource.performerId(it), it) }
+                return listed + taggedCreators.filter { t -> listed.none { it.id == t.id } }
             }
             return listOfNotNull(name?.let { Creator(null, it) })
         }
@@ -397,28 +400,53 @@ class AppModel(
     /** Looks up the pictures of a video page's channels that aren't known yet, once a week at most. */
     private fun lookUpPictures(page: VideoPage) = lookUpPictures(page.creators.mapNotNull { it.id })
 
-    private fun lookUpPictures(channels: List<PlatformId>) {
+    /**
+     * Looks up pictures not known yet. One found is kept for a week, "none" for a day; [force]
+     * (Refresh) asks again regardless. Why one is missing goes to [pictureProblems].
+     */
+    private fun lookUpPictures(channels: List<PlatformId>, force: Boolean = false) {
         val wanted = channels.filter { c ->
-            following.none { it.channel == c && it.avatarUrl != null } && c !in channelPictures
+            following.none { it.channel == c && it.avatarUrl != null } && (force || c !in channelPictures)
         }
         for (c in wanted) {
             val known = library.channelPicture(c)
-            if (known != null && known.second.isAfter(Instant.now().minus(java.time.Duration.ofDays(7)))) {
+            val keep = java.time.Duration.ofDays(if (known?.first != null) 7 else 1)
+            if (!force && known != null && known.second.isAfter(Instant.now().minus(keep))) {
                 channelPictures = channelPictures + (c to known.first)
                 continue
             }
             val url = try {
-                source.channelPicture(c)
+                source.channelPicture(c).also { if (it == null) pictureProblems = pictureProblems + (c to "their page shows no picture Forage can find") }
             } catch (e: SourceException.Blocked) {
                 // Refusing for now: the rest wait for another time, and this one isn't marked as having none.
                 known?.first?.let { channelPictures = channelPictures + (c to it) }
+                pictureProblems = pictureProblems + (c to "the site refused to show their page")
                 return
+            } catch (e: SourceException.NotAvailable) {
+                pictureProblems = pictureProblems + (c to "no profile page found for them")
+                null
             } catch (e: SourceException) {
+                pictureProblems = pictureProblems + (c to (e.message ?: "the lookup failed"))
                 known?.first
             }
+            if (url != null) pictureProblems = pictureProblems - c
             library.rememberChannelPicture(c, url)
             channelPictures = channelPictures + (c to url)
         }
+    }
+
+    /** Goes up with each Refresh, so pictures that didn't load are tried again. */
+    var pictureAttempt by mutableStateOf(0)
+        private set
+
+    /** Why someone's picture is missing, from the last lookup, for Manage. */
+    var pictureProblems by mutableStateOf<Map<PlatformId, String>>(emptyMap())
+        private set
+
+    /** Why someone followed shows a letter instead of a picture, if Forage knows. */
+    fun missingPicture(channel: PlatformId): String? {
+        val url = pictureOf(channel) ?: return pictureProblems[channel]
+        return thumbnails.pictureProblem(url)?.let { "the picture didn't load: $it" }
     }
 
     /** The channel the subscriptions are narrowed to, if any. */
@@ -461,6 +489,7 @@ class AppModel(
             return
         }
         checkingFeeds = true
+        if (force) pictureAttempt++
         launchQuiet {
             try {
                 inBackground(if (due.size == 1) "Checking 1 channel for new uploads" else "Checking ${due.size} channels for new uploads") {
@@ -485,7 +514,7 @@ class AppModel(
                     loadUploads()
                     following = library.following()
                     // Those whose feed brings no picture (performers) get theirs from their page.
-                    lookUpPictures(following.filter { it.avatarUrl == null && it.gone == null }.map { it.channel })
+                    lookUpPictures(following.filter { it.avatarUrl == null && it.gone == null }.map { it.channel }, force)
                     when {
                         blocked != null -> message = "Stopped checking subscriptions: $blocked"
                         failed > 0 && force -> message = "Couldn't check $failed of ${due.size} channels; the rest are up to date"
@@ -728,7 +757,11 @@ class AppModel(
                 inLibrary = library.about(id),
             )
         }
-        updatePage(id) { it.copy(following = followed(it)) }
+        updatePage(id) { page ->
+            // The performers from the tags first: who you follow among them depends on them.
+            val tagged = page.copy(taggedCreators = taggedCreators(page.details?.metadata?.tags.orEmpty(), id))
+            tagged.copy(following = followed(tagged))
+        }
         if (!fetch || videoStack.none { it.id == id && it.details == null }) {
             updatePage(id) { it.copy(loading = false) }
             videoStack.lastOrNull { it.id == id }?.let(::lookUpPictures)
@@ -737,8 +770,8 @@ class AppModel(
         val outcome = MetadataFetcher(source, cache).fetch(id)
         updatePage(id) { page ->
             when (outcome) {
-                is FetchOutcome.Fetched -> page.copy(details = outcome.details, loading = false)
-                is FetchOutcome.Cached -> page.copy(details = outcome.details, loading = false)
+                is FetchOutcome.Fetched -> page.copy(details = outcome.details, loading = false, taggedCreators = taggedCreators(outcome.details.metadata.tags, id))
+                is FetchOutcome.Cached -> page.copy(details = outcome.details, loading = false, taggedCreators = taggedCreators(outcome.details.metadata.tags, id))
                 is FetchOutcome.Unavailable -> page.copy(loading = false, gone = true, problem = outcome.reason)
                 is FetchOutcome.Failed -> page.copy(loading = false, problem = outcome.error.message ?: "The platform didn't answer")
             }
@@ -746,6 +779,18 @@ class AppModel(
         updatePage(id) { it.copy(following = followed(it)) }
         videoStack.lastOrNull { it.id == id }?.let(::lookUpPictures)
     }
+
+    /** Performers you follow (on the video's platform) whose name is among [tags]. */
+    private fun taggedCreators(tags: List<String>, video: PlatformId): List<Creator> {
+        if (video.platform != PornhubSource.PLATFORM || tags.isEmpty()) return emptyList()
+        val given = tags.mapTo(HashSet()) { it.lowercase() }
+        return following.filter { it.channel.platform == video.platform && it.channel.id.startsWith("pornstar/") }
+            .filter { f -> f.name?.let { n -> nameVariants(n).any { it in given } } == true }
+            .map { Creator(it.channel, it.name!!) }
+    }
+
+    /** How a name can appear as a tag: "candy love", "candy-love", "candylove". */
+    private fun nameVariants(name: String): Set<String> = name.trim().lowercase().let { setOf(it, it.replace(' ', '-'), it.replace(" ", "")) }
 
     private fun followed(page: VideoPage): Set<PlatformId> = page.creators.mapNotNull { it.id }.filterTo(HashSet(), library::follows)
 
@@ -1695,7 +1740,8 @@ class AppModel(
             LibraryRow(
                 id = v.video,
                 title = m?.title ?: v.title ?: known?.title,
-                channelName = m?.channelName ?: v.channelName ?: known?.channelName ?: m?.extra?.get("performers"),
+                channelName = m?.channelName ?: v.channelName ?: known?.channelName ?: m?.extra?.get("performers")
+                    ?: m?.let { taggedCreators(it.tags, it.id).firstOrNull()?.name },
                 watchCount = v.watchCount,
                 lastSeen = v.lastWatched,
                 durationSeconds = m?.durationSeconds ?: known?.durationSeconds,

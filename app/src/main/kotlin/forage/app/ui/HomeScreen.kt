@@ -159,7 +159,15 @@ fun HomeScreen(model: AppModel, onImport: () -> Unit) {
 @Composable
 fun Avatar(model: AppModel, name: String, url: String?, size: androidx.compose.ui.unit.Dp) {
     var image by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    LaunchedEffect(url) { if (url != null && model.showThumbnails) image = model.thumbnails.frame(url) }
+    LaunchedEffect(url, model.pictureAttempt) {
+        if (url == null || !model.showThumbnails) return@LaunchedEffect
+        // A refused or broken image often loads on a later try.
+        repeat(3) { attempt ->
+            if (attempt > 0) kotlinx.coroutines.delay(model.thumbnails.retryAfter.toMillis() + 500)
+            image = model.thumbnails.frame(url)
+            if (image != null) return@LaunchedEffect
+        }
+    }
     val loaded = image
     if (loaded == null) return Initial(name, size)
     androidx.compose.foundation.Image(
