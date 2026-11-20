@@ -80,7 +80,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import forage.core.profile.VideoState
 import forage.app.AppModel
-import forage.app.HistorySort
+import forage.app.sorts
 import forage.app.LibraryDialog
 import forage.app.LibraryView
 import androidx.compose.foundation.lazy.LazyRow
@@ -179,52 +179,97 @@ private fun emptyListText(model: AppModel): String = when {
 @Composable
 private fun LibraryHeader(model: AppModel, visibleCount: Int) {
     val compact = LocalCompact.current
+    val source = model.currentSource
+    val missing = model.rows.count { !it.hasMetadata }
     Column {
         BackLink("Library", model::back)
-        ScreenHeader(model.currentSource.label, null) {
-            if (compact) {
-                // A phone searches with the bar at the bottom; the view switch and adding share a row here.
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ViewToggle(model)
-                    OutlinedIconButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.size(ControlHeight)) {
-                        Icon(Icons.Outlined.Add, contentDescription = "Add by link")
-                    }
+        ScreenHeader(source.label, listSubtitle(model)) {
+            // A phone searches with the bar at the bottom.
+            if (!compact) SearchField(model.query, { model.query = it }, "Search titles and channels", Modifier.width(280.dp))
+            ViewToggle(model)
+            // A phone has no room for them beside the sort: the history's switches come up here.
+            if (compact && source == LibrarySource.History) {
+                OutlinedIconButton(
+                    onClick = { model.changeRecordHistory(!model.recordHistory) },
+                    shape = RoundedCornerShape(12.dp), modifier = Modifier.size(ControlHeight),
+                ) {
+                    Icon(
+                        if (model.recordHistory) Icons.Outlined.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (model.recordHistory) "Pause history" else "Resume history",
+                    )
                 }
-            } else {
-                SearchField(model.query, { model.query = it }, "Search titles and channels", Modifier.width(300.dp))
-
-                ViewToggle(model)
-                OutlinedButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
-                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Add by link")
+                OutlinedIconButton(
+                    onClick = { model.libraryDialog = LibraryDialog.ClearHistory },
+                    shape = RoundedCornerShape(12.dp), modifier = Modifier.size(ControlHeight),
+                ) { Icon(Icons.Outlined.DeleteOutline, contentDescription = "Clear history") }
+            }
+            if (source == LibrarySource.Liked) {
+                if (compact) {
+                    OutlinedIconButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.size(ControlHeight)) {
+                        Icon(Icons.Outlined.Link, contentDescription = "Add by link")
+                    }
+                } else {
+                    OutlinedButton(onClick = { model.addDialogOpen = true }, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
+                        Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add by link")
+                    }
                 }
             }
-            OutlinedButton(onClick = model::fetchDetails, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
-                Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    when {
-                        compact || model.selection.isEmpty() -> "Fetch details"
-                        else -> "Fetch details of selection"
-                    }
+            // Only where something lacks details: a title, a length, and what recommendations read.
+            if (missing > 0 || model.selection.isNotEmpty()) {
+                OutlinedButton(onClick = model::fetchDetails, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
+                    Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        when {
+                            model.selection.isNotEmpty() -> if (compact) "Fetch details" else "Fetch details of selection"
+                            else -> "Fetch details (%,d)".format(minOf(missing, forage.app.AppModel.FETCH_BATCH))
+                        },
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        // The order, and the history's own switches, on one line that swipes on a phone.
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (sort in source.sorts()) {
+                FilterChip(
+                    selected = model.listSort == sort,
+                    onClick = { model.sortList(sort) },
+                    label = { Text(sort.label, maxLines = 1) },
+                    shape = RoundedCornerShape(10.dp),
                 )
             }
-        }
-        SourceTabs(model)
-        when (val source = model.currentSource) {
-            LibrarySource.History -> {
-                HistoryTools(model)
-                Filters(model)
+            if (source == LibrarySource.History && !compact) {
+                Spacer(Modifier.width(8.dp))
+                if (model.recordHistory) {
+                    BarButton(Icons.Outlined.Pause, "Pause history") { model.changeRecordHistory(false) }
+                } else {
+                    BarButton(Icons.Filled.PlayArrow, "Resume history") { model.changeRecordHistory(true) }
+                }
+                BarButton(Icons.Outlined.DeleteOutline, "Clear history") { model.libraryDialog = LibraryDialog.ClearHistory }
             }
-            is LibrarySource.Playlist -> {
-                PlaylistTools(model, source.name)
-                Filters(model)
-            }
-            LibrarySource.All -> Filters(model)
-            else -> {}
         }
+        // Mixed lists can be narrowed to what you liked or didn't.
+        if (source == LibrarySource.History || source == LibrarySource.All || source is LibrarySource.Playlist) Filters(model)
         ActionBar(model, visibleCount)
+    }
+}
+
+/** A line about the list on screen. */
+private fun listSubtitle(model: AppModel): String {
+    val n = "%,d videos".format(model.rows.size)
+    return when (model.currentSource) {
+        LibrarySource.Liked -> "$n · recommendations come from these"
+        LibrarySource.History -> if (model.recordHistory) "$n you opened or imported" else "$n · paused: what you open isn't recorded"
+        LibrarySource.NotInterested -> "$n · recommendations steer away from these"
+        LibrarySource.All -> "$n the library knows"
+        is LibrarySource.Playlist -> n
     }
 }
 
@@ -295,97 +340,6 @@ private fun ViewToggle(model: AppModel) {
                 Icon(icon, contentDescription = if (grid) "Grid" else "List", tint = if (on) c.onPrimaryContainer else c.onSurfaceVariant, modifier = Modifier.size(20.dp))
             }
         }
-    }
-}
-
-/** The library's lists: likes, the history, each playlist, what was turned down, and a new playlist. */
-@Composable
-private fun SourceTabs(model: AppModel) {
-    val c = MaterialTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        // Playlists have a page of their own, from the library's overview.
-        for (source in model.sources.filter { it !is LibrarySource.Playlist || it == model.currentSource }) {
-            val selected = source == model.currentSource
-            val (name, count) = when (source) {
-                LibrarySource.Liked -> "Liked" to model.profileSize.toLong()
-                LibrarySource.History -> "History" to null
-                is LibrarySource.Playlist -> source.name to source.size
-                LibrarySource.NotInterested -> "Not interested" to model.notInterestedSize.toLong()
-                LibrarySource.All -> "All videos" to null
-            }
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (selected) c.primaryContainer else c.surfaceContainerLow)
-                    .clickable { model.selectSource(source) }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    name,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                    color = if (selected) c.onPrimaryContainer else c.onSurface,
-                )
-                (count ?: if (selected) model.rows.size.toLong() else null)?.let {
-                    Spacer(Modifier.width(8.dp))
-                    Text("%,d".format(it), style = MaterialTheme.typography.labelMedium, color = if (selected) c.onPrimaryContainer else c.onSurfaceVariant)
-                }
-            }
-        }
-        Row(
-            Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .border(1.dp, c.outlineVariant, RoundedCornerShape(12.dp))
-                .clickable { model.libraryDialog = LibraryDialog.NewPlaylist }
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(horizontal = 14.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Outlined.Add, contentDescription = null, tint = c.onSurfaceVariant, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("New playlist", style = MaterialTheme.typography.labelLarge, color = c.onSurface)
-        }
-    }
-}
-
-/** Sorting, pausing and clearing the history. */
-@Composable
-private fun HistoryTools(model: AppModel) {
-    val c = MaterialTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        for (sort in HistorySort.entries) {
-            FilterChip(
-                selected = model.historySort == sort,
-                onClick = { model.sortHistory(sort) },
-                label = { Text(sort.label, maxLines = 1) },
-                shape = RoundedCornerShape(10.dp),
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        if (model.recordHistory) {
-            BarButton(Icons.Outlined.Pause, "Pause history") { model.changeRecordHistory(false) }
-        } else {
-            Text("Paused", style = MaterialTheme.typography.labelLarge, color = c.error)
-            BarButton(Icons.Filled.PlayArrow, "Resume") { model.changeRecordHistory(true) }
-        }
-        BarButton(Icons.Outlined.DeleteOutline, "Clear history") { model.libraryDialog = LibraryDialog.ClearHistory }
-    }
-}
-
-@Composable
-private fun PlaylistTools(model: AppModel, name: String) {
-    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        BarButton(Icons.Outlined.Edit, "Rename") { model.libraryDialog = LibraryDialog.RenamePlaylist(name) }
-        BarButton(Icons.Outlined.DeleteOutline, "Delete playlist") { model.libraryDialog = LibraryDialog.DeletePlaylist(name) }
     }
 }
 
@@ -550,6 +504,8 @@ private fun ActionBar(model: AppModel, visibleCount: Int) {
             LibrarySource.All -> BarButton(Icons.AutoMirrored.Outlined.Undo, "Clear") { model.markSelected(null) }
         }
     }
+    // On a phone the line appears once something is selected (by its circle or a long press).
+    if (compact && selected == 0) return
     Column(
         Modifier
             .fillMaxWidth()

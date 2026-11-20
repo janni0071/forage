@@ -84,7 +84,15 @@ enum class StateFilter(val label: String) {
     }
 }
 
-enum class HistorySort(val label: String) { RECENT("Recent"), MOST_WATCHED("Most watched") }
+/** How a library list is ordered. "Recent" means liked, watched or added most recently, by list. */
+enum class ListSort(val label: String) { RECENT("Recent"), OLDEST("Oldest"), MOST_WATCHED("Most watched"), SHORTEST("Shortest") }
+
+/** The orders each list offers. */
+fun LibrarySource.sorts(): List<ListSort> = when (this) {
+    LibrarySource.History -> listOf(ListSort.RECENT, ListSort.MOST_WATCHED, ListSort.SHORTEST)
+    LibrarySource.All -> listOf(ListSort.RECENT, ListSort.OLDEST, ListSort.SHORTEST)
+    else -> listOf(ListSort.RECENT, ListSort.OLDEST, ListSort.SHORTEST)
+}
 
 /** The library's dialogs for playlists and the history. */
 sealed interface LibraryDialog {
@@ -653,7 +661,7 @@ class AppModel(
         private set
     var query by mutableStateOf("")
     var stateFilter by mutableStateOf(StateFilter.ALL)
-    var historySort by mutableStateOf(HistorySort.RECENT)
+    var listSort by mutableStateOf(ListSort.RECENT)
         private set
     var libraryDialog by mutableStateOf<LibraryDialog?>(null)
 
@@ -667,8 +675,8 @@ class AppModel(
         message = if (on) "History is on again" else "History paused: videos you open aren't recorded"
     }
 
-    fun sortHistory(sort: HistorySort) {
-        historySort = sort
+    fun sortList(sort: ListSort) {
+        listSort = sort
         launchQuiet { loadRows() }
     }
     var rows by mutableStateOf<List<LibraryRow>>(emptyList())
@@ -754,6 +762,7 @@ class AppModel(
     }
 
     fun selectSource(source: LibrarySource) {
+        if (source != currentSource) listSort = ListSort.RECENT
         currentSource = source
         selection = emptySet()
         launchQuiet { loadRows() }
@@ -910,11 +919,9 @@ class AppModel(
 
     /** Fetches metadata for the selection, or for every undecided-but-relevant profile video when nothing is selected. */
     fun fetchDetails() {
-        val ids = selection.toList().ifEmpty {
-            profiles.entries(profile).map { it.video }.filter { cache.video(it) == null }
-        }
+        val ids = selection.toList().ifEmpty { rows.filter { !it.hasMetadata }.map { it.id }.take(FETCH_BATCH) }
         if (ids.isEmpty()) {
-            message = "Every video you liked or turned down already has its details"
+            message = "Every video here already has its details"
             return
         }
         fetchDetailsOf(ids)
@@ -1441,9 +1448,8 @@ class AppModel(
         profileSize = states.values.count { it == VideoState.LIKED }
         notInterestedSize = states.values.count { it == VideoState.NOT_INTERESTED }
         val videos: List<WatchedVideo> = when (val s = currentSource) {
-            LibrarySource.History -> WatchHistory.select(library.events()).let { watched ->
-                if (historySort == HistorySort.RECENT) watched.sortedByDescending { it.lastWatched ?: Instant.MIN } else watched
-            }
+            // Every list starts most recent first; [listSort] reorders it below.
+            LibrarySource.History -> WatchHistory.select(library.events()).sortedByDescending { it.lastWatched ?: Instant.MIN }
             is LibrarySource.Playlist -> WatchHistory.select(library.events(s.name))
             LibrarySource.All -> {
                 val watched = WatchHistory.select(library.events()).associateBy { it.video }
@@ -1461,7 +1467,14 @@ class AppModel(
             }
         }
         val meta = cache.allMetadata()
-        rows = toRows(videos, states, meta)
+        rows = toRows(videos, states, meta).let { recent ->
+            when (listSort) {
+                ListSort.RECENT -> recent
+                ListSort.OLDEST -> recent.asReversed()
+                ListSort.MOST_WATCHED -> recent.sortedByDescending { it.watchCount }
+                ListSort.SHORTEST -> recent.sortedBy { it.durationSeconds ?: Long.MAX_VALUE }
+            }
+        }
         // Keep the selection to what still exists in this list.
         val ids = rows.mapTo(HashSet()) { it.id }
         selection = selection.filterTo(HashSet()) { it in ids }

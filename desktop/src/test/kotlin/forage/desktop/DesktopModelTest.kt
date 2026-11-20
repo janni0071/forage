@@ -119,7 +119,9 @@ class DesktopModelTest {
         model.selectSource(LibrarySource.History)
         // Most recently watched first.
         assertEquals(listOf("b", "a"), model.rows.map { it.id.id })
-        model.sortHistory(HistorySort.MOST_WATCHED)
+        model.sortList(ListSort.OLDEST)
+        assertEquals(listOf("a", "b"), model.rows.map { it.id.id })
+        model.sortList(ListSort.MOST_WATCHED)
         assertEquals(setOf("a", "b"), model.rows.map { it.id.id }.toSet())
         model.query = "wren"
         assertEquals(listOf(id("a")), model.visibleRows.map { it.id })
