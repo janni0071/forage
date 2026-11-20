@@ -175,4 +175,21 @@ class PornhubSourceTest {
         source.search("b")
         assertEquals(listOf(Duration.ofMillis(400)), waits)
     }
+
+    @Test
+    fun `a profile page's picture is read from its preview image, or else its avatar`() {
+        assertEquals(
+            "https://img.example/p/1.jpg",
+            PornhubSource.pictureIn("""<head><meta property="og:image" content="https://img.example/p/1.jpg" /></head>"""),
+        )
+        assertEquals(
+            "https://img.example/p/2.jpg?a=1&b=2",
+            PornhubSource.pictureIn("""<meta content="https://img.example/p/2.jpg?a=1&amp;b=2" property="og:image">"""),
+        )
+        assertEquals(
+            "https://img.example/a.jpg",
+            PornhubSource.pictureIn("""<img id="getAvatar" class="x" src="https://img.example/a.jpg">"""),
+        )
+        assertEquals(null, PornhubSource.pictureIn("<html>nothing here</html>"))
+    }
 }

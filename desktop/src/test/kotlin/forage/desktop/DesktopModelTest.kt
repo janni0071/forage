@@ -521,6 +521,10 @@ class DesktopModelTest {
             m.toggleLater(m.uploads.first().video)
             assertEquals(listOf(id("new")), m.later.map { it.id })
             assertEquals("Just out", m.later.single().title)
+
+            // Someone else's video carrying their name: marked not interested, it leaves the list.
+            m.mark(listOf(id("old")), VideoState.NOT_INTERESTED)
+            assertEquals(listOf("new"), m.uploads.map { it.video.id.id })
         } finally {
             m.close()
         }

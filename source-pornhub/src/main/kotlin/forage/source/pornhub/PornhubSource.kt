@@ -134,6 +134,30 @@ class PornhubSource(
         return ChannelFeed(found.values.sortedByDescending { it.uploadedAt }, name = performer)
     }
 
+    /**
+     * A performer's picture, from their profile page: the image a link to it would preview with
+     * (`og:image`), else the avatar on the page. Pornstars, amateur models and channels have
+     * pages under different paths, tried in that order. Null where none has one.
+     */
+    override fun channelPicture(channel: PlatformId): String? {
+        if (channel.platform != platform || !channel.id.startsWith("pornstar/")) return null
+        val slug = channel.id.removePrefix("pornstar/")
+        for (kind in listOf("pornstar", "model", "channels")) {
+            waitForTurn()
+            val response = try {
+                http.get(URI("$SITE/$kind/${URLEncoder.encode(slug, Charsets.UTF_8)}"))
+            } catch (e: java.io.IOException) {
+                throw SourceException("Couldn't reach $displayName for the picture of $slug: ${e.message ?: e}", e)
+            }
+            if (response.status == 403 || response.status == 451 || response.status == 429) {
+                throw SourceException.Blocked("$displayName refused the page of $slug (HTTP ${response.status})")
+            }
+            if (response.status != 200) continue
+            pictureIn(response.body)?.let { return it }
+        }
+        return null
+    }
+
     override fun watchUrl(id: PlatformId): String {
         require(id.platform == platform) { "Not a $displayName id: $id" }
         return "$SITE/view_video.php?viewkey=${URLEncoder.encode(id.id, Charsets.UTF_8)}"
@@ -260,6 +284,16 @@ class PornhubSource(
 
     companion object {
         const val PLATFORM = "pornhub"
+
+        private val OG_IMAGE = Regex("""<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+        private val OG_IMAGE_REVERSED = Regex("""<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']""", RegexOption.IGNORE_CASE)
+        private val AVATAR = Regex("""<img[^>]+id=["']getAvatar["'][^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+
+        /** The picture a profile page shows of its performer, if any: an https image address. */
+        internal fun pictureIn(html: String): String? =
+            sequenceOf(OG_IMAGE, OG_IMAGE_REVERSED, AVATAR)
+                .mapNotNull { it.find(html)?.groupValues?.get(1)?.replace("&amp;", "&") }
+                .firstOrNull { it.startsWith("https://") }
 
         /** A performer's feed stops looking once it has this many videos. */
         private const val ENOUGH_UPLOADS = 20

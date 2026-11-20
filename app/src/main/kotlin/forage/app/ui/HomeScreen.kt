@@ -135,7 +135,7 @@ fun HomeScreen(model: AppModel, onImport: () -> Unit) {
                                     .pointerHoverIcon(PointerIcon.Hand).padding(vertical = 4.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
-                                Avatar(model, s.name ?: "?", s.avatarUrl, 56.dp)
+                                Avatar(model, s.name ?: "?", model.pictureOf(s.channel), 56.dp)
                                 Text(
                                     s.name ?: s.channel.id,
                                     style = MaterialTheme.typography.labelSmall,

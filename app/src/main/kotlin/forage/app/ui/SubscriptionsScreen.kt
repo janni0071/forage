@@ -171,7 +171,7 @@ private fun People(model: AppModel) {
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Box {
-                    Avatar(model, f.name ?: "?", f.avatarUrl, 56.dp)
+                    Avatar(model, f.name ?: "?", model.pictureOf(f.channel), 56.dp)
                     if (f.channel in withNew) {
                         Box(
                             Modifier.align(Alignment.TopEnd).size(14.dp).clip(CircleShape).background(Accent.pastelPink)
@@ -238,7 +238,7 @@ private fun ManageList(model: AppModel) {
                 Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Avatar(model, s.name ?: "?", s.avatarUrl, 44.dp)
+                Avatar(model, s.name ?: "?", model.pictureOf(s.channel), 44.dp)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(s.name ?: s.channel.id, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

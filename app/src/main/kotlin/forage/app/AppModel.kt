@@ -383,13 +383,22 @@ class AppModel(
     var channelPictures by mutableStateOf<Map<PlatformId, String?>>(emptyMap())
         private set
 
+    /** Pictures already looked up for those followed whose feeds bring none, without asking again. */
+    private fun knownPictures() {
+        val add = following.filter { it.avatarUrl == null && it.channel !in channelPictures }
+            .mapNotNull { f -> library.channelPicture(f.channel)?.let { f.channel to it.first } }
+        if (add.isNotEmpty()) channelPictures = channelPictures + add
+    }
+
     /** The picture of a channel, if one is known: from following it, or looked up for a video page. */
     fun pictureOf(channel: PlatformId?): String? =
         channel?.let { c -> following.firstOrNull { it.channel == c }?.avatarUrl ?: channelPictures[c] }
 
     /** Looks up the pictures of a video page's channels that aren't known yet, once a week at most. */
-    private fun lookUpPictures(page: VideoPage) {
-        val wanted = page.creators.mapNotNull { it.id }.filter { c ->
+    private fun lookUpPictures(page: VideoPage) = lookUpPictures(page.creators.mapNotNull { it.id })
+
+    private fun lookUpPictures(channels: List<PlatformId>) {
+        val wanted = channels.filter { c ->
             following.none { it.channel == c && it.avatarUrl != null } && c !in channelPictures
         }
         for (c in wanted) {
@@ -400,6 +409,10 @@ class AppModel(
             }
             val url = try {
                 source.channelPicture(c)
+            } catch (e: SourceException.Blocked) {
+                // Refusing for now: the rest wait for another time, and this one isn't marked as having none.
+                known?.first?.let { channelPictures = channelPictures + (c to it) }
+                return
             } catch (e: SourceException) {
                 known?.first
             }
@@ -426,7 +439,9 @@ class AppModel(
     }
 
     private fun loadUploads() {
-        uploads = library.uploads()
+        // Marked "not interested" (say, someone else's video carrying their name as a tag): not shown.
+        val rejected = profiles.entries(profile, VideoState.NOT_INTERESTED).mapTo(HashSet()) { it.video }
+        uploads = library.uploads().filter { it.video.id !in rejected }
         newUploads = uploads.count { it.isNew }
     }
 
@@ -469,6 +484,8 @@ class AppModel(
                     }
                     loadUploads()
                     following = library.following()
+                    // Those whose feed brings no picture (performers) get theirs from their page.
+                    lookUpPictures(following.filter { it.avatarUrl == null && it.gone == null }.map { it.channel })
                     when {
                         blocked != null -> message = "Stopped checking subscriptions: $blocked"
                         failed > 0 && force -> message = "Couldn't check $failed of ${due.size} channels; the rest are up to date"
@@ -980,6 +997,7 @@ class AppModel(
             loadRows()
             loadProfiles()
             refreshPages()
+            if (state == VideoState.NOT_INTERESTED || state == null) loadUploads()
             if (state != null) fetchMissingDetails(ids)
         }
     }
@@ -1706,6 +1724,7 @@ class AppModel(
         historySize = library.watchedVideoCount()
         following = library.following()
         loadUploads()
+        knownPictures()
         imported = library.counts().second > 0 || library.playlists().isNotEmpty()
     }
 
