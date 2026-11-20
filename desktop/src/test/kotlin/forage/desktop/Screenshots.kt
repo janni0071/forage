@@ -157,7 +157,7 @@ internal suspend fun preload(model: forage.app.AppModel) {
             forage.app.LibraryView.LIST -> model.visibleRows.take(14).forEach { model.thumbnails.load(it.id) }
             forage.app.LibraryView.LATER -> model.later.take(8).forEach { model.thumbnails.load(it.id, large = true) }
             forage.app.LibraryView.TASTE -> model.topics.take(4).flatMap { t -> t.videos.take(6) }.forEach { model.thumbnails.load(it.id) }
-            forage.app.LibraryView.PLAYLISTS -> {}
+            forage.app.LibraryView.PLAYLISTS -> model.playlistCovers.values.forEach { model.thumbnails.load(it, large = true) }
             forage.app.LibraryView.PLAYLIST -> model.playlistItems.take(8).forEach { model.thumbnails.load(it.id, large = true) }
         }
     }

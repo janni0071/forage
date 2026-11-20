@@ -129,6 +129,11 @@ data class LaterItem(
     val savedAt: Instant,
 )
 
+/** How a playlist is ordered: its own order (which can be changed), or by when added or length. */
+enum class PlaylistSort(val label: String, val shortLabel: String) {
+    CUSTOM("Your order", "Order"), RECENT("Recently added", "Recent"), SHORTEST("Shortest first", "Shortest"),
+}
+
 enum class LaterSort(val label: String, val shortLabel: String) {
     RECENT("Recently saved", "Recent"), OLDEST("Oldest first", "Oldest"), SHORTEST("Shortest first", "Shortest"),
 }
@@ -346,6 +351,7 @@ class AppModel(
         when {
             videoPage != null -> closeVideo()
             searchShown -> searchShown = false
+            screen == Screen.LIBRARY && libraryView == LibraryView.PLAYLIST && reorderingPlaylist -> reorderingPlaylist = false
             screen == Screen.LIBRARY && libraryView == LibraryView.PLAYLIST -> libraryView = LibraryView.PLAYLISTS
             screen == Screen.LIBRARY && libraryView != LibraryView.HUB -> {
                 libraryView = LibraryView.HUB
@@ -361,16 +367,41 @@ class AppModel(
         private set
     var playlistItems by mutableStateOf<List<LaterItem>>(emptyList())
         private set
-    /** In the order they were added, until the user picks another. */
-    var playlistSort by mutableStateOf(LaterSort.OLDEST)
+    /** The playlist's own order, until the user picks another. */
+    var playlistSort by mutableStateOf(PlaylistSort.CUSTOM)
 
-    val sortedPlaylist: List<LaterItem> get() = sorted(playlistItems, playlistSort)
+    val sortedPlaylist: List<LaterItem>
+        get() = when (playlistSort) {
+            PlaylistSort.CUSTOM -> playlistItems
+            PlaylistSort.RECENT -> playlistItems.sortedByDescending { it.savedAt }
+            PlaylistSort.SHORTEST -> playlistItems.sortedBy { it.durationSeconds ?: Long.MAX_VALUE }
+        }
+
+    /** True while the playlist on screen shows handles to drag its videos into a new order. */
+    var reorderingPlaylist by mutableStateOf(false)
+
+    /** Each playlist's first video, for the covers on the playlists page. */
+    var playlistCovers by mutableStateOf<Map<String, PlatformId>>(emptyMap())
+        private set
+
+    /** Saves a new order for the playlist on screen, e.g. after dragging a video elsewhere. */
+    fun reorderPlaylist(ids: List<PlatformId>) {
+        val name = openPlaylistName ?: return
+        val byId = playlistItems.associateBy { it.id }
+        playlistItems = ids.mapNotNull { byId[it] } + playlistItems.filter { it.id !in ids }
+        launchQuiet {
+            library.reorderPlaylist(name, ids)
+            playlistCovers = library.playlistCovers()
+        }
+    }
 
     fun openPlaylist(name: String) {
         closeAllVideos()
         searchShown = false
         screen = Screen.LIBRARY
         libraryView = LibraryView.PLAYLIST
+        if (openPlaylistName != name) playlistSort = PlaylistSort.CUSTOM
+        reorderingPlaylist = false
         openPlaylistName = name
         playlistItems = emptyList()
         launchQuiet { loadPlaylist() }
@@ -756,6 +787,7 @@ class AppModel(
     private fun loadSources() {
         val playlists = library.playlists().map { (name, size) -> LibrarySource.Playlist(name, size) }
         sources = listOf(LibrarySource.Liked, LibrarySource.History) + playlists + LibrarySource.NotInterested + LibrarySource.All
+        playlistCovers = library.playlistCovers()
         if (currentSource !in sources) {
             // A playlist whose size changed is still the same playlist.
             val name = (currentSource as? LibrarySource.Playlist)?.name

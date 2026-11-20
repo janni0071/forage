@@ -114,7 +114,17 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
         else queries.selectPlaylistItems(playlist).executeAsList().map { event(it.video_id, it.added_at) }
     }
 
-    /** A playlist's videos with when each was added, where known, in the order they were added. */
+    /** Puts a playlist's videos in the order of [videos]; ones it doesn't name keep their places after them. */
+    fun reorderPlaylist(name: String, videos: List<PlatformId>) = queries.transaction {
+        val rest = queries.selectPlaylistItemsInOrder(name).executeAsList().map { it.video_id }.filter { id -> videos.none { it.toString() == id } }
+        (videos.map { it.toString() } + rest).forEachIndexed { i, id -> queries.setPlaylistItemPosition(i.toLong(), name, id) }
+    }
+
+    /** Each playlist's first video, for its cover. */
+    fun playlistCovers(): Map<String, PlatformId> =
+        queries.selectPlaylistCovers().executeAsList().associate { it.playlist to PlatformId.parse(it.video_id) }
+
+    /** A playlist's videos with when each was added, where known, in the playlist's own order. */
     fun playlistItems(name: String): List<Pair<PlatformId, Instant?>> =
         queries.selectPlaylistItemsInOrder(name).executeAsList()
             .map { PlatformId.parse(it.video_id) to it.added_at?.let(Instant::ofEpochSecond) }

@@ -172,6 +172,13 @@ class DesktopModelTest {
         // In the order they were added.
         assertEquals(listOf(id("b"), id("a")), model.sortedPlaylist.map { it.id })
         assertEquals("Sourdough basics", model.sortedPlaylist.first().title)
+        // Dragged into a new order, which the playlist keeps and its cover follows.
+        model.reorderPlaylist(listOf(id("a"), id("b")))
+        assertEquals(listOf(id("a"), id("b")), model.sortedPlaylist.map { it.id })
+        assertEquals(listOf(id("a"), id("b")), model.library.playlistItems("Bread").map { it.first })
+        assertEquals(id("a"), model.playlistCovers["Bread"])
+        model.playlistSort = PlaylistSort.SHORTEST
+        model.playlistSort = PlaylistSort.CUSTOM
 
         assertTrue("already" in model.renamePlaylist("Bread", "Woodwork")!!)
         assertNull(model.renamePlaylist("Bread", "Baking"))
@@ -182,8 +189,13 @@ class DesktopModelTest {
         assertEquals(LibraryView.PLAYLISTS, model.libraryView)
         assertEquals(listOf("Liked", "History", "Woodwork", "Not interested", "All videos"), model.sources.map { it.label })
         assertEquals("Sourdough basics", model.library.video(id("b"))?.title)
-        // Back from a playlist goes to the playlists, and from there to the overview.
+        // Back from a playlist goes to the playlists, and from there to the overview; while
+        // reordering, it ends that first.
         model.openPlaylist("Woodwork")
+        model.reorderingPlaylist = true
+        model.back()
+        assertEquals(false, model.reorderingPlaylist)
+        assertEquals(LibraryView.PLAYLIST, model.libraryView)
         model.back()
         assertEquals(LibraryView.PLAYLISTS, model.libraryView)
         model.back()

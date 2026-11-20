@@ -34,6 +34,7 @@ CREATE TABLE playlist_item (
     playlist TEXT NOT NULL,
     video_id TEXT NOT NULL,
     added_at INTEGER,
+    position INTEGER NOT NULL DEFAULT 0,   -- the playlist's own order, from 0
     PRIMARY KEY (playlist, video_id)
 );
 
@@ -127,15 +128,16 @@ deleteWatchEvents:
 DELETE FROM watch_event;
 
 upsertPlaylistItem:
-INSERT OR REPLACE INTO playlist_item VALUES (?, ?, ?);
+INSERT OR IGNORE INTO playlist_item (playlist, video_id, added_at, position)
+VALUES (:playlist, :video_id, :added_at, (SELECT coalesce(max(position), -1) + 1 FROM playlist_item WHERE playlist = :playlist));
 
 selectPlaylistItems:
 SELECT * FROM playlist_item WHERE playlist = ?;
 
--- In the order they were added; videos added together keep the order they were added in.
+-- In the playlist's own order.
 selectPlaylistItemsInOrder:
 SELECT video_id, added_at FROM playlist_item WHERE playlist = ?
-ORDER BY coalesce(added_at, 9223372036854775807), rowid;
+ORDER BY position, rowid;
 
 selectPlaylists:
 SELECT p.name, count(i.video_id) AS videos
@@ -161,7 +163,16 @@ deletePlaylistItem:
 DELETE FROM playlist_item WHERE playlist = ? AND video_id = ?;
 
 insertPlaylistItem:
-INSERT OR IGNORE INTO playlist_item VALUES (?, ?, ?);
+INSERT OR IGNORE INTO playlist_item (playlist, video_id, added_at, position)
+VALUES (:playlist, :video_id, :added_at, (SELECT coalesce(max(position), -1) + 1 FROM playlist_item WHERE playlist = :playlist));
+
+setPlaylistItemPosition:
+UPDATE playlist_item SET position = :position WHERE playlist = :playlist AND video_id = :video_id;
+
+-- The first video of each playlist, in its own order, for the playlists' covers.
+selectPlaylistCovers:
+SELECT playlist, video_id FROM playlist_item i
+WHERE position = (SELECT min(position) FROM playlist_item WHERE playlist = i.playlist);
 
 insertSubscription:
 INSERT OR IGNORE INTO subscription (channel_id, added_at) VALUES (?, ?);

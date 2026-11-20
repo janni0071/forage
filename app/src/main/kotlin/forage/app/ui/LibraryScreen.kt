@@ -34,6 +34,7 @@ import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -927,58 +928,91 @@ private fun TasteCard(model: AppModel) {
     }
 }
 
-/** Every playlist, and making a new one. */
+/** Every playlist as a card with its first video's picture, and making a new one. */
 @Composable
 private fun PlaylistsScreen(model: AppModel) {
     val c = MaterialTheme.colorScheme
     val compact = LocalCompact.current
     val playlists = model.sources.filterIsInstance<LibrarySource.Playlist>()
-    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(
-            Modifier.fillMaxSize().padding(end = scrollbarGap()),
-            state = listState,
+        LazyVerticalGrid(
+            // Two columns on a phone, as many as fit in a window.
+            columns = GridCells.Adaptive(minSize = if (compact) 150.dp else 240.dp),
+            state = gridState,
+            modifier = Modifier.fillMaxSize().padding(end = scrollbarGap()),
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 16.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 20.dp),
             contentPadding = PaddingValues(
                 start = if (compact) 16.dp else 32.dp, end = if (compact) 16.dp else 16.dp,
                 top = if (compact) 4.dp else 16.dp, bottom = 120.dp,
             ),
         ) {
-            item { BackLink("Library", model::back) }
-            item {
-                ScreenHeader("Playlists", if (playlists.isEmpty()) null else "${playlists.size} playlists") {
-                    OutlinedButton(onClick = { model.libraryDialog = LibraryDialog.NewPlaylist }, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
-                        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("New playlist")
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    BackLink("Library", model::back)
+                    ScreenHeader("Playlists", if (playlists.isEmpty()) null else if (playlists.size == 1) "1 playlist" else "${playlists.size} playlists") {
+                        OutlinedButton(onClick = { model.libraryDialog = LibraryDialog.NewPlaylist }, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) {
+                            Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("New playlist")
+                        }
+                    }
+                    if (playlists.isEmpty()) {
+                        Text("No playlists yet. Make one here, or add a video to a new one from its page.", color = c.onSurfaceVariant)
                     }
                 }
             }
-            if (playlists.isEmpty()) {
-                item {
-                    Text(
-                        "No playlists yet. Make one here, or add videos to a new one from their page.",
-                        color = c.onSurfaceVariant,
-                    )
-                }
+            gridItems(playlists, key = { it.name }) { p -> PlaylistCard(model, p) }
+        }
+        Scrollbar(gridState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+    }
+}
+
+@Composable
+private fun PlaylistCard(model: AppModel, playlist: LibrarySource.Playlist) {
+    val c = MaterialTheme.colorScheme
+    val cover = model.playlistCovers[playlist.name]
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    val zoom by animateFloatAsState(if (hovered) 1.04f else 1f)
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .hoverable(hover)
+            .clickable { model.openPlaylist(playlist.name) }
+            .pointerHoverIcon(PointerIcon.Hand),
+    ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)).background(c.surfaceContainerHigh)) {
+            if (cover != null && model.showThumbnails) {
+                ThumbnailImage(model, cover, large = true, zoom = zoom)
+            } else {
+                Icon(Icons.AutoMirrored.Outlined.PlaylistPlay, contentDescription = null, tint = c.onSurfaceVariant, modifier = Modifier.align(Alignment.Center).size(40.dp))
             }
-            items(playlists, key = { it.name }) { p ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 720.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { model.openPlaylist(p.name) }
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .padding(horizontal = 8.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.AutoMirrored.Outlined.PlaylistPlay, contentDescription = null, tint = c.primary, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(14.dp))
-                    Text(p.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Text("%,d videos".format(p.size), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant)
-                }
+            // How many videos, on the picture, as playlists show it on the sites.
+            Row(
+                Modifier.align(Alignment.BottomEnd).padding(8.dp)
+                    .clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.75f)).padding(horizontal = 7.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.PlaylistPlay, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("%,d".format(playlist.size), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = Color.White)
             }
         }
-        Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+        Text(
+            playlist.name,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp),
+        )
+        Text(
+            if (playlist.size == 1L) "1 video" else "%,d videos".format(playlist.size),
+            style = MaterialTheme.typography.bodySmall,
+            color = c.onSurfaceVariant,
+            modifier = Modifier.padding(start = 2.dp, bottom = 4.dp),
+        )
     }
 }

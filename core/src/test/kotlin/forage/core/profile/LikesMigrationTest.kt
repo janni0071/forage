@@ -19,7 +19,7 @@ class LikesMigrationTest {
         for ((video, state) in listOf("a" to "included", "b" to "excluded", "c" to "negative")) {
             driver.execute(null, "INSERT INTO profile_video VALUES (1, 'youtube:$video', '$state', 1, 'manual', 0)", 0)
         }
-        driver.execute(null, "INSERT INTO playlist_item VALUES ('Woodwork', 'youtube:a', 100), ('Woodwork', 'youtube:d', 50)", 0)
+        driver.execute(null, "INSERT INTO playlist_item (playlist, video_id, added_at) VALUES ('Woodwork', 'youtube:a', 100), ('Woodwork', 'youtube:d', 50)", 0)
 
         ForageDatabase.Schema.migrate(driver, 9, 10)
 
@@ -37,7 +37,7 @@ class LikesMigrationTest {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         ForageDatabase.Schema.create(driver)
         driver.execute(null, "INSERT INTO playlist VALUES ('Später ansehen', 0), ('Woodwork', 0)", 0)
-        driver.execute(null, "INSERT INTO playlist_item VALUES ('Später ansehen', 'youtube:a', 100), ('Später ansehen', 'youtube:b', NULL), ('Woodwork', 'youtube:c', 5)", 0)
+        driver.execute(null, "INSERT INTO playlist_item (playlist, video_id, added_at) VALUES ('Später ansehen', 'youtube:a', 100), ('Später ansehen', 'youtube:b', NULL), ('Woodwork', 'youtube:c', 5)", 0)
         driver.execute(null, "INSERT INTO watch_later VALUES ('youtube:a', 50)", 0)
 
         ForageDatabase.Schema.migrate(driver, 10, 11)
@@ -48,5 +48,22 @@ class LikesMigrationTest {
         // Already queued stays as it was; one without a date gets the time of the move.
         assertEquals(50L, saved["a"])
         assertEquals(setOf("a", "b"), saved.keys)
+    }
+
+    @Test
+    fun `playlists keep the order their videos were added in`() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        ForageDatabase.Schema.create(driver)
+        // The table as version 11 had it, without positions.
+        driver.execute(null, "DROP TABLE playlist_item", 0)
+        driver.execute(null, "CREATE TABLE playlist_item (playlist TEXT NOT NULL, video_id TEXT NOT NULL, added_at INTEGER, PRIMARY KEY (playlist, video_id))", 0)
+        driver.execute(null, "INSERT INTO playlist VALUES ('Woodwork', 0)", 0)
+        driver.execute(null, "INSERT INTO playlist_item (playlist, video_id, added_at) VALUES ('Woodwork', 'youtube:b', 20), ('Woodwork', 'youtube:a', 10), ('Woodwork', 'youtube:c', 20)", 0)
+        ForageDatabase.Schema.migrate(driver, 11, 12)
+        val library = LibraryStore(ForageDatabase(driver))
+        assertEquals(listOf("a", "b", "c"), library.playlistItems("Woodwork").map { it.first.id })
+        library.reorderPlaylist("Woodwork", listOf(PlatformId.youtube("c"), PlatformId.youtube("a")))
+        assertEquals(listOf("c", "a", "b"), library.playlistItems("Woodwork").map { it.first.id })
+        assertEquals(mapOf("Woodwork" to PlatformId.youtube("c")), library.playlistCovers())
     }
 }

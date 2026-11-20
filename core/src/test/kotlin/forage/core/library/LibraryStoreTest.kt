@@ -41,7 +41,8 @@ class LibraryStoreTest {
         assertEquals(mapOf("Woodwork" to 2L), store.playlists())
         // YouTube's Watch later lands in the queue, with the time it was saved there.
         assertEquals(listOf(SavedVideo(id("d"), at(7))), store.savedForLater())
-        assertEquals(listOf(id("a") to at(1), id("c") to at(5)), store.playlistItems("Woodwork"))
+        // In the order the export lists them, which is the playlist's own.
+        assertEquals(listOf(id("c") to at(5), id("a") to at(1)), store.playlistItems("Woodwork"))
         assertEquals(listOf(Subscription(id("UCwren"), "Workshop Wren")), store.subscriptions())
         assertEquals(setOf(id("a"), id("b"), id("c"), id("d")), store.knownVideoIds())
     }

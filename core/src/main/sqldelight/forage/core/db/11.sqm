@@ -1,0 +1,12 @@
+-- Version 12 lets playlists keep an order of their own. Each playlist starts in the order its
+-- videos were added (ties in the order they were stored), which is how the site lists them too.
+ALTER TABLE playlist_item ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+UPDATE playlist_item SET position = (
+    SELECT count(*) FROM playlist_item p
+    WHERE p.playlist = playlist_item.playlist AND (
+        coalesce(p.added_at, 9223372036854775807) < coalesce(playlist_item.added_at, 9223372036854775807) OR (
+            coalesce(p.added_at, 9223372036854775807) = coalesce(playlist_item.added_at, 9223372036854775807)
+            AND p.rowid < playlist_item.rowid
+        )
+    )
+);
