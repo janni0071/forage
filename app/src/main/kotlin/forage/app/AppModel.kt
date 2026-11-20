@@ -12,6 +12,8 @@ import forage.core.importer.TakeoutFolder
 import forage.core.language.LanguageDetector
 import forage.core.library.LibraryStore
 import forage.core.library.VideoInLibrary
+import forage.core.library.FollowedChannel
+import forage.core.library.Upload
 import forage.core.source.VideoDetails
 import forage.core.library.WatchHistory
 import forage.core.library.WatchedVideo
@@ -331,7 +333,96 @@ class AppModel(
         closeAllVideos()
         searchShown = false
         if (to == Screen.LIBRARY) libraryView = LibraryView.HUB
+        // Leaving the subscriptions, what was new there has been seen.
+        if (screen == Screen.SUBSCRIPTIONS && to != Screen.SUBSCRIPTIONS) launchQuiet {
+            library.markUploadsSeen()
+            loadUploads()
+        }
         screen = to
+        if (to == Screen.HOME || to == Screen.SUBSCRIPTIONS) refreshFeeds()
+    }
+
+    // Subscriptions (SPEC, Direction: order of work, step 5)
+
+    /** The latest uploads of everyone followed, newest first. */
+    var uploads by mutableStateOf<List<Upload>>(emptyList())
+        private set
+    /** How many of [uploads] came since the subscriptions were last seen. */
+    var newUploads by mutableStateOf(0)
+        private set
+    var checkingFeeds by mutableStateOf(false)
+        private set
+    /** The channel the subscriptions are narrowed to, if any. */
+    var feedChannel by mutableStateOf<PlatformId?>(null)
+    /** True while the subscriptions show the list of who you follow, to change it. */
+    var managingFollowing by mutableStateOf(false)
+
+    /** Saves a video for later, or takes it off the queue if it's there. */
+    fun toggleLater(video: VideoStub) {
+        val saved = later.any { it.id == video.id }
+        launchQuiet {
+            library.remember(video.id, video.title, video.channel, video.channelName, video.isShort, video.durationSeconds, video.uploadedAt)
+            if (saved) library.removeFromWatchLater(video.id) else library.saveForLater(video.id)
+            loadLater()
+            loadPicks()
+            message = if (saved) "Taken off watch later" else "Saved \"${video.title}\" for later"
+        }
+    }
+
+    private fun loadUploads() {
+        uploads = library.uploads()
+        newUploads = uploads.count { it.isNew }
+    }
+
+    /**
+     * Looks up the latest uploads of everyone followed, one channel after another, in the
+     * background. Without [force] only channels not checked in the last half hour are asked.
+     */
+    fun refreshFeeds(force: Boolean = false) {
+        if (checkingFeeds || Capability.CHANNEL_FEED !in source.capabilities) return
+        val cutoff = Instant.now().minus(java.time.Duration.ofMinutes(FEED_INTERVAL_MINUTES))
+        // One that's gone is asked again weekly, in case it comes back.
+        val goneCutoff = Instant.now().minus(java.time.Duration.ofDays(7))
+        val due = library.following().filter { force || (it.checkedAt?.isBefore(if (it.gone != null) goneCutoff else cutoff) ?: true) }
+            .filter { source.forPlatform(it.channel.platform)?.capabilities?.contains(Capability.CHANNEL_FEED) == true }
+        if (due.isEmpty()) {
+            if (force) message = "Nobody to check yet: follow channels from a video's page"
+            return
+        }
+        checkingFeeds = true
+        launchQuiet {
+            try {
+                inBackground(if (due.size == 1) "Checking 1 channel for new uploads" else "Checking ${due.size} channels for new uploads") {
+                    var failed = 0
+                    var blocked: String? = null
+                    for ((i, channel) in due.withIndex()) {
+                        if (i > 0) delay(FEED_PAUSE_MILLIS)
+                        try {
+                            library.storeFeed(channel.channel, source.channelFeed(channel.channel, channel.name))
+                        } catch (e: SourceException.Blocked) {
+                            // The platform is refusing for now; the rest can wait for the next check.
+                            blocked = e.message
+                            break
+                        } catch (e: SourceException.NotAvailable) {
+                            // Removed or terminated: shown as gone, and asked again only now and then.
+                            library.markGone(channel.channel, e.cause?.message ?: e.message ?: "No longer available")
+                        } catch (e: SourceException) {
+                            failed++
+                        }
+                        if (i % 5 == 4) loadUploads()
+                    }
+                    loadUploads()
+                    following = library.following()
+                    when {
+                        blocked != null -> message = "Stopped checking subscriptions: $blocked"
+                        failed > 0 && force -> message = "Couldn't check $failed of ${due.size} channels; the rest are up to date"
+                        force -> message = if (newUploads == 0) "No new uploads" else if (newUploads == 1) "1 new upload" else "$newUploads new uploads"
+                    }
+                }
+            } finally {
+                checkingFeeds = false
+            }
+        }
     }
 
     /** Opens a list from the library's overview, e.g. the likes or one playlist. */
@@ -469,7 +560,7 @@ class AppModel(
     var historySize by mutableStateOf(0L)
         private set
     /** The channels and performers this vault follows. */
-    var following by mutableStateOf<List<forage.core.importer.Subscription>>(emptyList())
+    var following by mutableStateOf<List<FollowedChannel>>(emptyList())
         private set
     /** Whether anything was ever imported, for Home's "Get started". */
     var imported by mutableStateOf(false)
@@ -478,7 +569,7 @@ class AppModel(
         private set
 
     /** Follows someone again from the subscriptions list. */
-    fun follow(subscription: forage.core.importer.Subscription) = launchQuiet {
+    fun follow(subscription: FollowedChannel) = launchQuiet {
         library.follow(subscription.channel, subscription.name)
         refreshFollowing()
         loadHome()
@@ -776,6 +867,7 @@ class AppModel(
 
     /** Loads everything shown on screen. */
     suspend fun reload() = withContext(io) {
+        if (screen == Screen.HOME) refreshFeeds()
         loadSources()
         loadProfiles()
         loadRows()
@@ -1554,7 +1646,8 @@ class AppModel(
             states, meta,
         )
         historySize = library.watchedVideoCount()
-        following = library.subscriptions()
+        following = library.following()
+        loadUploads()
         imported = library.counts().second > 0 || library.playlists().isNotEmpty()
     }
 
@@ -1721,6 +1814,10 @@ class AppModel(
         private const val BACKGROUND_FETCH_LIMIT = 30
         /** How many videos a row on Home shows. */
         private const val HOME_ROW = 12
+        /** Subscriptions are checked at most this often, unless asked. */
+        private const val FEED_INTERVAL_MINUTES = 30L
+        /** A pause between two channels, to be gentle with the platform. */
+        private const val FEED_PAUSE_MILLIS = 400L
         /** How many videos one "Fetch details" on the queue or a playlist asks for. */
         const val FETCH_BATCH = 200
         private const val MAX_PLAYLIST_NAME = 60

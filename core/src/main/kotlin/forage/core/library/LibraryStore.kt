@@ -5,6 +5,8 @@ import forage.core.db.ForageDatabase
 import forage.core.importer.Subscription
 import forage.core.importer.TakeoutData
 import forage.core.importer.TakeoutFolder
+import forage.core.source.ChannelFeed
+import forage.core.source.VideoStub
 import forage.core.importer.WatchEvent
 import java.time.Instant
 
@@ -28,6 +30,20 @@ data class VideoInLibrary(
     val playlists: List<String> = emptyList(),
     val savedForLater: Boolean = false,
 )
+
+/** Someone followed: a channel, or a performer on platforms without channels. */
+data class FollowedChannel(
+    val channel: PlatformId,
+    val name: String?,
+    val avatarUrl: String? = null,
+    val checkedAt: Instant? = null,
+    val seenAt: Instant? = null,
+    /** Why the platform no longer has them, if it doesn't. */
+    val gone: String? = null,
+)
+
+/** One upload of someone followed, and whether it came after their uploads were last seen. */
+data class Upload(val video: VideoStub, val foundAt: Instant, val isNew: Boolean)
 
 /** A video in the watch-later queue and when it was saved. */
 data class SavedVideo(val id: PlatformId, val savedAt: Instant)
@@ -212,7 +228,57 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
         queries.updateSubscription(name, channel.toString())
     }
 
-    fun unfollow(channel: PlatformId) = queries.deleteSubscription(channel.toString())
+    /** Stops following a channel, and forgets the uploads found for it. */
+    fun unfollow(channel: PlatformId) = queries.transaction {
+        queries.deleteSubscription(channel.toString())
+        queries.deleteSubscriptionVideos(channel.toString())
+    }
+
+    /** Everyone followed, with their pictures and when they were last checked, by name. */
+    fun following(): List<FollowedChannel> = queries.selectSubscriptions().executeAsList().map {
+        FollowedChannel(
+            PlatformId.parse(it.channel_id), it.name, it.avatar_url,
+            it.checked_at?.let(Instant::ofEpochSecond), it.seen_at?.let(Instant::ofEpochSecond), it.gone,
+        )
+    }
+
+    /** Notes that the platform no longer has a channel (removed, terminated), so it isn't asked again soon. */
+    fun markGone(channel: PlatformId, reason: String) = queries.markSubscriptionGone(reason, clock().epochSecond, channel.toString())
+
+    /**
+     * Stores what a channel's feed listed: new videos join its uploads, known ones are updated,
+     * and only the newest [keep] stay. Its first check marks everything found as seen, so a
+     * channel's back catalogue doesn't arrive as new.
+     */
+    fun storeFeed(channel: PlatformId, feed: ChannelFeed, keep: Int = 30) {
+        val now = clock().epochSecond
+        queries.transaction {
+            feed.videos.forEachIndexed { i, v ->
+                // A second apart in the feed's order, so videos with the same rough date keep it.
+                queries.insertSubscriptionVideo(
+                    channel.toString(), v.id.toString(), v.title, v.channelName, v.durationSeconds, v.uploadedAt?.epochSecond, now - i,
+                )
+                queries.updateSubscriptionVideo(v.title, v.channelName, v.durationSeconds, v.uploadedAt?.epochSecond, channel.toString(), v.id.toString())
+            }
+            queries.pruneSubscriptionVideos(channel.toString(), keep.toLong())
+            queries.markSubscriptionChecked(now, feed.name, feed.avatarUrl, channel.toString())
+        }
+    }
+
+    /** The latest uploads of everyone followed, newest first. */
+    fun uploads(limit: Int = 300): List<Upload> = queries.selectUploads(limit.toLong()).executeAsList().map {
+        Upload(
+            VideoStub(
+                PlatformId.parse(it.video_id), it.title, PlatformId.parse(it.channel_id), it.channel_name ?: it.followed_name,
+                it.duration_seconds, isShort = false, uploadedAt = it.uploaded_at?.let(Instant::ofEpochSecond),
+            ),
+            Instant.ofEpochSecond(it.found_at),
+            isNew = it.is_new == true,
+        )
+    }
+
+    /** Everything found so far counts as seen: the next uploads are the new ones. */
+    fun markUploadsSeen() = queries.markSubscriptionsSeen(clock().epochSecond)
 
     fun follows(channel: PlatformId): Boolean = queries.selectSubscription(channel.toString()).executeAsOneOrNull() != null
 

@@ -1,0 +1,17 @@
+-- Version 13 keeps the latest uploads of everyone followed (SPEC, Direction: Subscriptions),
+-- with each channel's picture, when it was last checked and when its uploads were last seen.
+ALTER TABLE subscription ADD COLUMN avatar_url TEXT;
+ALTER TABLE subscription ADD COLUMN checked_at INTEGER;
+ALTER TABLE subscription ADD COLUMN seen_at INTEGER;
+ALTER TABLE subscription ADD COLUMN gone TEXT;
+
+CREATE TABLE subscription_video (
+    channel_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    channel_name TEXT,
+    duration_seconds INTEGER,
+    uploaded_at INTEGER,
+    found_at INTEGER NOT NULL,
+    PRIMARY KEY (channel_id, video_id)
+);

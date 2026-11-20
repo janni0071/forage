@@ -66,4 +66,19 @@ class LikesMigrationTest {
         assertEquals(listOf("c", "a", "b"), library.playlistItems("Woodwork").map { it.first.id })
         assertEquals(mapOf("Woodwork" to PlatformId.youtube("c")), library.playlistCovers())
     }
+
+    @Test
+    fun `followed channels gain a place for their uploads`() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        ForageDatabase.Schema.create(driver)
+        // The tables as version 12 had them.
+        driver.execute(null, "DROP TABLE subscription_video", 0)
+        driver.execute(null, "DROP TABLE subscription", 0)
+        driver.execute(null, "CREATE TABLE subscription (channel_id TEXT NOT NULL PRIMARY KEY, name TEXT, added_at INTEGER NOT NULL)", 0)
+        driver.execute(null, "INSERT INTO subscription VALUES ('youtube:UCwren', 'Workshop Wren', 0)", 0)
+        ForageDatabase.Schema.migrate(driver, 12, 13)
+        val library = LibraryStore(ForageDatabase(driver))
+        assertEquals(listOf("Workshop Wren"), library.following().map { it.name })
+        assertEquals(emptyList(), library.uploads())
+    }
 }

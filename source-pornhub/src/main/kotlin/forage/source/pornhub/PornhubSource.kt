@@ -2,6 +2,7 @@ package forage.source.pornhub
 
 import forage.core.PlatformId
 import forage.core.source.Capability
+import forage.core.source.ChannelFeed
 import forage.core.source.ExtractorSource
 import forage.core.source.SourceException
 import forage.core.source.VideoDetails
@@ -40,7 +41,7 @@ class PornhubSource(
 ) : ExtractorSource {
     override val platform = PLATFORM
     override val displayName = "Pornhub"
-    override val capabilities = setOf(Capability.SEARCH, Capability.DESCRIPTIVE_TAGS)
+    override val capabilities = setOf(Capability.SEARCH, Capability.DESCRIPTIVE_TAGS, Capability.CHANNEL_FEED)
 
     /** A GET that returns the status and body; replaceable for tests. */
     fun interface Http {
@@ -93,6 +94,30 @@ class PornhubSource(
         return videos.mapNotNull { (it as? JsonObject)?.let(::parse) }.map {
             VideoStub(it.id, it.title, channel = null, it.channelName, it.durationSeconds, isShort = false, it.uploadedAt, it.tags)
         }
+    }
+
+    /**
+     * A performer's newest videos: the API's performer filter sorted by newest, keeping only
+     * videos that list them (a name search also finds videos that merely mention it). Where the
+     * filter finds nothing, a plain search for the name, filtered the same way.
+     */
+    override fun channelFeed(channel: PlatformId, name: String?): ChannelFeed {
+        require(channel.platform == platform) { "Not a $displayName performer: $channel" }
+        val performer = name?.trim()?.takeIf { it.isNotEmpty() }
+            ?: throw SourceException("Following someone on $displayName needs their name")
+        fun find(vararg params: Pair<String, String>): List<VideoStub> {
+            val json = request("videos of $performer", "search", *params, "ordering" to "newest")
+            val videos = json["videos"] as? JsonArray ?: run {
+                if (isNotFound(json)) return emptyList()
+                throw apiError(json, "videos of $performer", notFoundIsGone = false)
+            }
+            return videos.mapNotNull { (it as? JsonObject) }
+                .filter { v -> v.names("pornstars", "pornstar_name").any { it.equals(performer, ignoreCase = true) } }
+                .mapNotNull(::parse)
+                .map { VideoStub(it.id, it.title, channel = null, it.channelName, it.durationSeconds, isShort = false, it.uploadedAt, it.tags) }
+        }
+        val videos = find("stars[]" to performer).ifEmpty { find("search" to performer) }
+        return ChannelFeed(videos.sortedByDescending { it.uploadedAt }, name = performer)
     }
 
     override fun watchUrl(id: PlatformId): String {

@@ -50,6 +50,15 @@ interface ExtractorSource {
      */
     fun previewFrames(id: PlatformId): List<String> = emptyList()
 
+    /**
+     * The latest uploads of a channel (or a performer, on platforms without channels), newest
+     * first, with its name and picture where the platform has them. [name] is what the channel
+     * was called when followed, for platforms that find uploads by name. Requires
+     * [Capability.CHANNEL_FEED].
+     */
+    fun channelFeed(channel: PlatformId, name: String?): ChannelFeed =
+        throw SourceException("$displayName can't list a channel's uploads")
+
     /** The video a pasted link (or bare ID) points to, if it is one of this platform's. */
     fun parseLink(text: String): PlatformId? = null
 
@@ -69,7 +78,13 @@ enum class Capability {
      * are grouped by shared tags and named after them.
      */
     DESCRIPTIVE_TAGS,
+
+    /** [ExtractorSource.channelFeed]: a followed channel's or performer's latest uploads. */
+    CHANNEL_FEED,
 }
+
+/** A channel's latest uploads, newest first, with what the platform says about the channel. */
+data class ChannelFeed(val videos: List<VideoStub>, val name: String? = null, val avatarUrl: String? = null)
 
 /** Platform-neutral video model. Platform-specific odds and ends go into [extra]. */
 data class VideoMetadata(

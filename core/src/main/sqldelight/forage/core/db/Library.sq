@@ -41,7 +41,23 @@ CREATE TABLE playlist_item (
 CREATE TABLE subscription (
     channel_id TEXT NOT NULL PRIMARY KEY,
     name TEXT,
-    added_at INTEGER NOT NULL
+    added_at INTEGER NOT NULL,
+    avatar_url TEXT,
+    checked_at INTEGER,      -- when its uploads were last looked up
+    seen_at INTEGER,         -- uploads after this are new; set at the first check, so its back catalogue isn't
+    gone TEXT                -- why the platform no longer has the channel, when it doesn't
+);
+
+-- The latest uploads of each followed channel, as its feed listed them.
+CREATE TABLE subscription_video (
+    channel_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    channel_name TEXT,
+    duration_seconds INTEGER,
+    uploaded_at INTEGER,
+    found_at INTEGER NOT NULL,
+    PRIMARY KEY (channel_id, video_id)
 );
 
 CREATE TABLE watch_later (
@@ -188,6 +204,52 @@ SELECT * FROM subscription WHERE channel_id = ?;
 
 deleteSubscription:
 DELETE FROM subscription WHERE channel_id = ?;
+
+deleteSubscriptionVideos:
+DELETE FROM subscription_video WHERE channel_id = ?;
+
+insertSubscriptionVideo:
+INSERT OR IGNORE INTO subscription_video VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- A later look may know a video better (its length, a fixed title); the time it was found stays.
+updateSubscriptionVideo:
+UPDATE subscription_video SET
+    title = :title,
+    channel_name = coalesce(:channel_name, channel_name),
+    duration_seconds = coalesce(:duration_seconds, duration_seconds),
+    uploaded_at = coalesce(uploaded_at, :uploaded_at)
+WHERE channel_id = :channel_id AND video_id = :video_id;
+
+-- Keeps each channel's newest uploads only.
+pruneSubscriptionVideos:
+DELETE FROM subscription_video WHERE channel_id = :channel_id AND video_id NOT IN (
+    SELECT video_id FROM subscription_video WHERE channel_id = :channel_id
+    ORDER BY coalesce(uploaded_at, found_at) DESC LIMIT :keep
+);
+
+markSubscriptionChecked:
+UPDATE subscription SET
+    gone = NULL,
+    checked_at = :now,
+    seen_at = coalesce(seen_at, :now),
+    name = coalesce(:name, name),
+    avatar_url = coalesce(:avatar_url, avatar_url)
+WHERE channel_id = :channel_id;
+
+markSubscriptionGone:
+UPDATE subscription SET gone = :reason, checked_at = :now WHERE channel_id = :channel_id;
+
+markSubscriptionsSeen:
+UPDATE subscription SET seen_at = ? WHERE checked_at IS NOT NULL;
+
+-- Everyone's uploads, newest first. New ones were found after their channel was last seen: the
+-- platform's upload dates can be rough ("2 days ago"), the time Forage found a video isn't.
+selectUploads:
+SELECT v.*, s.name AS followed_name,
+    (s.seen_at IS NOT NULL AND v.found_at > s.seen_at) AS is_new
+FROM subscription_video v JOIN subscription s ON s.channel_id = v.channel_id
+ORDER BY coalesce(v.uploaded_at, v.found_at) DESC, v.found_at DESC
+LIMIT ?;
 
 -- The playlists a video is in.
 selectPlaylistsOfVideo:

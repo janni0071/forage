@@ -151,7 +151,7 @@ internal suspend fun preload(model: forage.app.AppModel) {
         Screen.HOME -> (model.later.take(6).map { it.id } + model.picks.take(6).map { it.pick.video } + model.recentlyWatched.take(6).map { it.id })
             .forEach { model.thumbnails.load(it) }
         Screen.DISCOVER -> model.picks.take(9).forEach { model.thumbnails.load(it.pick.video, large = true) }
-        Screen.SUBSCRIPTIONS -> {}
+        Screen.SUBSCRIPTIONS -> model.uploads.take(8).forEach { model.thumbnails.load(it.video.id, large = true) }
         Screen.LIBRARY -> when (model.libraryView) {
             forage.app.LibraryView.HUB -> model.recentlyLiked.take(6).forEach { model.thumbnails.load(it.id) }
             forage.app.LibraryView.LIST -> model.visibleRows.take(14).forEach { model.thumbnails.load(it.id) }

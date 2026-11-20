@@ -14,6 +14,10 @@ import org.jsoup.nodes.TextNode
 import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
+import org.schabi.newpipe.extractor.channel.ChannelInfo
+import org.schabi.newpipe.extractor.channel.tabs.ChannelTabInfo
+import org.schabi.newpipe.extractor.channel.tabs.ChannelTabs
+import forage.core.source.ChannelFeed
 import org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
 import org.schabi.newpipe.extractor.exceptions.SignInConfirmNotBotException
@@ -32,7 +36,7 @@ class YouTubeSource : ExtractorSource {
 
     override val platform = Platforms.YOUTUBE
     override val displayName = "YouTube"
-    override val capabilities = setOf(Capability.RELATED_VIDEOS, Capability.SEARCH)
+    override val capabilities = setOf(Capability.RELATED_VIDEOS, Capability.SEARCH, Capability.CHANNEL_FEED)
 
     override fun video(id: PlatformId): VideoDetails = guarded("video $id") {
         val info = StreamInfo.getInfo(ServiceList.YouTube, watchUrl(id))
@@ -60,6 +64,23 @@ class YouTubeSource : ExtractorSource {
         val handler = ServiceList.YouTube.searchQHFactory
             .fromQuery(query, listOf(YoutubeSearchQueryHandlerFactory.VIDEOS), "")
         stubs(SearchInfo.getInfo(ServiceList.YouTube, handler).relatedItems)
+    }
+
+    /**
+     * The channel page for its name and picture, then its Videos tab: the latest uploads with
+     * their lengths, and without Shorts, which have a tab of their own.
+     */
+    override fun channelFeed(channel: PlatformId, name: String?): ChannelFeed = guarded("channel ${name ?: channel.id}") {
+        require(channel.platform == platform) { "Not a YouTube channel: $channel" }
+        val info = ChannelInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/channel/${channel.id}")
+        val videosTab = info.tabs.firstOrNull { ChannelTabs.VIDEOS in it.contentFilters }
+        val videos = videosTab?.let { stubs(ChannelTabInfo.getInfo(ServiceList.YouTube, it).relatedItems) }.orEmpty()
+        ChannelFeed(
+            videos = videos.map { it.copy(channel = it.channel ?: channel, channelName = it.channelName ?: info.name) },
+            name = info.name?.takeIf { it.isNotBlank() },
+            // A small picture is plenty for a round badge.
+            avatarUrl = info.avatars.filter { it.width in 1..240 }.maxByOrNull { it.width }?.url ?: info.avatars.firstOrNull()?.url,
+        )
     }
 
     /** A link in any of YouTube's shapes, a bare 11-character ID, or `youtube:<id>`. */

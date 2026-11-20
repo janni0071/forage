@@ -418,6 +418,10 @@ internal class QueueActions(
     val verb: String,
     /** Something more to say about the video, e.g. how often it was watched. */
     val note: String? = null,
+    /** The last button's icon: removing, unless it does something else. */
+    val removeIcon: ImageVector = Icons.Outlined.Close,
+    /** Shows the last button filled, for one that's on (saved, say). */
+    val removeActive: Boolean = false,
 ) {
     companion object {
         fun later(model: AppModel, item: LaterItem) =
@@ -428,6 +432,12 @@ internal class QueueActions(
 
         fun liked(model: AppModel, item: LaterItem) = QueueActions(
             null, { model.openAddToPlaylist(listOf(item.id)) }, { model.mark(listOf(item.id), null) }, "Unlike", "liked",
+        )
+
+        /** An upload of someone followed: play it, keep it in a playlist, or save it for later. */
+        fun upload(model: AppModel, item: LaterItem, saved: Boolean, onToggleLater: () -> Unit) = QueueActions(
+            null, { model.openAddToPlaylist(listOf(item.id)) }, onToggleLater, if (saved) "Saved for later" else "Save for later", "",
+            removeIcon = Icons.Outlined.WatchLater, removeActive = saved,
         )
 
         fun history(model: AppModel, item: LaterItem, watchCount: Int) = QueueActions(
@@ -458,7 +468,7 @@ private fun QueueRowCompact(model: AppModel, item: LaterItem, actions: QueueActi
                 RoundAction(Icons.Filled.PlayArrow, "Play", filled = true) { model.open(item.id) }
                 actions.watched?.let { RoundAction(Icons.Outlined.CheckCircle, "Mark as watched", onClick = it) }
                 actions.playlist?.let { RoundAction(Icons.AutoMirrored.Outlined.PlaylistAdd, "Add to a playlist", onClick = it) }
-                RoundAction(Icons.Outlined.Close, actions.removeHint, onClick = actions.remove)
+                RoundAction(actions.removeIcon, actions.removeHint, filled = actions.removeActive, onClick = actions.remove)
             }
         }
     }
@@ -510,7 +520,7 @@ internal fun QueueRow(model: AppModel, item: LaterItem, position: Int?, actions:
             RoundAction(Icons.AutoMirrored.Outlined.PlaylistAdd, "Add to a playlist", onClick = it)
         }
         Spacer(Modifier.width(8.dp))
-        RoundAction(Icons.Outlined.Close, actions.removeHint, onClick = actions.remove)
+        RoundAction(actions.removeIcon, actions.removeHint, filled = actions.removeActive, onClick = actions.remove)
     }
 }
 

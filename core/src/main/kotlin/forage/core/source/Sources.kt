@@ -43,5 +43,7 @@ class Sources(val members: List<ExtractorSource>) : ExtractorSource {
 
     override fun previewFrames(id: PlatformId): List<String> = byPlatform[id.platform]?.previewFrames(id).orEmpty()
 
+    override fun channelFeed(channel: PlatformId, name: String?): ChannelFeed = of(channel).channelFeed(channel, name)
+
     override fun parseLink(text: String): PlatformId? = members.firstNotNullOfOrNull { it.parseLink(text) }
 }

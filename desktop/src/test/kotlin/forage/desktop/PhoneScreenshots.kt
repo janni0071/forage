@@ -59,7 +59,15 @@ fun main(args: Array<String>) {
         openLibrary(forage.app.LibraryView.LATER)
     }
     shot("topics") { openLibrary(forage.app.LibraryView.TASTE); loadTopics() }
-    shot("subscriptions") { go(Screen.SUBSCRIPTIONS) }
+    shot("subscriptions") {
+        // Looks up everyone followed first, so the screen has their uploads.
+        refreshFeeds(force = true)
+        val start = System.currentTimeMillis()
+        while (checkingFeeds && System.currentTimeMillis() - start < 180_000) Thread.sleep(500)
+        go(Screen.SUBSCRIPTIONS)
+        message = null
+    }
+    shot("subscriptions-manage") { managingFollowing = true }
     shot("settings") { settingsOpen = true }
     shot("add") {
         settingsOpen = false

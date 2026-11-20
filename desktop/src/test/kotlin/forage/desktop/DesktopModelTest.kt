@@ -459,7 +459,7 @@ class DesktopModelTest {
         model.library.follow(id("UCwren"), "Workshop Wren")
         model.unfollow(id("UCwren"))
         assertEquals(emptyList(), model.following)
-        model.follow(forage.core.importer.Subscription(id("UCwren"), "Workshop Wren"))
+        model.follow(forage.core.library.FollowedChannel(id("UCwren"), "Workshop Wren"))
         assertEquals(listOf("Workshop Wren"), model.following.map { it.name })
     }
 
@@ -485,5 +485,44 @@ class DesktopModelTest {
         assertEquals(false, model.library.follows(PlatformId("pornhub", "pornstar/performer-a")))
         model.toggleFollow(creators[1])
         assertEquals(emptySet(), model.videoPage!!.following)
+    }
+
+    @Test
+    fun `subscriptions look up new uploads, mark them new once, and save them for later`() {
+        var uploads = listOf(VideoStub(id("old"), "An older one", id("UCwren"), "Workshop Wren", 600, false, Instant.parse("2026-11-01T00:00:00Z")))
+        val feeds = object : ExtractorSource by offline {
+            override val capabilities = setOf(Capability.CHANNEL_FEED)
+            override fun forPlatform(platform: String) = takeIf { platform == "youtube" }
+            override fun channelFeed(channel: PlatformId, name: String?) = forage.core.source.ChannelFeed(uploads, "Workshop Wren", "https://img/wren.jpg")
+        }
+        val m = DesktopModel(dir.resolve("feeds"), CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined) { feeds }
+        try {
+            m.library.follow(id("UCwren"), "Workshop Wren")
+            m.refreshFeeds(force = true)
+            // The first look fills the list without calling it new.
+            assertEquals(listOf("old"), m.uploads.map { it.video.id.id })
+            assertEquals(0, m.newUploads)
+            assertEquals("https://img/wren.jpg", m.following.single().avatarUrl)
+
+            // Times are kept to the second; the next look comes a little later.
+            Thread.sleep(1_100)
+            uploads = listOf(VideoStub(id("new"), "Just out", id("UCwren"), "Workshop Wren", 300, false, Instant.now())) + uploads
+            m.refreshFeeds(force = true)
+            assertEquals(listOf("new", "old"), m.uploads.map { it.video.id.id })
+            assertEquals(1, m.newUploads)
+            assertEquals("1 new upload", m.message)
+
+            // Seen once the subscriptions were visited and left.
+            m.go(Screen.SUBSCRIPTIONS)
+            assertEquals(1, m.newUploads)
+            m.go(Screen.HOME)
+            assertEquals(0, m.newUploads)
+
+            m.toggleLater(m.uploads.first().video)
+            assertEquals(listOf(id("new")), m.later.map { it.id })
+            assertEquals("Just out", m.later.single().title)
+        } finally {
+            m.close()
+        }
     }
 }

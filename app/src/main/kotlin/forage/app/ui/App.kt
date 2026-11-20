@@ -52,6 +52,8 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -155,8 +157,18 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
                     NavigationBarItem(
                         selected = model.screen == screen,
                         onClick = { model.go(screen) },
-                        icon = { Icon(icon, contentDescription = null) },
-                        label = { Text(label) },
+                        icon = {
+                            // How many new uploads wait in the subscriptions.
+                            val count = if (screen == Screen.SUBSCRIPTIONS) model.newUploads else 0
+                            if (count > 0) {
+                                BadgedBox(badge = { Badge(containerColor = Accent.pastelPink, contentColor = Color(0xFF3E0423)) { Text(if (count > 99) "99+" else "$count") } }) {
+                                    Icon(icon, contentDescription = null)
+                                }
+                            } else {
+                                Icon(icon, contentDescription = null)
+                            }
+                        },
+                        label = { Text(label, maxLines = 1) },
                     )
                 }
             }
@@ -309,7 +321,9 @@ private fun Sidebar(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
         NavItem(Icons.Outlined.AutoAwesome, "Discover", model.screen == Screen.DISCOVER, count = model.picks.size.takeIf { it > 0 }) {
             model.go(Screen.DISCOVER)
         }
-        NavItem(Icons.Outlined.Subscriptions, "Subscriptions", model.screen == Screen.SUBSCRIPTIONS) { model.go(Screen.SUBSCRIPTIONS) }
+        NavItem(Icons.Outlined.Subscriptions, "Subscriptions", model.screen == Screen.SUBSCRIPTIONS, count = model.newUploads.takeIf { it > 0 }) {
+            model.go(Screen.SUBSCRIPTIONS)
+        }
         NavItem(Icons.Outlined.VideoLibrary, "Library", model.screen == Screen.LIBRARY) { model.go(Screen.LIBRARY) }
 
         Spacer(Modifier.weight(1f))

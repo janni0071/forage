@@ -142,3 +142,42 @@ class WatchLaterTest {
         assertEquals(754L, store.video(id)!!.durationSeconds)
     }
 }
+
+class SubscriptionFeedTest {
+    private fun id(s: String) = PlatformId.youtube(s)
+    private var now = Instant.parse("2026-11-20T08:00:00Z")
+    private val store = LibraryStore(memoryDatabase()) { now }
+    private fun video(v: String, daysAgo: Long, title: String = "Video $v") =
+        forage.core.source.VideoStub(id(v), title, id("UCwren"), "Workshop Wren", 600, false, now.minusSeconds(daysAgo * 86_400))
+
+    @Test
+    fun `a channel's first check fills its uploads without calling them new, later ones are`() {
+        store.follow(id("UCwren"), "Workshop Wren")
+        store.storeFeed(id("UCwren"), forage.core.source.ChannelFeed(listOf(video("a", 1), video("b", 3)), "Workshop Wren", "https://img/wren.jpg"))
+        assertEquals(listOf("a", "b"), store.uploads().map { it.video.id.id })
+        assertEquals(listOf(false, false), store.uploads().map { it.isNew })
+        assertEquals("https://img/wren.jpg", store.following().single().avatarUrl)
+
+        now = now.plusSeconds(86_400)
+        store.storeFeed(id("UCwren"), forage.core.source.ChannelFeed(listOf(video("c", 0), video("a", 2, "Video a, fixed"))))
+        assertEquals(listOf("c", "a", "b"), store.uploads().map { it.video.id.id })
+        assertEquals(listOf(true, false, false), store.uploads().map { it.isNew })
+        assertEquals("Video a, fixed", store.uploads()[1].video.title)
+        // The picture stays when a later look has none.
+        assertEquals("https://img/wren.jpg", store.following().single().avatarUrl)
+
+        store.markUploadsSeen()
+        assertEquals(listOf(false, false, false), store.uploads().map { it.isNew })
+
+        store.markGone(id("UCwren"), "This channel was removed")
+        assertEquals("This channel was removed", store.following().single().gone)
+        store.storeFeed(id("UCwren"), forage.core.source.ChannelFeed(emptyList()))
+        assertEquals(null, store.following().single().gone)
+
+        // Only the newest are kept; unfollowing forgets them.
+        store.storeFeed(id("UCwren"), forage.core.source.ChannelFeed(emptyList()), keep = 2)
+        assertEquals(listOf("c", "a"), store.uploads().map { it.video.id.id })
+        store.unfollow(id("UCwren"))
+        assertEquals(emptyList(), store.uploads())
+    }
+}

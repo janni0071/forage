@@ -30,6 +30,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,6 +83,21 @@ fun HomeScreen(model: AppModel, onImport: () -> Unit) {
                 }
             }
 
+            if (model.uploads.isNotEmpty()) {
+                val newCount = model.newUploads
+                item { SectionTitle(if (newCount > 0) "New from your subscriptions · $newCount" else "From your subscriptions", "All") { model.go(Screen.SUBSCRIPTIONS) } }
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(model.uploads.take(12), key = { it.video.id.toString() }) { u ->
+                            val v = u.video
+                            VideoTile(model, v.id, v.title, listOfNotNull(v.channelName, formatAge(v.uploadedAt)).joinToString("  ·  "), v.durationSeconds, tile) {
+                                model.showVideo(v)
+                            }
+                        }
+                    }
+                }
+            }
+
             if (model.picks.isNotEmpty()) {
                 item { SectionTitle("From your latest Discover batch", "All ${model.picks.size}") { model.go(Screen.DISCOVER) } }
                 item {
@@ -115,7 +135,7 @@ fun HomeScreen(model: AppModel, onImport: () -> Unit) {
                                     .pointerHoverIcon(PointerIcon.Hand).padding(vertical = 4.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
-                                Initial(s.name ?: "?", 56.dp)
+                                Avatar(model, s.name ?: "?", s.avatarUrl, 56.dp)
                                 Text(
                                     s.name ?: s.channel.id,
                                     style = MaterialTheme.typography.labelSmall,
@@ -135,7 +155,21 @@ fun HomeScreen(model: AppModel, onImport: () -> Unit) {
     }
 }
 
-/** A round badge with someone's first letter, until channels have pictures (SPEC, Direction). */
+/** Someone's picture, round, where the platform has one; their first letter otherwise. */
+@Composable
+fun Avatar(model: AppModel, name: String, url: String?, size: androidx.compose.ui.unit.Dp) {
+    var image by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(url) { if (url != null && model.showThumbnails) image = model.thumbnails.frame(url) }
+    val loaded = image
+    if (loaded == null) return Initial(name, size)
+    androidx.compose.foundation.Image(
+        loaded, contentDescription = null,
+        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        modifier = Modifier.size(size).clip(CircleShape),
+    )
+}
+
+/** A round badge with someone's first letter, where there's no picture. */
 @Composable
 fun Initial(name: String, size: androidx.compose.ui.unit.Dp) {
     val c = MaterialTheme.colorScheme
