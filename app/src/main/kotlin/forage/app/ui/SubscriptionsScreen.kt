@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.ManageAccounts
+import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -284,18 +285,18 @@ private fun FollowField(model: AppModel) {
         problem = model.followFromText(text)
         if (problem == null) text = ""
     }
-    Row(Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(bottom = 16.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        androidx.compose.material3.OutlinedTextField(
-            text, { text = it; problem = null },
-            singleLine = true,
-            placeholder = { Text(if (model.followsPerformers) "A performer's name, or a link" else "A link to a YouTube channel") },
-            isError = problem != null,
-            supportingText = problem?.let { { Text(it) } },
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { follow() }),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.weight(1f),
-        )
-        Button(onClick = { follow() }, enabled = text.isNotBlank(), shape = RoundedCornerShape(12.dp), modifier = Modifier.padding(top = 4.dp).height(48.dp)) { Text("Follow") }
+    // The same height as Forage's other fields and buttons, side by side.
+    Column(Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(bottom = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SearchField(
+                text, { text = it; problem = null },
+                if (model.followsPerformers) "A performer's name, or a link" else "A link to a YouTube channel",
+                Modifier.weight(1f),
+                onSearch = ::follow,
+                icon = androidx.compose.material.icons.Icons.Outlined.PersonAdd,
+            )
+            Button(onClick = { follow() }, enabled = text.isNotBlank(), shape = RoundedCornerShape(12.dp), modifier = Modifier.height(ControlHeight)) { Text("Follow") }
+        }
+        problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 6.dp, start = 4.dp)) }
     }
 }

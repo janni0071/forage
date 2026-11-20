@@ -335,6 +335,8 @@ fun SearchField(
     placeholder: String,
     modifier: Modifier = Modifier,
     onSearch: (() -> Unit)? = null,
+    /** The icon at the start: a magnifier, unless the field is for something else. */
+    icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Outlined.Search,
 ) {
     val c = MaterialTheme.colorScheme
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -366,7 +368,7 @@ fun SearchField(
                     .padding(start = 12.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Outlined.Search, contentDescription = null, tint = c.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                Icon(icon, contentDescription = null, tint = c.onSurfaceVariant, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(10.dp))
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = c.onSurfaceVariant, maxLines = 1)
