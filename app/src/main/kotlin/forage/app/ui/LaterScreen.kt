@@ -314,6 +314,9 @@ private fun UpNext(model: AppModel, item: LaterItem, actions: QueueActions) {
             .padding(bottom = 18.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(c.surfaceContainerLow)
+            // Anywhere on the card opens the video; its buttons do their own thing.
+            .clickable { model.showLater(item) }
+            .pointerHoverIcon(PointerIcon.Hand)
             .padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -364,6 +367,7 @@ private fun UpNextCompact(model: AppModel, item: LaterItem, actions: QueueAction
             .padding(bottom = 14.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(c.surfaceContainerLow)
+            .clickable { model.showLater(item) }
             .padding(12.dp),
     ) {
         BigThumbnail(model, item, width = null, playIcon = 52.dp)
@@ -455,7 +459,11 @@ internal class QueueActions(
 @Composable
 private fun QueueRowCompact(model: AppModel, item: LaterItem, actions: QueueActions) {
     val c = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
+    // Anywhere on the row opens the video; its buttons do their own thing.
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { model.showLater(item) }.padding(vertical = 6.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
         BigThumbnail(model, item, width = 136.dp, playIcon = 30.dp)
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(
@@ -489,6 +497,8 @@ internal fun QueueRow(model: AppModel, item: LaterItem, position: Int?, actions:
             .clip(RoundedCornerShape(16.dp))
             .background(if (hovered) c.surfaceContainerLow else Color.Transparent)
             .hoverable(hover)
+            .clickable { model.showLater(item) }
+            .pointerHoverIcon(PointerIcon.Hand)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

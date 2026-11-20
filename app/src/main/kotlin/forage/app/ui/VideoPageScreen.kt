@@ -111,14 +111,18 @@ fun VideoPageScreen(model: AppModel, page: VideoPage) {
         val listState = rememberLazyListState()
         LaunchedEffect(page.id) { listState.scrollToItem(0) }
         if (sideBySide) {
+            // The video's column as wide as the video, the related videos right beside it; what's
+            // left over goes to the far side, not between the two.
+            val gutter = 24.dp
+            val mainColumn = minOf(mainWidth + gutter, maxWidth - 48.dp - relatedWidth)
             Row(Modifier.fillMaxSize().padding(screenPadding())) {
-                LazyColumn(Modifier.weight(1f).fillMaxHeight(), state = listState, contentPadding = PaddingValues(end = 24.dp, bottom = 48.dp)) {
+                LazyColumn(Modifier.width(mainColumn).fillMaxHeight(), state = listState, contentPadding = PaddingValues(end = gutter, bottom = 48.dp)) {
                     item { BackRow(model) }
                     item { Main(model, page, mainWidth) }
                 }
                 val sideState = rememberLazyListState()
                 LaunchedEffect(page.id) { sideState.scrollToItem(0) }
-                Box(Modifier.width(relatedWidth).fillMaxHeight()) {
+                Box(Modifier.weight(1f, fill = false).widthIn(min = relatedWidth, max = 520.dp).fillMaxHeight()) {
                     LazyColumn(Modifier.fillMaxSize().padding(end = scrollbarGap()), state = sideState, contentPadding = PaddingValues(top = 52.dp, bottom = 48.dp)) {
                         relatedItems(model, page, related)
                     }

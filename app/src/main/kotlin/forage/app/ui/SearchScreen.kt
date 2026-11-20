@@ -119,7 +119,8 @@ private fun ResultCard(model: AppModel, stub: VideoStub, liked: Boolean, saved: 
     val hovered by hover.collectIsHoveredAsState()
     val zoom by animateFloatAsState(if (hovered) 1.04f else 1f)
     var holding by remember { mutableStateOf(false) }
-    Column {
+    // Anywhere on the card opens the video; its buttons do their own thing.
+    Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { model.showVideo(stub) }.pointerHoverIcon(PointerIcon.Hand)) {
         Box(
             Modifier
                 .fillMaxWidth()

@@ -180,7 +180,11 @@ private fun PickCard(model: AppModel, view: PickView) {
     // On a phone, touching and holding the thumbnail plays its preview.
     var holding by remember { mutableStateOf(false) }
 
-    Column(Modifier.alpha(if (rejected) 0.45f else 1f)) {
+    // Anywhere on the card opens the video; its buttons do their own thing.
+    Column(
+        Modifier.alpha(if (rejected) 0.45f else 1f).clip(RoundedCornerShape(14.dp))
+            .clickable { model.showPick(pick) }.pointerHoverIcon(PointerIcon.Hand),
+    ) {
         // The thumbnail: click to watch; zooms gently under the mouse.
         Box(
             Modifier

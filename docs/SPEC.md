@@ -121,6 +121,7 @@ Order of work, each step usable on its own:
    - **Not interested** on an upload also takes it out of the subscriptions: the way to drop someone else's video that only carries a performer's name as a tag.
    - **Order:** the people along the top and in Manage follow a chosen order: by name, by latest upload, or most recently followed (kept in settings).
    - **Performers the API doesn't list** (amateur models are often only in their videos' tags): after the performer filter, a name search by newest and by relevance, keeping videos that list the performer or carry their name as a tag.
+   - Rows and cards open the video's page wherever they're tapped (the queue, playlists, Liked, History, subscriptions, search results, Discover); their buttons do their own thing. On a wide video page the related videos sit right beside the video.
    - Lists keep their scroll position while a video page is in front, and start at the top when their order or filter changes.
 
 Sync (M4) follows after these.
