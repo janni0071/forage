@@ -87,6 +87,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.WatchLater
+import forage.app.LaterItem
 import forage.app.LibraryRow
 import forage.app.LibrarySource
 import forage.app.StateFilter
@@ -134,6 +135,26 @@ private fun LibraryList(model: AppModel) {
                         modifier = Modifier.padding(top = 24.dp).widthIn(max = 640.dp),
                     )
                 }
+            } else if (bigRows(model)) {
+                // Liked and the history are for playing and keeping: big rows with those buttons.
+                val listState = rememberLazyListState()
+                val history = model.currentSource == LibrarySource.History
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(end = scrollbarGap(), bottom = 120.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (compact) item { header() }
+                    items(visible, key = { it.id.toString() }) { row ->
+                        val item = LaterItem(
+                            row.id, row.title, row.channelName, row.durationSeconds, null,
+                            (if (history) row.lastSeen else row.decidedAt) ?: java.time.Instant.EPOCH,
+                        )
+                        QueueRow(model, item, null, if (history) QueueActions.history(model, item, row.watchCount) else QueueActions.liked(model, item))
+                    }
+                }
+                Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             } else if (model.libraryGrid) {
                 val gridState = rememberLazyGridState()
                 LazyVerticalGrid(
@@ -162,6 +183,9 @@ private fun LibraryList(model: AppModel) {
     }
 }
 
+/** Liked and the history show big rows to play from; the other lists stay lists to select from. */
+private fun bigRows(model: AppModel) = model.currentSource == LibrarySource.Liked || model.currentSource == LibrarySource.History
+
 /** What an empty list says, depending on why it's empty. */
 private fun emptyListText(model: AppModel): String = when {
     model.rows.isNotEmpty() -> "Nothing here matches. Try another filter or search."
@@ -186,7 +210,7 @@ private fun LibraryHeader(model: AppModel, visibleCount: Int) {
         ScreenHeader(source.label, listSubtitle(model)) {
             // A phone searches with the bar at the bottom.
             if (!compact) SearchField(model.query, { model.query = it }, "Search titles and channels", Modifier.width(280.dp))
-            ViewToggle(model)
+            if (!bigRows(model)) ViewToggle(model)
             // A phone has no room for them beside the sort: the history's switches come up here.
             if (compact && source == LibrarySource.History) {
                 OutlinedIconButton(
@@ -257,7 +281,7 @@ private fun LibraryHeader(model: AppModel, visibleCount: Int) {
         }
         // Mixed lists can be narrowed to what you liked or didn't.
         if (source == LibrarySource.History || source == LibrarySource.All || source is LibrarySource.Playlist) Filters(model)
-        ActionBar(model, visibleCount)
+        if (bigRows(model)) Spacer(Modifier.height(8.dp)) else ActionBar(model, visibleCount)
     }
 }
 

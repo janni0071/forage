@@ -113,6 +113,8 @@ data class LibraryRow(
     val isShort: Boolean,
     val state: VideoState?,
     val hasMetadata: Boolean,
+    /** When the profile liked or turned down the video, if it did. */
+    val decidedAt: Instant? = null,
 )
 
 enum class Feedback { LIKE, NOT_INTERESTED, SAVED }
@@ -1467,7 +1469,7 @@ class AppModel(
             }
         }
         val meta = cache.allMetadata()
-        rows = toRows(videos, states, meta).let { recent ->
+        rows = toRows(videos, states, meta, entries.associate { it.video to it.changedAt }).let { recent ->
             when (listSort) {
                 ListSort.RECENT -> recent
                 ListSort.OLDEST -> recent.asReversed()
@@ -1481,7 +1483,12 @@ class AppModel(
         loadHome(entries, meta)
     }
 
-    private fun toRows(videos: List<WatchedVideo>, states: Map<PlatformId, VideoState>, meta: Map<PlatformId, forage.core.source.VideoMetadata>) =
+    private fun toRows(
+        videos: List<WatchedVideo>,
+        states: Map<PlatformId, VideoState>,
+        meta: Map<PlatformId, forage.core.source.VideoMetadata>,
+        decided: Map<PlatformId, Instant?> = emptyMap(),
+    ) =
         videos.map { v ->
             val m = meta[v.video]
             val known = if (m == null && (v.title == null || v.channelName == null)) library.video(v.video) else null
@@ -1495,6 +1502,7 @@ class AppModel(
                 isShort = m?.isShort == true || v.isShort,
                 state = states[v.video],
                 hasMetadata = m != null,
+                decidedAt = decided[v.video],
             )
         }
 

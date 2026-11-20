@@ -20,7 +20,14 @@ enum class VideoState(val stored: String) {
 
 data class ProfileRef(val id: Long, val name: String)
 
-data class ProfileEntry(val video: PlatformId, val state: VideoState, val weight: Float, val source: String)
+data class ProfileEntry(
+    val video: PlatformId,
+    val state: VideoState,
+    val weight: Float,
+    val source: String,
+    /** When the video was liked or turned down. */
+    val changedAt: Instant? = null,
+)
 
 /** One recommendation of the latest Discover batch, as stored for the feedback buttons. */
 data class StoredPick(
@@ -79,7 +86,7 @@ class ProfileStore(private val db: ForageDatabase, private val clock: () -> Inst
 
     fun entries(profile: ProfileRef, state: VideoState? = null): List<ProfileEntry> =
         queries.selectProfileVideos(profile.id).executeAsList()
-            .mapNotNull { row -> VideoState.of(row.state)?.let { ProfileEntry(PlatformId.parse(row.video_id), it, row.weight.toFloat(), row.source) } }
+            .mapNotNull { row -> VideoState.of(row.state)?.let { ProfileEntry(PlatformId.parse(row.video_id), it, row.weight.toFloat(), row.source, Instant.ofEpochSecond(row.changed_at)) } }
             .filter { state == null || it.state == state }
 
     // Feedback on a recommendation (SPEC, Feedback).

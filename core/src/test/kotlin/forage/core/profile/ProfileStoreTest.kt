@@ -50,7 +50,7 @@ class ProfileStoreTest {
         store.like(main, id("a"))
         store.notInterested(main, id("b"))
         val entries = store.entries(main).associateBy { it.video }
-        assertEquals(ProfileEntry(id("a"), VideoState.LIKED, 1f, "discover"), entries.getValue(id("a")))
+        assertEquals(ProfileEntry(id("a"), VideoState.LIKED, 1f, "discover"), entries.getValue(id("a")).copy(changedAt = null))
         assertEquals(VideoState.NOT_INTERESTED, entries.getValue(id("b")).state)
     }
 

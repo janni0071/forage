@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import forage.app.AppModel
 import forage.app.LibraryDialog
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
@@ -270,14 +271,36 @@ private fun UpNextCompact(model: AppModel, item: LaterItem) {
     }
 }
 
-/** What a row in the queue or a playlist offers besides Play: Watched (the queue only) and Remove. */
-private class QueueActions(val watched: (() -> Unit)?, val remove: () -> Unit, val removeHint: String, val verb: String) {
+/**
+ * What a big row offers besides Play: Watched (the queue only), Add to playlist, and Remove from
+ * wherever it is. [verb] says what the row's date is ("saved 3 days ago").
+ */
+internal class QueueActions(
+    val watched: (() -> Unit)?,
+    val playlist: (() -> Unit)?,
+    val remove: () -> Unit,
+    val removeHint: String,
+    val verb: String,
+    /** Something more to say about the video, e.g. how often it was watched. */
+    val note: String? = null,
+) {
     companion object {
         fun later(model: AppModel, item: LaterItem) =
-            QueueActions({ model.markWatched(item) }, { model.removeFromLater(item.id) }, "Remove from the queue", "saved")
+            QueueActions({ model.markWatched(item) }, null, { model.removeFromLater(item.id) }, "Remove from the queue", "saved")
 
         fun playlist(model: AppModel, item: LaterItem) =
-            QueueActions(null, { model.removeFromPlaylist(listOf(item.id)) }, "Remove from the playlist", "added")
+            QueueActions(null, null, { model.removeFromPlaylist(listOf(item.id)) }, "Remove from the playlist", "added")
+
+        fun liked(model: AppModel, item: LaterItem) = QueueActions(
+            null, { model.openAddToPlaylist(listOf(item.id)) }, { model.mark(listOf(item.id), null) }, "Unlike", "liked",
+        )
+
+        fun history(model: AppModel, item: LaterItem, watchCount: Int) = QueueActions(
+            null, { model.openAddToPlaylist(listOf(item.id)) }, { model.forget(listOf(item.id)) }, "Remove from history",
+            // "watched 4×, last 6 days ago" for a rewatched video.
+            if (watchCount > 1) "watched $watchCount×, last" else "watched",
+            note = "watched $watchCount×".takeIf { watchCount > 1 && item.savedAt == java.time.Instant.EPOCH },
+        )
     }
 }
 
@@ -295,18 +318,20 @@ private fun QueueRowCompact(model: AppModel, item: LaterItem, actions: QueueActi
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(details(item, actions.verb), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            Text(details(item, actions), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
             Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 RoundAction(Icons.Filled.PlayArrow, "Play", filled = true) { model.open(item.id) }
                 actions.watched?.let { RoundAction(Icons.Outlined.CheckCircle, "Mark as watched", onClick = it) }
+                actions.playlist?.let { RoundAction(Icons.AutoMirrored.Outlined.PlaylistAdd, "Add to a playlist", onClick = it) }
                 RoundAction(Icons.Outlined.Close, actions.removeHint, onClick = actions.remove)
             }
         }
     }
 }
 
+/** A video in a big row: thumbnail, title, a line about it, and its actions. [position] numbers it in a window. */
 @Composable
-private fun QueueRow(model: AppModel, item: LaterItem, position: Int, actions: QueueActions) {
+internal fun QueueRow(model: AppModel, item: LaterItem, position: Int?, actions: QueueActions) {
     if (LocalCompact.current) return QueueRowCompact(model, item, actions)
     val c = MaterialTheme.colorScheme
     val hover = remember { MutableInteractionSource() }
@@ -320,12 +345,14 @@ private fun QueueRow(model: AppModel, item: LaterItem, position: Int, actions: Q
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            "$position",
-            style = MaterialTheme.typography.titleMedium,
-            color = c.onSurfaceVariant,
-            modifier = Modifier.width(36.dp),
-        )
+        if (position != null) {
+            Text(
+                "$position",
+                style = MaterialTheme.typography.titleMedium,
+                color = c.onSurfaceVariant,
+                modifier = Modifier.width(36.dp),
+            )
+        }
         BigThumbnail(model, item, width = 230.dp, playIcon = 36.dp)
         Column(Modifier.weight(1f).padding(horizontal = 20.dp)) {
             Text(
@@ -336,12 +363,16 @@ private fun QueueRow(model: AppModel, item: LaterItem, position: Int, actions: Q
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.clickable { model.showLater(item) },
             )
-            Text(details(item, actions.verb), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+            Text(details(item, actions), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
         }
         RoundAction(Icons.Filled.PlayArrow, "Play", filled = true) { model.open(item.id) }
         actions.watched?.let {
             Spacer(Modifier.width(8.dp))
             RoundAction(Icons.Outlined.CheckCircle, "Mark as watched: off the queue and never recommended again", onClick = it)
+        }
+        actions.playlist?.let {
+            Spacer(Modifier.width(8.dp))
+            RoundAction(Icons.AutoMirrored.Outlined.PlaylistAdd, "Add to a playlist", onClick = it)
         }
         Spacer(Modifier.width(8.dp))
         RoundAction(Icons.Outlined.Close, actions.removeHint, onClick = actions.remove)
@@ -431,11 +462,12 @@ private fun EmptyQueue(model: AppModel) {
     }
 }
 
-private fun details(item: LaterItem, verb: String = "saved"): String = listOfNotNull(
+private fun details(item: LaterItem, actions: QueueActions? = null): String = listOfNotNull(
     item.channelName,
     formatAge(item.uploadedAt),
+    actions?.note,
     // Imports don't always say when a video was added.
-    item.savedAt.takeIf { it != java.time.Instant.EPOCH }?.let { "$verb ${formatAge(it)}" },
+    item.savedAt.takeIf { it != java.time.Instant.EPOCH }?.let { "${actions?.verb ?: "saved"} ${formatAge(it)}" },
 ).joinToString("  ·  ")
 
 /** Fetches titles and lengths for imported videos that have none yet, a batch at a time. */
