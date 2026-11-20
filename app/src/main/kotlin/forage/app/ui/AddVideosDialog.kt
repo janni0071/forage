@@ -94,58 +94,6 @@ fun AddVideosDialog(model: AppModel) {
     }
 }
 
-/** One search result: tap it for its page, or like it straight away. */
-@Composable
-internal fun SearchResultRow(model: AppModel, stub: VideoStub) {
-    val c = MaterialTheme.colorScheme
-    val liked = stub.id in model.searchLiked
-    val compact = LocalCompact.current
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-            .background(if (liked) c.primaryContainer.copy(alpha = 0.35f) else c.surfaceContainerLow)
-            .padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp),
-    ) {
-        Box(Modifier.clickable { model.showVideo(stub) }.pointerHoverIcon(PointerIcon.Hand)) {
-            Thumbnail(model, stub.id, if (compact) 112.dp else 160.dp)
-            formatDuration(stub.durationSeconds)?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = androidx.compose.ui.graphics.Color.White,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(5.dp)
-                        .clip(RoundedCornerShape(4.dp)).background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.75f))
-                        .padding(horizontal = 5.dp, vertical = 1.dp),
-                )
-            }
-        }
-        Column(Modifier.weight(1f)) {
-            Text(stub.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val meta = listOfNotNull(stub.channelName, formatAge(stub.uploadedAt), "Short".takeIf { stub.isShort }).joinToString("  ·  ")
-            if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        val icon = if (liked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp
-        if (compact) {
-            // Round buttons on a phone: a label would leave the title no room.
-            FilledTonalIconButton(onClick = { model.likeFromSearch(stub) }) { Icon(icon, contentDescription = if (liked) "Liked" else "Like", tint = if (liked) c.primary else c.onSecondaryContainer) }
-        } else if (liked) {
-            TextButton(onClick = { model.likeFromSearch(stub) }, shape = RoundedCornerShape(12.dp)) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Liked")
-            }
-        } else {
-            FilledTonalButton(onClick = { model.likeFromSearch(stub) }, shape = RoundedCornerShape(12.dp)) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Like")
-            }
-        }
-    }
-}
-
 @Composable
 private fun LinksTab(model: AppModel) {
     var link by remember { mutableStateOf("") }

@@ -567,7 +567,7 @@ private fun BigThumbnail(model: AppModel, item: LaterItem, width: Dp?, playIcon:
 }
 
 @Composable
-private fun RoundAction(icon: ImageVector, hint: String, filled: Boolean = false, onClick: () -> Unit) {
+internal fun RoundAction(icon: ImageVector, hint: String, filled: Boolean = false, onClick: () -> Unit) {
     val c = MaterialTheme.colorScheme
     Tooltip(
         tooltip = {

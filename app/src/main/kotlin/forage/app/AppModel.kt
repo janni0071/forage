@@ -454,6 +454,12 @@ class AppModel(
     /** True while the subscriptions show the list of who you follow, to change it. */
     var managingFollowing by mutableStateOf(false)
 
+    /** Plays a video from a list (a search result), keeping what the list knew about it for the history. */
+    fun play(video: VideoStub) {
+        launchQuiet { library.remember(video.id, video.title, video.channel, video.channelName, video.isShort, video.durationSeconds, video.uploadedAt) }
+        open(video.id)
+    }
+
     /** Saves a video for later, or takes it off the queue if it's there. */
     fun toggleLater(video: VideoStub) {
         val saved = later.any { it.id == video.id }
