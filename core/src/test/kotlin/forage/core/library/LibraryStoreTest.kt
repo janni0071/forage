@@ -25,19 +25,25 @@ class LibraryStoreTest {
             ),
             emptyMap(),
         ),
-        playlists = mapOf("Watch later" to listOf(PlaylistEntry(id("c"), at(5)), PlaylistEntry(id("a"), at(1)))),
+        playlists = mapOf(
+            "Woodwork" to listOf(PlaylistEntry(id("c"), at(5)), PlaylistEntry(id("a"), at(1))),
+            "Watch later" to listOf(PlaylistEntry(id("d"), at(7))),
+        ),
         subscriptions = listOf(Subscription(id("UCwren"), "Workshop Wren")),
     )
 
     @Test
     fun `import fills history, playlists and subscriptions, and repeating it changes nothing`() {
         val summary = store.importTakeout(takeout)
-        assertEquals(ImportSummary(3, mapOf("Watch later" to 2), 1), summary)
+        assertEquals(ImportSummary(3, mapOf("Woodwork" to 2, "Watch later" to 1), 1), summary)
         store.importTakeout(takeout)
-        assertEquals(3L to 3L, store.counts())
-        assertEquals(mapOf("Watch later" to 2L), store.playlists())
+        assertEquals(4L to 3L, store.counts())
+        assertEquals(mapOf("Woodwork" to 2L), store.playlists())
+        // YouTube's Watch later lands in the queue, with the time it was saved there.
+        assertEquals(listOf(SavedVideo(id("d"), at(7))), store.savedForLater())
+        assertEquals(listOf(id("a") to at(1), id("c") to at(5)), store.playlistItems("Woodwork"))
         assertEquals(listOf(Subscription(id("UCwren"), "Workshop Wren")), store.subscriptions())
-        assertEquals(setOf(id("a"), id("b"), id("c")), store.knownVideoIds())
+        assertEquals(setOf(id("a"), id("b"), id("c"), id("d")), store.knownVideoIds())
     }
 
     @Test
@@ -49,7 +55,7 @@ class LibraryStoreTest {
         assertEquals(setOf("Dovetails"), history.filter { it.video == id("a") }.map { it.title }.toSet())
         assertNull(history.single { it.video == id("b") }.watchedAt)
 
-        val saved = store.events(playlist = "Watch later").associateBy { it.video }
+        val saved = store.events(playlist = "Woodwork").associateBy { it.video }
         assertEquals(at(1), saved.getValue(id("a")).watchedAt)
         assertNull(saved.getValue(id("c")).title)
     }
@@ -80,18 +86,18 @@ class LibraryStoreTest {
     @Test
     fun `playlists can be made, filled, renamed and deleted`() {
         store.importTakeout(takeout)
-        assertEquals(true, store.createPlaylist("Woodwork"))
-        assertEquals(false, store.createPlaylist("Woodwork"))
-        assertEquals(0L, store.playlists()["Woodwork"])
-        assertEquals(2, store.addToPlaylist("Woodwork", listOf(id("a"), id("d"))))
-        assertEquals(0, store.addToPlaylist("Woodwork", listOf(id("a"))))
-        assertEquals(false, store.renamePlaylist("Woodwork", "Watch later"))
-        assertEquals(true, store.renamePlaylist("Woodwork", "Joinery"))
-        assertEquals(listOf(id("a"), id("d")), store.events("Joinery").map { it.video })
-        store.removeFromPlaylist("Joinery", listOf(id("a")))
-        assertEquals(mapOf("Joinery" to 1L, "Watch later" to 2L), store.playlists())
-        store.deletePlaylist("Joinery")
-        assertEquals(mapOf("Watch later" to 2L), store.playlists())
+        assertEquals(true, store.createPlaylist("Joinery"))
+        assertEquals(false, store.createPlaylist("Joinery"))
+        assertEquals(0L, store.playlists()["Joinery"])
+        assertEquals(2, store.addToPlaylist("Joinery", listOf(id("a"), id("e"))))
+        assertEquals(0, store.addToPlaylist("Joinery", listOf(id("a"))))
+        assertEquals(false, store.renamePlaylist("Joinery", "Woodwork"))
+        assertEquals(true, store.renamePlaylist("Joinery", "Carving"))
+        assertEquals(listOf(id("a"), id("e")), store.events("Carving").map { it.video })
+        store.removeFromPlaylist("Carving", listOf(id("a")))
+        assertEquals(mapOf("Carving" to 1L, "Woodwork" to 2L), store.playlists())
+        store.deletePlaylist("Carving")
+        assertEquals(mapOf("Woodwork" to 2L), store.playlists())
         // The videos stay in the library.
         assertEquals("Dovetails", store.video(id("a"))?.title)
     }
@@ -106,7 +112,7 @@ class LibraryStoreTest {
         store.clearHistory()
         assertEquals(emptyList(), store.events())
         // Playlists are not history.
-        assertEquals(2, store.events("Watch later").size)
+        assertEquals(2, store.events("Woodwork").size)
     }
 }
 

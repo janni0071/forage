@@ -31,4 +31,22 @@ class LikesMigrationTest {
         assertEquals(mapOf("Woodwork" to 2L), library.playlists())
         assertEquals(setOf(PlatformId.youtube("a"), PlatformId.youtube("d")), library.events("Woodwork").map { it.video }.toSet())
     }
+
+    @Test
+    fun `an imported Watch later playlist moves into the watch-later queue`() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        ForageDatabase.Schema.create(driver)
+        driver.execute(null, "INSERT INTO playlist VALUES ('Später ansehen', 0), ('Woodwork', 0)", 0)
+        driver.execute(null, "INSERT INTO playlist_item VALUES ('Später ansehen', 'youtube:a', 100), ('Später ansehen', 'youtube:b', NULL), ('Woodwork', 'youtube:c', 5)", 0)
+        driver.execute(null, "INSERT INTO watch_later VALUES ('youtube:a', 50)", 0)
+
+        ForageDatabase.Schema.migrate(driver, 10, 11)
+
+        val library = LibraryStore(ForageDatabase(driver))
+        assertEquals(mapOf("Woodwork" to 1L), library.playlists())
+        val saved = library.savedForLater().associate { it.id.id to it.savedAt.epochSecond }
+        // Already queued stays as it was; one without a date gets the time of the move.
+        assertEquals(50L, saved["a"])
+        assertEquals(setOf("a", "b"), saved.keys)
+    }
 }

@@ -106,6 +106,8 @@ Order of work, each step usable on its own:
    - **Library** opens on an overview: cards for Liked, Watch later, Playlists and History, "Your taste" (the former Topics tab, with rename, pin and mute), Not interested, All videos and recently liked. Each card opens its list; Back (the link, Escape or the phone's back gesture) returns to the overview.
    - **Search:** on phones a bar just above the tabs, sliding away while scrolling down and back when scrolling up; on desktop a bar at the top of every tab but the library, which has its own. Outside the library it searches the platforms, with the results on their own page (videos open from there, and Back returns to them); in the library it filters the list on screen, or from the overview searches all videos. The "Add videos" dialog is down to adding by link.
    - **Subscriptions** lists who you follow, with Following/Follow to change it; their new uploads come in step 5.
+   - **Playlists** open on a page of their own, laid out like the queue (videos in the order added, Recent/Oldest/Shortest, Rename and Delete), not in the library's general list. The overview's cards all keep one height.
+   - **YouTube's Watch later** (Takeout exports it as a playlist, named in the export's language) goes into Forage's watch-later queue, on import and, through migration 10.sqm (database version 11), for exports already imported. The queue and playlists fetch details for imported videos without titles, 200 at a time.
    - The Android launcher icon is adaptive now (gradient background, sparkle foreground, a single-colour layer for themed icons), so launchers no longer put it on a white disc.
 5. **Subscriptions**, with pictures and a new-uploads inbox (milestone M2's inbox).
 

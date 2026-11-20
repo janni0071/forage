@@ -69,4 +69,10 @@ object TakeoutFolder {
 
     private val ESCAPED = Regex("#U([0-9a-fA-F]{4,6})")
     private const val PLAYLIST_SUFFIX = "-videos.csv"
+
+    /**
+     * What YouTube's own Watch later is called in a Takeout export, by language: it comes as a
+     * playlist, but belongs in Forage's watch-later queue. Migration 10.sqm lists the same names.
+     */
+    val WATCH_LATER = setOf("Watch later", "Später ansehen", "Regarder plus tard", "Ver más tarde", "Ver mais tarde", "Assistir mais tarde", "Guarda più tardi", "Later bekijken", "Obejrzyj później", "Посмотреть позже", "Titta senare", "Se senere", "Katso myöhemmin")
 }

@@ -57,7 +57,7 @@ import java.time.Instant
 enum class Screen { HOME, DISCOVER, SUBSCRIPTIONS, LIBRARY }
 
 /** Where in the library tab: its overview, or one of the lists it leads to. */
-enum class LibraryView { HUB, LIST, PLAYLISTS, LATER, TASTE }
+enum class LibraryView { HUB, LIST, PLAYLISTS, PLAYLIST, LATER, TASTE }
 
 enum class ProfileDialog { NEW, DELETE, PRIVATE }
 
@@ -336,11 +336,52 @@ class AppModel(
         when {
             videoPage != null -> closeVideo()
             searchShown -> searchShown = false
+            screen == Screen.LIBRARY && libraryView == LibraryView.PLAYLIST -> libraryView = LibraryView.PLAYLISTS
             screen == Screen.LIBRARY && libraryView != LibraryView.HUB -> {
                 libraryView = LibraryView.HUB
                 selection = emptySet()
             }
         }
+    }
+
+    // A playlist, on a page of its own like the watch-later queue
+
+    /** The playlist on screen, in [LibraryView.PLAYLIST]. */
+    var openPlaylistName by mutableStateOf<String?>(null)
+        private set
+    var playlistItems by mutableStateOf<List<LaterItem>>(emptyList())
+        private set
+    /** In the order they were added, until the user picks another. */
+    var playlistSort by mutableStateOf(LaterSort.OLDEST)
+
+    val sortedPlaylist: List<LaterItem> get() = sorted(playlistItems, playlistSort)
+
+    fun openPlaylist(name: String) {
+        closeAllVideos()
+        searchShown = false
+        screen = Screen.LIBRARY
+        libraryView = LibraryView.PLAYLIST
+        openPlaylistName = name
+        playlistItems = emptyList()
+        launchQuiet { loadPlaylist() }
+    }
+
+    private fun loadPlaylist() {
+        val name = openPlaylistName ?: return
+        val meta = cache.allMetadata()
+        val known = library.allVideos().associateBy { it.id }
+        playlistItems = library.playlistItems(name).map { (id, added) -> laterItem(id, added ?: Instant.EPOCH, meta, known) }
+    }
+
+    private fun laterItem(
+        id: PlatformId,
+        at: Instant,
+        meta: Map<PlatformId, forage.core.source.VideoMetadata>,
+        known: Map<PlatformId, forage.core.library.LibraryVideo>,
+    ): LaterItem {
+        val m = meta[id]
+        val k = known[id]
+        return LaterItem(id, m?.title ?: k?.title, m?.channelName ?: k?.channelName, m?.durationSeconds ?: k?.durationSeconds, m?.uploadedAt ?: k?.uploadedAt, at)
     }
 
     // Search (SPEC, Direction: "Search within reach")
@@ -661,12 +702,14 @@ class AppModel(
     var laterSort by mutableStateOf(LaterSort.RECENT)
 
     /** The queue in the chosen order; videos of unknown length go last when sorting by length. */
-    val sortedLater: List<LaterItem>
-        get() = when (laterSort) {
-            LaterSort.RECENT -> later.sortedByDescending { it.savedAt }
-            LaterSort.OLDEST -> later.sortedBy { it.savedAt }
-            LaterSort.SHORTEST -> later.sortedBy { it.durationSeconds ?: Long.MAX_VALUE }
-        }
+    val sortedLater: List<LaterItem> get() = sorted(later, laterSort)
+
+    private fun sorted(items: List<LaterItem>, sort: LaterSort): List<LaterItem> = when (sort) {
+        LaterSort.RECENT -> items.sortedByDescending { it.savedAt }
+        // Stable, so a playlist's videos added at the same moment keep their order.
+        LaterSort.OLDEST -> items.sortedBy { it.savedAt }
+        LaterSort.SHORTEST -> items.sortedBy { it.durationSeconds ?: Long.MAX_VALUE }
+    }
 
     // Status
     var job by mutableStateOf<Job?>(null)
@@ -781,6 +824,7 @@ class AppModel(
             selection = emptySet()
             loadSources()
             loadRows()
+            if (openPlaylistName == clean) loadPlaylist()
             refreshPages()
             message = when {
                 added == 0 -> "Already in \"$clean\""
@@ -797,8 +841,8 @@ class AppModel(
         if (!library.createPlaylist(clean)) return "There's already a playlist called \"$clean\""
         libraryDialog = null
         loadSources()
-        openLibrary(LibraryView.LIST, sources.first { it is LibrarySource.Playlist && it.name == clean })
-        message = "Made \"$clean\". Add videos to it from the history, your likes or Discover."
+        openPlaylist(clean)
+        message = "Made \"$clean\". Add videos to it from their page, or from the history and your likes."
         return null
     }
 
@@ -809,28 +853,38 @@ class AppModel(
         val wasOpen = (currentSource as? LibrarySource.Playlist)?.name == old
         loadSources()
         if (wasOpen) currentSource = sources.first { it is LibrarySource.Playlist && it.name == clean }
+        if (openPlaylistName == old) openPlaylistName = clean
+        refreshPages()
         message = "Renamed to \"$clean\""
         return null
     }
 
     fun deletePlaylist(name: String) {
         libraryDialog = null
+        if (openPlaylistName == name) {
+            openPlaylistName = null
+            if (libraryView == LibraryView.PLAYLIST) libraryView = LibraryView.PLAYLISTS
+        }
         launchQuiet {
             library.deletePlaylist(name)
             loadSources()
             loadRows()
+            refreshPages()
             message = "Deleted \"$name\". Its videos are still in your library."
         }
     }
 
     /** Takes [ids] out of the playlist on screen. */
     fun removeFromPlaylist(ids: List<PlatformId>) {
-        val playlist = (currentSource as? LibrarySource.Playlist)?.name ?: return
+        val playlist = (if (libraryView == LibraryView.PLAYLIST) openPlaylistName else null)
+            ?: (currentSource as? LibrarySource.Playlist)?.name ?: return
         launchQuiet {
             library.removeFromPlaylist(playlist, ids)
             selection = emptySet()
             loadSources()
             loadRows()
+            if (openPlaylistName == playlist) loadPlaylist()
+            refreshPages()
             message = if (ids.size == 1) "Removed 1 video from \"$playlist\"" else "Removed ${ids.size} videos from \"$playlist\""
         }
     }
@@ -863,6 +917,20 @@ class AppModel(
             message = "Every video you liked or turned down already has its details"
             return
         }
+        fetchDetailsOf(ids)
+    }
+
+    /**
+     * Fetches details for the videos of the queue or a playlist that have no title yet, in the
+     * order shown, at most [FETCH_BATCH] at a time: an imported queue can hold thousands, which
+     * would take hours at the pace the platform allows.
+     */
+    fun fetchMissing(items: List<LaterItem>) {
+        val ids = items.filter { it.title == null }.map { it.id }.take(FETCH_BATCH)
+        if (ids.isNotEmpty()) fetchDetailsOf(ids)
+    }
+
+    private fun fetchDetailsOf(ids: List<PlatformId>) {
         runJob("Fetching details from ${source.displayName}", ids.size) { update ->
             val job = currentCoroutineContext()[CoroutineJob]
             val summary = MetadataFetcher(source, cache).fetchAll(ids) { id, outcome ->
@@ -877,6 +945,8 @@ class AppModel(
             }
             selection = emptySet()
             loadRows()
+            loadLater()
+            loadPlaylist()
             buildString {
                 append("Fetched ${summary.fetched}")
                 if (summary.cached > 0) append(", ${summary.cached} already had details")
@@ -1449,18 +1519,9 @@ class AppModel(
 
     private fun loadLater() {
         val meta = cache.allMetadata()
-        later = library.savedForLater().map { saved ->
-            val m = meta[saved.id]
-            val known = library.video(saved.id)
-            LaterItem(
-                saved.id,
-                m?.title ?: known?.title,
-                m?.channelName ?: known?.channelName,
-                m?.durationSeconds ?: known?.durationSeconds,
-                m?.uploadedAt ?: known?.uploadedAt,
-                saved.savedAt,
-            )
-        }
+        // One read of the library instead of one per video: an imported queue holds thousands.
+        val known = library.allVideos().associateBy { it.id }
+        later = library.savedForLater().map { laterItem(it.id, it.savedAt, meta, known) }
     }
 
     // Running work
@@ -1602,13 +1663,15 @@ class AppModel(
         return scope.launch { open.shutdown() }
     }
 
-    private companion object {
+    companion object {
         /** Likes beyond this many videos without details wait for "Fetch details". */
-        const val BACKGROUND_FETCH_LIMIT = 30
+        private const val BACKGROUND_FETCH_LIMIT = 30
         /** How many videos a row on Home shows. */
-        const val HOME_ROW = 12
-        const val MAX_PLAYLIST_NAME = 60
-        const val OUT_OF_MEMORY = "Not enough memory on this device to import the dump. Import it on a computer instead, " +
+        private const val HOME_ROW = 12
+        /** How many videos one "Fetch details" on the queue or a playlist asks for. */
+        const val FETCH_BATCH = 200
+        private const val MAX_PLAYLIST_NAME = 60
+        private const val OUT_OF_MEMORY = "Not enough memory on this device to import the dump. Import it on a computer instead, " +
             "then copy catalogues/pornhub.db from its Forage folder here and choose it in Settings."
     }
 }

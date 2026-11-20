@@ -132,6 +132,11 @@ INSERT OR REPLACE INTO playlist_item VALUES (?, ?, ?);
 selectPlaylistItems:
 SELECT * FROM playlist_item WHERE playlist = ?;
 
+-- In the order they were added; videos added together keep the order they were added in.
+selectPlaylistItemsInOrder:
+SELECT video_id, added_at FROM playlist_item WHERE playlist = ?
+ORDER BY coalesce(added_at, 9223372036854775807), rowid;
+
 selectPlaylists:
 SELECT p.name, count(i.video_id) AS videos
 FROM playlist p LEFT JOIN playlist_item i ON i.playlist = p.name

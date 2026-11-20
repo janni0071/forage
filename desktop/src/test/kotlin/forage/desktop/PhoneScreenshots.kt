@@ -47,6 +47,7 @@ fun main(args: Array<String>) {
     }
     shot("home") { go(Screen.HOME) }
     shot("library-hub") { go(Screen.LIBRARY) }
+    shot("playlist") { sources.filterIsInstance<forage.app.LibrarySource.Playlist>().firstOrNull()?.let { openPlaylist(it.name) } }
     shot("library") { openLibrary(forage.app.LibraryView.LIST) }
     shot("library-grid") { showLibraryAsGrid(true) }
     shot("discover") { showLibraryAsGrid(false); go(Screen.DISCOVER) }

@@ -108,6 +108,7 @@ fun LibraryScreen(model: AppModel, onImport: () -> Unit) {
         LibraryView.HUB -> if (model.libraryEmpty) EmptyLibrary(model, onImport) else LibraryHub(model)
         LibraryView.LIST -> LibraryList(model)
         LibraryView.PLAYLISTS -> PlaylistsScreen(model)
+        LibraryView.PLAYLIST -> PlaylistScreen(model)
         LibraryView.LATER -> LaterScreen(model)
         LibraryView.TASTE -> TopicsScreen(model)
     }
@@ -305,7 +306,8 @@ private fun SourceTabs(model: AppModel) {
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        for (source in model.sources) {
+        // Playlists have a page of their own, from the library's overview.
+        for (source in model.sources.filter { it !is LibrarySource.Playlist || it == model.currentSource }) {
             val selected = source == model.currentSource
             val (name, count) = when (source) {
                 LibrarySource.Liked -> "Liked" to model.profileSize.toLong()
@@ -840,8 +842,8 @@ private fun LibraryHub(model: AppModel) {
                 val playlists = model.sources.filterIsInstance<LibrarySource.Playlist>()
                 val cards = listOf<Triple<ImageVector, String, Pair<String, () -> Unit>>>(
                     Triple(Icons.Outlined.ThumbUp, "Liked", "%,d videos · your taste".format(model.profileSize) to { model.openLibrary(LibraryView.LIST, LibrarySource.Liked) }),
-                    Triple(Icons.Outlined.WatchLater, "Watch later", ("%,d videos".format(model.later.size) + (if (total > 0) " · ${formatDuration(total)}" else "")) to { model.openLibrary(LibraryView.LATER) }),
-                    Triple(Icons.AutoMirrored.Outlined.PlaylistPlay, "Playlists", (if (playlists.isEmpty()) "None yet" else playlists.joinToString(", ") { it.name }) to { model.openLibrary(LibraryView.PLAYLISTS) }),
+                    Triple(Icons.Outlined.WatchLater, "Watch later", ("%,d videos".format(model.later.size) + (if (total > 0) " · ${formatTotal(total)}" else "")) to { model.openLibrary(LibraryView.LATER) }),
+                    Triple(Icons.AutoMirrored.Outlined.PlaylistPlay, "Playlists", (if (playlists.isEmpty()) "None yet" else if (playlists.size == 1) "1 playlist" else "${playlists.size} playlists") to { model.openLibrary(LibraryView.PLAYLISTS) }),
                     Triple(Icons.Outlined.History, "History", ("%,d videos".format(model.historySize) + (if (!model.recordHistory) " · paused" else "")) to { model.openLibrary(LibraryView.LIST, LibrarySource.History) }),
                 )
                 val perRow = if (compact) 2 else 4
@@ -878,9 +880,10 @@ private fun LibraryHub(model: AppModel) {
 @Composable
 private fun HubCard(icon: ImageVector, title: String, text: String, modifier: Modifier, onClick: () -> Unit) {
     val c = MaterialTheme.colorScheme
+    // All the same height, whatever they say.
     Column(
         modifier
-            .heightIn(min = 96.dp)
+            .height(100.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(c.surfaceContainer)
             .clickable(onClick = onClick)
@@ -889,7 +892,7 @@ private fun HubCard(icon: ImageVector, title: String, text: String, modifier: Mo
     ) {
         Icon(icon, contentDescription = null, tint = c.primary, modifier = Modifier.size(24.dp))
         Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-        Text(text, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(text, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -984,7 +987,7 @@ private fun PlaylistsScreen(model: AppModel) {
                         .fillMaxWidth()
                         .widthIn(max = 720.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { model.openLibrary(LibraryView.LIST, p) }
+                        .clickable { model.openPlaylist(p.name) }
                         .pointerHoverIcon(PointerIcon.Hand)
                         .padding(horizontal = 8.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,

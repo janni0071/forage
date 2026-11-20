@@ -42,7 +42,7 @@ fun main(args: Array<String>) {
 
     shot("1-library-watch-later") {
         openLibrary(forage.app.LibraryView.LIST)
-        selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })
+        selectSource(LibrarySource.Liked)
         stateFilter = StateFilter.LIKED
         listOf(1, 3, 4).mapNotNull { visibleRows.getOrNull(it)?.id }.forEach(::toggle)
     }
@@ -78,7 +78,7 @@ fun main(args: Array<String>) {
     }
     shot("6-library-dark", dark = true) {
         openLibrary(forage.app.LibraryView.LIST)
-        selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })
+        selectSource(LibrarySource.Liked)
         stateFilter = StateFilter.LIKED
         listOf(1, 3).mapNotNull { visibleRows.getOrNull(it)?.id }.forEach(::toggle)
     }
@@ -86,7 +86,7 @@ fun main(args: Array<String>) {
         openLibrary(forage.app.LibraryView.LIST)
         stateFilter = StateFilter.ALL
         showLibraryAsGrid(true)
-        selectSource(sources.first { it is LibrarySource.Playlist && it.name == "Watch later" })
+        selectSource(LibrarySource.Liked)
         visibleRows.drop(2).take(2).forEach { toggle(it.id) }
         runBlocking { visibleRows.take(24).forEach { thumbnails.load(it.id) } }
     }
@@ -158,6 +158,7 @@ internal suspend fun preload(model: forage.app.AppModel) {
             forage.app.LibraryView.LATER -> model.later.take(8).forEach { model.thumbnails.load(it.id, large = true) }
             forage.app.LibraryView.TASTE -> model.topics.take(4).flatMap { t -> t.videos.take(6) }.forEach { model.thumbnails.load(it.id) }
             forage.app.LibraryView.PLAYLISTS -> {}
+            forage.app.LibraryView.PLAYLIST -> model.playlistItems.take(8).forEach { model.thumbnails.load(it.id, large = true) }
         }
     }
 }

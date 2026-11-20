@@ -503,3 +503,10 @@ fun SectionTitle(title: String, link: String? = null, onLink: () -> Unit = {}) {
         }
     }
 }
+
+/** "3 h 12 min" for a whole queue or playlist. */
+fun formatTotal(seconds: Long): String {
+    val h = seconds / 3600
+    val m = (seconds % 3600 + 59) / 60
+    return if (h > 0) "$h h $m min" else "$m min"
+}

@@ -1,0 +1,7 @@
+-- Version 11 moves YouTube's own Watch later, which Takeout exports as a playlist, into Forage's
+-- watch-later queue (TakeoutFolder.WATCH_LATER lists the names it has in other languages).
+INSERT OR IGNORE INTO watch_later (video_id, added_at)
+SELECT video_id, coalesce(added_at, CAST(strftime('%s', 'now') AS INTEGER))
+FROM playlist_item WHERE playlist IN ('Watch later', 'Später ansehen', 'Regarder plus tard', 'Ver más tarde', 'Ver mais tarde', 'Assistir mais tarde', 'Guarda più tardi', 'Later bekijken', 'Obejrzyj później', 'Посмотреть позже', 'Titta senare', 'Se senere', 'Katso myöhemmin');
+DELETE FROM playlist_item WHERE playlist IN ('Watch later', 'Später ansehen', 'Regarder plus tard', 'Ver más tarde', 'Ver mais tarde', 'Assistir mais tarde', 'Guarda più tardi', 'Later bekijken', 'Obejrzyj później', 'Посмотреть позже', 'Titta senare', 'Se senere', 'Katso myöhemmin');
+DELETE FROM playlist WHERE name IN ('Watch later', 'Später ansehen', 'Regarder plus tard', 'Ver más tarde', 'Ver mais tarde', 'Assistir mais tarde', 'Guarda più tardi', 'Later bekijken', 'Obejrzyj później', 'Посмотреть позже', 'Titta senare', 'Se senere', 'Katso myöhemmin');

@@ -64,7 +64,7 @@ class DesktopModelTest {
                     ),
                     emptyMap(),
                 ),
-                mapOf("Watch later" to listOf(PlaylistEntry(id("c"), null))),
+                mapOf("Woodwork" to listOf(PlaylistEntry(id("c"), null))),
                 emptyList(),
             )
         )
@@ -113,7 +113,7 @@ class DesktopModelTest {
 
     @Test
     fun `lists the history and filters it by text and state`() {
-        assertEquals(listOf("Liked", "History", "Watch later", "Not interested", "All videos"), model.sources.map { it.label })
+        assertEquals(listOf("Liked", "History", "Woodwork", "Not interested", "All videos"), model.sources.map { it.label })
         assertEquals(LibrarySource.Liked, model.currentSource)
         assertEquals(emptyList(), model.rows)
         model.selectSource(LibrarySource.History)
@@ -157,27 +157,35 @@ class DesktopModelTest {
     }
 
     @Test
-    fun `playlists are made, filled, renamed, emptied and deleted`() {
+    fun `playlists are made, filled, renamed, emptied and deleted on a page of their own`() {
         assertNull(model.createPlaylist("  Bread  "))
-        assertEquals(LibrarySource.Playlist("Bread", 0), model.currentSource)
+        assertEquals(LibraryView.PLAYLIST, model.libraryView)
+        assertEquals("Bread", model.openPlaylistName)
         assertTrue("already" in model.createPlaylist("Bread")!!)
         model.openAddToPlaylist(listOf(id("b"), id("a")))
         assertEquals(LibraryDialog.AddToPlaylist(listOf(id("b"), id("a"))), model.libraryDialog)
         assertNull(model.addToPlaylist("Bread", listOf(id("b"), id("a"))))
         assertNull(model.libraryDialog)
         assertEquals("Added 2 videos to \"Bread\"", model.message)
-        assertEquals(LibrarySource.Playlist("Bread", 2), model.currentSource)
-        assertEquals(setOf(id("a"), id("b")), model.rows.map { it.id }.toSet())
+        // In the order they were added.
+        assertEquals(listOf(id("b"), id("a")), model.sortedPlaylist.map { it.id })
+        assertEquals("Sourdough basics", model.sortedPlaylist.first().title)
 
-        assertTrue("already" in model.renamePlaylist("Bread", "Watch later")!!)
+        assertTrue("already" in model.renamePlaylist("Bread", "Woodwork")!!)
         assertNull(model.renamePlaylist("Bread", "Baking"))
-        assertEquals(LibrarySource.Playlist("Baking", 2), model.currentSource)
+        assertEquals("Baking", model.openPlaylistName)
         model.removeFromPlaylist(listOf(id("a")))
-        assertEquals(listOf(id("b")), model.rows.map { it.id })
+        assertEquals(listOf(id("b")), model.playlistItems.map { it.id })
         model.deletePlaylist("Baking")
-        assertEquals(LibrarySource.Liked, model.currentSource)
-        assertEquals(listOf("Liked", "History", "Watch later", "Not interested", "All videos"), model.sources.map { it.label })
+        assertEquals(LibraryView.PLAYLISTS, model.libraryView)
+        assertEquals(listOf("Liked", "History", "Woodwork", "Not interested", "All videos"), model.sources.map { it.label })
         assertEquals("Sourdough basics", model.library.video(id("b"))?.title)
+        // Back from a playlist goes to the playlists, and from there to the overview.
+        model.openPlaylist("Woodwork")
+        model.back()
+        assertEquals(LibraryView.PLAYLISTS, model.libraryView)
+        model.back()
+        assertEquals(LibraryView.HUB, model.libraryView)
     }
 
     @Test
@@ -188,7 +196,7 @@ class DesktopModelTest {
         model.clearHistory()
         assertEquals(emptyList(), model.rows)
         // The playlist is untouched.
-        assertEquals(1L, model.library.playlists()["Watch later"])
+        assertEquals(1L, model.library.playlists()["Woodwork"])
         assertTrue(model.recordHistory)
         model.changeRecordHistory(false)
         assertEquals(false, Settings(dir.resolve("settings.properties")).recordHistory)

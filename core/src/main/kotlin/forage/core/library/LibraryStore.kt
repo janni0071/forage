@@ -4,6 +4,7 @@ import forage.core.PlatformId
 import forage.core.db.ForageDatabase
 import forage.core.importer.Subscription
 import forage.core.importer.TakeoutData
+import forage.core.importer.TakeoutFolder
 import forage.core.importer.WatchEvent
 import java.time.Instant
 
@@ -48,6 +49,14 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
                 queries.insertWatchEvent(e.video.toString(), e.watchedAt?.epochSecond ?: 0)
             }
             for ((playlist, entries) in data.playlists) {
+                // YouTube's Watch later is the queue, not a playlist of its own.
+                if (playlist in TakeoutFolder.WATCH_LATER) {
+                    for (entry in entries) {
+                        remember(entry.video)
+                        queries.insertWatchLater(entry.video.toString(), entry.addedAt?.epochSecond ?: now)
+                    }
+                    continue
+                }
                 queries.insertPlaylist(playlist, entries.mapNotNull { it.addedAt?.epochSecond }.minOrNull() ?: now)
                 for (entry in entries) {
                     remember(entry.video)
@@ -104,6 +113,11 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
         return if (playlist == null) queries.selectWatchEvents().executeAsList().map { event(it.video_id, it.watched_at) }
         else queries.selectPlaylistItems(playlist).executeAsList().map { event(it.video_id, it.added_at) }
     }
+
+    /** A playlist's videos with when each was added, where known, in the order they were added. */
+    fun playlistItems(name: String): List<Pair<PlatformId, Instant?>> =
+        queries.selectPlaylistItemsInOrder(name).executeAsList()
+            .map { PlatformId.parse(it.video_id) to it.added_at?.let(Instant::ofEpochSecond) }
 
     /** Playlist names with their number of videos, the newest playlist first. */
     fun playlists(): Map<String, Long> = queries.selectPlaylists().executeAsList().associate { it.name to it.videos }

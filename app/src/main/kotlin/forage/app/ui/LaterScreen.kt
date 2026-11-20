@@ -64,6 +64,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import forage.app.AppModel
+import forage.app.LibraryDialog
+import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material3.TextButton
 import forage.app.LaterItem
 import forage.app.LaterSort
 import forage.app.Screen
@@ -78,7 +83,7 @@ fun LaterScreen(model: AppModel) {
         ScreenHeader(
             "Watch later",
             if (queue.isEmpty()) "Videos you save from Discover wait here"
-            else "${queue.size} videos" + (if (total > 0) " · ${formatTotal(total)}" else "") + (if (unknown > 0 && total > 0) " (+$unknown of unknown length)" else ""),
+            else "%,d videos".format(queue.size) + (if (total > 0) " · ${formatTotal(total)}" else "") + (if (unknown > 0 && total > 0) " (+%,d of unknown length)".format(unknown) else ""),
         ) {
             if (queue.isNotEmpty()) {
                 for (sort in LaterSort.entries) {
@@ -92,6 +97,7 @@ fun LaterScreen(model: AppModel) {
                 }
             }
         }
+        MissingDetails(model, queue)
         if (queue.isEmpty()) {
             EmptyQueue(model)
             return
@@ -102,7 +108,61 @@ fun LaterScreen(model: AppModel) {
             val end = if (LocalCompact.current) 0.dp else 16.dp
             LazyColumn(state = listState, contentPadding = PaddingValues(end = end, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 itemsIndexed(queue, key = { _, it -> it.id.toString() }) { index, item ->
-                    if (index == 0) UpNext(model, item) else QueueRow(model, item, index + 1)
+                    if (index == 0) UpNext(model, item) else QueueRow(model, item, index + 1, QueueActions.later(model, item))
+                }
+            }
+            Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+        }
+    }
+}
+
+/** One playlist, laid out like the queue: its videos in order, each to play, open or remove. */
+@Composable
+fun PlaylistScreen(model: AppModel) {
+    val name = model.openPlaylistName ?: return
+    val items = model.sortedPlaylist
+    Column(Modifier.fillMaxSize().padding(screenPadding())) {
+        val total = items.mapNotNull { it.durationSeconds }.sum()
+        BackLink("Playlists", model::back)
+        ScreenHeader(
+            name,
+            if (items.isEmpty()) "No videos yet" else "%,d videos".format(items.size) + (if (total > 0) " · ${formatTotal(total)}" else ""),
+        ) {
+            if (items.size > 1) {
+                for (sort in LaterSort.entries) {
+                    FilterChip(
+                        selected = model.playlistSort == sort,
+                        onClick = { model.playlistSort = sort },
+                        label = { Text(if (LocalCompact.current) sort.shortLabel else sort.label, maxLines = 1) },
+                        shape = RoundedCornerShape(10.dp),
+                    )
+                }
+            }
+            TextButton(onClick = { model.libraryDialog = LibraryDialog.RenamePlaylist(name) }) {
+                Icon(Icons.Outlined.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Rename")
+            }
+            TextButton(onClick = { model.libraryDialog = LibraryDialog.DeletePlaylist(name) }) {
+                Icon(Icons.Outlined.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Delete")
+            }
+        }
+        MissingDetails(model, items)
+        if (items.isEmpty()) {
+            Text(
+                "Add videos with the Playlist button on their page, or select them in your likes or history.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            return
+        }
+        Box(Modifier.weight(1f)) {
+            val listState = rememberLazyListState()
+            LazyColumn(state = listState, contentPadding = PaddingValues(end = scrollbarGap(), bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                itemsIndexed(items, key = { _, it -> it.id.toString() }) { index, item ->
+                    QueueRow(model, item, index + 1, QueueActions.playlist(model, item))
                 }
             }
             Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
@@ -210,9 +270,20 @@ private fun UpNextCompact(model: AppModel, item: LaterItem) {
     }
 }
 
-/** A queued video on a phone: a small thumbnail, the title, and its three actions under the title. */
+/** What a row in the queue or a playlist offers besides Play: Watched (the queue only) and Remove. */
+private class QueueActions(val watched: (() -> Unit)?, val remove: () -> Unit, val removeHint: String, val verb: String) {
+    companion object {
+        fun later(model: AppModel, item: LaterItem) =
+            QueueActions({ model.markWatched(item) }, { model.removeFromLater(item.id) }, "Remove from the queue", "saved")
+
+        fun playlist(model: AppModel, item: LaterItem) =
+            QueueActions(null, { model.removeFromPlaylist(listOf(item.id)) }, "Remove from the playlist", "added")
+    }
+}
+
+/** A queued video on a phone: a small thumbnail, the title, and its actions under the title. */
 @Composable
-private fun QueueRowCompact(model: AppModel, item: LaterItem) {
+private fun QueueRowCompact(model: AppModel, item: LaterItem, actions: QueueActions) {
     val c = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
         BigThumbnail(model, item, width = 136.dp, playIcon = 30.dp)
@@ -224,19 +295,19 @@ private fun QueueRowCompact(model: AppModel, item: LaterItem) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(details(item), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            Text(details(item, actions.verb), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
             Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 RoundAction(Icons.Filled.PlayArrow, "Play", filled = true) { model.open(item.id) }
-                RoundAction(Icons.Outlined.CheckCircle, "Mark as watched") { model.markWatched(item) }
-                RoundAction(Icons.Outlined.Close, "Remove from the queue") { model.removeFromLater(item.id) }
+                actions.watched?.let { RoundAction(Icons.Outlined.CheckCircle, "Mark as watched", onClick = it) }
+                RoundAction(Icons.Outlined.Close, actions.removeHint, onClick = actions.remove)
             }
         }
     }
 }
 
 @Composable
-private fun QueueRow(model: AppModel, item: LaterItem, position: Int) {
-    if (LocalCompact.current) return QueueRowCompact(model, item)
+private fun QueueRow(model: AppModel, item: LaterItem, position: Int, actions: QueueActions) {
+    if (LocalCompact.current) return QueueRowCompact(model, item, actions)
     val c = MaterialTheme.colorScheme
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
@@ -265,13 +336,15 @@ private fun QueueRow(model: AppModel, item: LaterItem, position: Int) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.clickable { model.showLater(item) },
             )
-            Text(details(item), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+            Text(details(item, actions.verb), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
         }
         RoundAction(Icons.Filled.PlayArrow, "Play", filled = true) { model.open(item.id) }
+        actions.watched?.let {
+            Spacer(Modifier.width(8.dp))
+            RoundAction(Icons.Outlined.CheckCircle, "Mark as watched: off the queue and never recommended again", onClick = it)
+        }
         Spacer(Modifier.width(8.dp))
-        RoundAction(Icons.Outlined.CheckCircle, "Mark as watched: off the queue and never recommended again") { model.markWatched(item) }
-        Spacer(Modifier.width(8.dp))
-        RoundAction(Icons.Outlined.Close, "Remove from the queue") { model.removeFromLater(item.id) }
+        RoundAction(Icons.Outlined.Close, actions.removeHint, onClick = actions.remove)
     }
 }
 
@@ -358,15 +431,23 @@ private fun EmptyQueue(model: AppModel) {
     }
 }
 
-private fun details(item: LaterItem): String = listOfNotNull(
+private fun details(item: LaterItem, verb: String = "saved"): String = listOfNotNull(
     item.channelName,
     formatAge(item.uploadedAt),
-    "saved ${formatAge(item.savedAt)}",
+    // Imports don't always say when a video was added.
+    item.savedAt.takeIf { it != java.time.Instant.EPOCH }?.let { "$verb ${formatAge(it)}" },
 ).joinToString("  ·  ")
 
-/** "3 h 12 min" for a whole queue. */
-private fun formatTotal(seconds: Long): String {
-    val h = seconds / 3600
-    val m = (seconds % 3600 + 59) / 60
-    return if (h > 0) "$h h $m min" else "$m min"
+/** Fetches titles and lengths for imported videos that have none yet, a batch at a time. */
+@Composable
+private fun MissingDetails(model: AppModel, items: List<LaterItem>) {
+    val missing = items.count { it.title == null }
+    if (missing == 0) return
+    val batch = minOf(missing, AppModel.FETCH_BATCH)
+    // A line of its own under the header, which is full with the sort and the playlist's buttons.
+    OutlinedButton(onClick = { model.fetchMissing(items) }, enabled = model.job == null, shape = RoundedCornerShape(12.dp), modifier = Modifier.padding(bottom = 12.dp).height(ControlHeight)) {
+        Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(if (batch == missing) "Fetch details ($missing)" else "Fetch details (%,d of %,d)".format(batch, missing), maxLines = 1)
+    }
 }
