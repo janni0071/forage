@@ -32,6 +32,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material.icons.filled.Block
@@ -258,7 +260,7 @@ private fun Main(model: AppModel, page: VideoPage, maxWidth: Dp) {
         val tags = metadata?.tags.orEmpty().filter { it.isNotBlank() }.distinct().take(16)
         if (tags.isNotEmpty()) {
             FlowRow(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                tags.forEach { Tag(it, c.surfaceContainerHigh, c.onSurface) }
+                tags.forEach { TagChip(model, page, it) }
             }
         }
     }
@@ -481,6 +483,44 @@ private fun RelatedRow(model: AppModel, stub: VideoStub) {
             Text(stub.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val meta = listOfNotNull(stub.channelName, formatAge(stub.uploadedAt)).joinToString("  ·  ")
             if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+        }
+    }
+}
+
+/** A tag on a video page: tap it to search for it, or (on the private platform) to follow it as a performer. */
+@Composable
+private fun TagChip(model: AppModel, page: VideoPage, tag: String) {
+    val c = MaterialTheme.colorScheme
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Text(
+            tag,
+            style = MaterialTheme.typography.labelLarge,
+            color = c.onSurface,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(c.surfaceContainerHigh)
+                .clickable { open = true }
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+        )
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("Search for \"$tag\"") },
+                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                onClick = { open = false; model.searchFor(tag) },
+            )
+            if (page.id.platform == forage.source.pornhub.PornhubSource.PLATFORM && model.followsPerformers) {
+                val name = tag.trim().split(Regex("\\s+")).joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+                val id = forage.source.pornhub.PornhubSource.performerId(name)
+                if (model.following.none { it.channel == id }) {
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Follow \"$name\" as a performer") },
+                        leadingIcon = { Icon(Icons.Outlined.PersonAdd, contentDescription = null) },
+                        onClick = { open = false; model.followPerformer(name) },
+                    )
+                }
+            }
         }
     }
 }

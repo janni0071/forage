@@ -676,6 +676,71 @@ class AppModel(
     var hasSearched by mutableStateOf(settings.hasSearched)
         private set
 
+    /** Searches the platforms for [text], e.g. a tag tapped on a video page. */
+    fun searchFor(text: String) {
+        searchText = text
+        closeAllVideos()
+        searchShown = true
+        searchVideos(text)
+    }
+
+    /** Whether the private platform's performers can be followed here (the private vault). */
+    val followsPerformers: Boolean get() = searchPlatforms.any { it.first == PornhubSource.PLATFORM }
+
+    /** Follows a performer by name, e.g. one named only in a video's tags. */
+    fun followPerformer(name: String) {
+        val clean = name.trim().split(Regex("\\s+")).joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+        if (clean.isEmpty()) return
+        val id = PornhubSource.performerId(clean)
+        launchQuiet {
+            library.follow(id, clean)
+            following = library.following()
+            // Open pages that carry the name among their tags now list them.
+            videoStack = videoStack.map { p ->
+                val tagged = p.copy(taggedCreators = taggedCreators(p.details?.metadata?.tags.orEmpty(), p.id))
+                tagged.copy(following = followed(tagged))
+            }
+            loadHome()
+            message = "Following $clean. Their uploads show in Subscriptions after the next check."
+            refreshFeeds()
+        }
+    }
+
+    /**
+     * Follows from what was typed in Manage: a link to a channel or performer page, or (where
+     * performers can be followed) a performer's name. Returns why it can't, or null.
+     */
+    fun followFromText(text: String): String? {
+        val t = text.trim()
+        if (t.isEmpty()) return "Type a name or paste a link"
+        val looksLikeLink = "://" in t || t.startsWith("www.") || ".com/" in t
+        if (!looksLikeLink && !followsPerformers) return "Paste a link to a YouTube channel"
+        if (!looksLikeLink) {
+            followPerformer(t)
+            return null
+        }
+        launchQuiet {
+            val found = try {
+                source.channelFromLink(t)
+            } catch (e: SourceException) {
+                message = e.message ?: "Couldn't open that link"
+                return@launchQuiet
+            }
+            if (found == null) {
+                message = "That isn't a link to a channel Forage knows" + if (followsPerformers) " or to a performer's page" else ""
+                return@launchQuiet
+            }
+            val (channel, name) = found
+            library.follow(channel, name)
+            following = library.following()
+            refreshFollowing()
+            loadHome()
+            message = "Following ${name ?: "the channel"}. Their uploads show after the next check."
+            refreshFeeds()
+        }
+        return null
+    }
+
     /** Follows someone again from the subscriptions list. */
     fun follow(subscription: FollowedChannel) = launchQuiet {
         library.follow(subscription.channel, subscription.name)
@@ -771,6 +836,7 @@ class AppModel(
         if (!fetch || videoStack.none { it.id == id && it.details == null }) {
             updatePage(id) { it.copy(loading = false) }
             videoStack.lastOrNull { it.id == id }?.let(::lookUpPictures)
+            findRelated(id)
             return
         }
         val outcome = MetadataFetcher(source, cache).fetch(id)
@@ -784,6 +850,32 @@ class AppModel(
         }
         updatePage(id) { it.copy(following = followed(it)) }
         videoStack.lastOrNull { it.id == id }?.let(::lookUpPictures)
+        findRelated(id)
+    }
+
+    /**
+     * Related videos where the platform sends none (the private one): the catalogue's videos that
+     * share the most telling tags, or without a catalogue a search for the first performer, or
+     * else for the video's rarest-looking tags.
+     */
+    private fun findRelated(id: PlatformId) {
+        val page = videoStack.lastOrNull { it.id == id } ?: return
+        val details = page.details ?: return
+        if (details.related.isNotEmpty() || id.platform != PornhubSource.PLATFORM) return
+        val tags = details.metadata.tags
+        val related = try {
+            val catalogue = openCatalogue()
+            if (catalogue != null && tags.isNotEmpty()) {
+                catalogue.matching(tags.associateWith { 1.0 }, RELATED_COUNT, exclude = setOf(id)).map { it.stub }
+            } else {
+                val query = page.creators.firstOrNull()?.name ?: tags.take(3).joinToString(" ")
+                if (query.isBlank()) emptyList()
+                else source.forPlatform(id.platform)?.search(query).orEmpty().filter { it.id != id }.take(RELATED_COUNT)
+            }
+        } catch (e: SourceException) {
+            emptyList()
+        }
+        if (related.isNotEmpty()) updatePage(id) { p -> p.details?.let { p.copy(details = it.copy(related = related)) } ?: p }
     }
 
     /** Performers you follow (on the video's platform) whose name is among [tags]. */
@@ -1943,6 +2035,8 @@ class AppModel(
         private const val BACKGROUND_FETCH_LIMIT = 30
         /** How many videos a row on Home shows. */
         private const val HOME_ROW = 12
+        /** How many related videos a page shows where Forage finds them itself. */
+        private const val RELATED_COUNT = 20
         /** Subscriptions are checked at most this often, unless asked. */
         private const val FEED_INTERVAL_MINUTES = 30L
         /** A pause between two channels, to be gentle with the platform. */

@@ -589,4 +589,42 @@ class DesktopModelTest {
             m.close()
         }
     }
+
+    @Test
+    fun `performers can be followed by name, and private videos get related ones from a search`() {
+        val site = object : ExtractorSource by offline {
+            override val platform = "pornhub"
+            override val capabilities = setOf(Capability.SEARCH)
+            override fun forPlatform(platform: String) = takeIf { platform == "pornhub" }
+            override fun search(query: String) = listOf(
+                VideoStub(PlatformId("pornhub", "ph1"), "The video itself", null, null, 60, false),
+                VideoStub(PlatformId("pornhub", "ph2"), "Another with $query", null, null, 60, false),
+            )
+        }
+        val m = DesktopModel(dir.resolve("site"), CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined) { site }
+        try {
+            assertTrue(m.followsPerformers)
+            assertEquals("Type a name or paste a link", m.followFromText("  "))
+            assertNull(m.followFromText("candy love"))
+            assertEquals(listOf("Candy Love"), m.following.map { it.name })
+            assertEquals(forage.source.pornhub.PornhubSource.performerId("Candy Love"), m.following.single().channel)
+
+            val video = PlatformId("pornhub", "ph1")
+            m.cache.put(
+                VideoDetails(
+                    forage.core.source.VideoMetadata(video, "The video itself", "", listOf("pov"), 60, null, "Someone", null, null, null, false, extra = mapOf("performers" to "Someone")),
+                    emptyList(),
+                )
+            )
+            m.showVideo(video)
+            assertEquals(listOf("Another with Someone"), m.videoPage!!.details!!.related.map { it.title })
+
+            m.searchFor("pov")
+            assertNull(m.videoPage)
+            assertTrue(m.searchShown)
+            assertEquals("pov", m.searchText)
+        } finally {
+            m.close()
+        }
+    }
 }

@@ -45,6 +45,8 @@ class Sources(val members: List<ExtractorSource>) : ExtractorSource {
 
     override fun channelFeed(channel: PlatformId, name: String?): ChannelFeed = of(channel).channelFeed(channel, name)
 
+    override fun channelFromLink(text: String): Pair<PlatformId, String?>? = members.firstNotNullOfOrNull { it.channelFromLink(text) }
+
     override fun channelPicture(channel: PlatformId): String? = byPlatform[channel.platform]?.channelPicture(channel)
 
     override fun parseLink(text: String): PlatformId? = members.firstNotNullOfOrNull { it.parseLink(text) }

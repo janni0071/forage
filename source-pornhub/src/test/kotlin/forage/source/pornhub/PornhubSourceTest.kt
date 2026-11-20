@@ -192,4 +192,12 @@ class PornhubSourceTest {
         )
         assertEquals(null, PornhubSource.pictureIn("<html>nothing here</html>"))
     }
+
+    @Test
+    fun `a performer's page link follows them by the name it's named after`() {
+        val source = PornhubSource()
+        assertEquals(PornhubSource.performerId("Candy Love") to "Candy Love", source.channelFromLink("https://www.pornhub.com/model/candy-love/videos"))
+        assertEquals(PlatformId("pornhub", "pornstar/first-last") to "First Last", source.channelFromLink("pornhub.com/pornstar/first-last"))
+        assertEquals(null, source.channelFromLink("https://www.pornhub.com/view_video.php?viewkey=ph1"))
+    }
 }

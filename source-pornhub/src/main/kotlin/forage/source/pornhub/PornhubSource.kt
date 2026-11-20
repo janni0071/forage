@@ -134,6 +134,13 @@ class PornhubSource(
         return ChannelFeed(found.values.sortedByDescending { it.uploadedAt }, name = performer)
     }
 
+    /** A link to a performer's (or model's, or channel's) page: followed by the name the page is named after. */
+    override fun channelFromLink(text: String): Pair<PlatformId, String?>? {
+        val slug = PROFILE_LINK.find(text.trim())?.groupValues?.get(2) ?: return null
+        val name = slug.split('-', '_').filter { it.isNotEmpty() }.joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+        return performerId(name) to name
+    }
+
     /**
      * A performer's picture, from their profile page: the image a link to it would preview with
      * (`og:image`), else the avatar on the page. Pornstars, amateur models and channels have
@@ -297,6 +304,8 @@ class PornhubSource(
             sequenceOf(OG_IMAGE, OG_IMAGE_REVERSED, AVATAR)
                 .mapNotNull { it.find(html)?.groupValues?.get(1)?.replace("&amp;", "&") }
                 .firstOrNull { it.startsWith("https://") }
+
+        private val PROFILE_LINK = Regex("""pornhub\.com/(pornstar|model|channels)/([A-Za-z0-9_-]+)""", RegexOption.IGNORE_CASE)
 
         /** A performer's feed stops looking once it has this many videos. */
         private const val ENOUGH_UPLOADS = 20

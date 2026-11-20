@@ -82,6 +82,24 @@ class YouTubeSource : ExtractorSource {
         )
     }
 
+    /** A channel link in any of YouTube's shapes (/channel/, /@handle, /c/, /user/), resolved by its page. */
+    override fun channelFromLink(text: String): Pair<PlatformId, String?>? {
+        val t = text.trim()
+        if (!CHANNEL_LINK.containsMatchIn(t)) return null
+        YouTubeUrls.channel(t)?.let { direct -> if (direct.id.startsWith("UC")) return direct to null }
+        val url = if (t.startsWith("http")) t else "https://$t"
+        return guarded("channel link") {
+            // The link handler resolves a handle (@name) to its channel through YouTube's API; the
+            // channel page itself doesn't always come back readable for a handle.
+            val handler = ServiceList.YouTube.channelLHFactory.fromUrl(url)
+            val extractor = ServiceList.YouTube.getChannelExtractor(handler)
+            extractor.fetchPage()
+            val id = extractor.id?.takeIf { it.startsWith("UC") } ?: YouTubeUrls.channel(extractor.url ?: "")?.id
+                ?: throw SourceException("YouTube didn't say which channel that is")
+            PlatformId.youtube(id) to extractor.name?.takeIf { it.isNotBlank() }
+        }
+    }
+
     /** The channel page, for its picture alone. */
     override fun channelPicture(channel: PlatformId): String? = guarded("channel ${channel.id}") {
         if (channel.platform != platform) return@guarded null
@@ -151,5 +169,6 @@ class YouTubeSource : ExtractorSource {
 
     private companion object {
         val BARE_ID = Regex("[A-Za-z0-9_-]{11}")
+        val CHANNEL_LINK = Regex("""youtube\.com/(channel/|@|c/|user/)""", RegexOption.IGNORE_CASE)
     }
 }

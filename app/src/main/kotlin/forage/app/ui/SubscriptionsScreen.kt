@@ -214,6 +214,7 @@ private fun ManageList(model: AppModel) {
         shown = shown + following.filter { it.channel !in known }
     }
     val followed = following.mapTo(HashSet()) { it.channel }
+    FollowField(model)
     // The chosen order; someone unfollowed just now keeps their place until the next visit.
     val order = model.sortedFollowing.map { it.channel }.withIndex().associate { (i, ch) -> ch to i }
     Column {
@@ -272,4 +273,29 @@ private fun goneText(reason: String): String = when {
     "terminated" in reason.lowercase() -> "Gone: account terminated"
     "removed" in reason.lowercase() -> "Gone: channel removed"
     else -> "Gone: $reason"
+}
+
+/** Follow someone by pasting a link to their channel or page, or (in the private vault) by name. */
+@Composable
+private fun FollowField(model: AppModel) {
+    var text by remember { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+    fun follow() {
+        problem = model.followFromText(text)
+        if (problem == null) text = ""
+    }
+    Row(Modifier.fillMaxWidth().widthIn(max = 720.dp).padding(bottom = 16.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        androidx.compose.material3.OutlinedTextField(
+            text, { text = it; problem = null },
+            singleLine = true,
+            placeholder = { Text(if (model.followsPerformers) "A performer's name, or a link" else "A link to a YouTube channel") },
+            isError = problem != null,
+            supportingText = problem?.let { { Text(it) } },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { follow() }),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f),
+        )
+        Button(onClick = { follow() }, enabled = text.isNotBlank(), shape = RoundedCornerShape(12.dp), modifier = Modifier.padding(top = 4.dp).height(48.dp)) { Text("Follow") }
+    }
 }
