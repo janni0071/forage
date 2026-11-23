@@ -1799,10 +1799,80 @@ class AppModel(
             message = e.message
             return
         }
+        notePlayed(id)
         if (recordHistory) launchQuiet {
             library.recordWatch(id)
             if (currentSource == LibrarySource.History) loadRows()
         }
+    }
+
+    // Back from the player: what was handed to a player, to ask about once Forage is in front again.
+
+    /** A video handed to a player, and when. */
+    data class Played(val id: PlatformId, val title: String?, val channelName: String?, val at: Instant)
+
+    /** The video last handed to a player, until Forage comes back to the front. */
+    private var lastPlayed: Played? = null
+
+    /** The card offered for the video just watched: like it, turn it down, keep it. */
+    var backFromPlayer by mutableStateOf<BackFromPlayer?>(null)
+        private set
+
+    /** The card's video and what's already true of it. */
+    data class BackFromPlayer(val video: Played, val state: VideoState?, val savedForLater: Boolean)
+
+    internal fun notePlayed(id: PlatformId, at: Instant = Instant.now()) {
+        val m = cache.video(id)?.metadata
+        val known = if (m == null) library.video(id) else null
+        lastPlayed = Played(id, m?.title ?: known?.title, m?.channelName ?: known?.channelName ?: m?.extra?.get("performers"), at)
+        backFromPlayer = null
+    }
+
+    /**
+     * Forage is in front again (the phone switched back to it, the window got focus): offers the
+     * card for the video last played, if it was handed off a while ago. A glance away doesn't count.
+     */
+    fun cameBack(now: Instant = Instant.now()) {
+        val played = lastPlayed ?: return
+        if (java.time.Duration.between(played.at, now) < java.time.Duration.ofSeconds(AWAY_SECONDS)) return
+        lastPlayed = null
+        val state = profiles.entries(profile).firstOrNull { it.video == played.id }?.state
+        backFromPlayer = BackFromPlayer(played, state, later.any { it.id == played.id })
+    }
+
+    fun dismissBackFromPlayer() {
+        backFromPlayer = null
+    }
+
+    /** Like or Not interested from the card (null takes it back), which then closes. */
+    fun answerBackFromPlayer(state: VideoState?) {
+        val card = backFromPlayer ?: return
+        mark(listOf(card.video.id), state)
+        backFromPlayer = null
+    }
+
+    /** Later from the card (or, for a video from the queue, Watched: off the queue). */
+    fun laterFromBackFromPlayer() {
+        val card = backFromPlayer ?: return
+        val id = card.video.id
+        launchQuiet {
+            if (card.savedForLater) {
+                library.removeFromWatchLater(id)
+                message = "Took \"${card.video.title ?: "the video"}\" off watch later"
+            } else {
+                library.saveForLater(id)
+                message = "Saved \"${card.video.title ?: "the video"}\" for later"
+            }
+            loadLater()
+            loadPicks()
+        }
+        backFromPlayer = null
+    }
+
+    fun playlistFromBackFromPlayer() {
+        val card = backFromPlayer ?: return
+        openAddToPlaylist(listOf(card.video.id))
+        backFromPlayer = null
     }
 
     // Loading
@@ -2060,6 +2130,8 @@ class AppModel(
         private const val GUIDE_HIDDEN = "home.guideHidden"
         /** How many related videos a page shows where Forage finds them itself. */
         private const val RELATED_COUNT = 20
+        /** How long a video must have been away in a player before the "back from the player" card asks about it. */
+        private const val AWAY_SECONDS = 15L
         /** Subscriptions are checked at most this often, unless asked. */
         private const val FEED_INTERVAL_MINUTES = 30L
         /** A pause between two channels, to be gentle with the platform. */

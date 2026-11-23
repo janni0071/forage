@@ -627,4 +627,39 @@ class DesktopModelTest {
             m.close()
         }
     }
+
+    @Test
+    fun `back from the player, the video just watched can be liked, saved or put away`() {
+        val start = Instant.parse("2026-11-23T20:00:00Z")
+        model.notePlayed(id("a"), start)
+        // A glance away doesn't count.
+        model.cameBack(start.plusSeconds(5))
+        assertNull(model.backFromPlayer)
+        model.cameBack(start.plusSeconds(600))
+        val card = model.backFromPlayer!!
+        assertEquals("Hand-cut dovetails", card.video.title)
+        assertEquals("Workshop Wren", card.video.channelName)
+        assertEquals(false, card.savedForLater)
+        // Asked once: coming back again later doesn't ask again.
+        model.dismissBackFromPlayer()
+        model.cameBack(start.plusSeconds(900))
+        assertNull(model.backFromPlayer)
+
+        model.notePlayed(id("a"), start)
+        model.cameBack(start.plusSeconds(600))
+        model.answerBackFromPlayer(VideoState.LIKED)
+        assertNull(model.backFromPlayer)
+        assertEquals(listOf(id("a")), model.profiles.entries(model.profile, VideoState.LIKED).map { it.video })
+
+        model.notePlayed(id("b"), start)
+        model.cameBack(start.plusSeconds(600))
+        model.laterFromBackFromPlayer()
+        assertEquals(listOf(id("b")), model.later.map { it.id })
+        // From the queue, the card offers to take it off instead.
+        model.notePlayed(id("b"), start)
+        model.cameBack(start.plusSeconds(600))
+        assertTrue(model.backFromPlayer!!.savedForLater)
+        model.laterFromBackFromPlayer()
+        assertEquals(emptyList(), model.later)
+    }
 }

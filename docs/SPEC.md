@@ -128,6 +128,8 @@ Order of work, each step usable on its own:
 
 Sync (M4) follows after these.
 
+**Back from the player (Nov 2026):** playing still happens in another app, so Forage notes which video it handed to a player and when; when Forage comes back to the front (the phone switching back to it, the desktop window getting focus) at least 15 seconds later, a card asks about that video: Like (or Liked, to take it back), Not interested, Later (or Watched, for a video from the queue: off the queue) and Playlist, or × to put it away. Next: a player inside the Android app (Media3 for YouTube's streams, the site's official embed player for the private vault), with "Open in…" kept for other players.
+
 **The private vault's look (Nov 2026):** the vault wears a look of its own, always dark and kept inside the vault (database version 15 adds a preference table, encrypted with the vault): Neon by default (near-black, hot pink and violet, with a soft glow around the accent's buttons), or Velvet (wine and rose-red with gold) or Noir (graphite and crimson), chosen in its Settings. The accent and the text on it now come from the theme. In the vault the Subscriptions tab shows a face, as it's where the performers you follow are, and Home's "Get started" walks through searching, liking, following performers and (optionally) the catalogue, saying what the catalogue is for; the card can be hidden.
 
 ## Build order

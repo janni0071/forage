@@ -153,6 +153,8 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
                 // Above the search bar and Discover's floating button, not on top of them.
                 val clear = (if (withBar && barShown) 72.dp else 12.dp) + (if (model.screen == Screen.DISCOVER && !model.searchShown && withBar) 76.dp else 0.dp)
                 StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = clear))
+                // Above the search bar, where a thumb reaches it.
+                BackFromPlayerCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = if (withBar && barShown) 76.dp else 12.dp))
             }
             NavigationBar(containerColor = c.surfaceContainerLow) {
                 for ((screen, tabIcon, label) in TABS) {
@@ -293,6 +295,8 @@ private fun WideApp(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         Screens(model, onImport)
                         StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp))
+                        // Above the status messages, in the corner.
+                        BackFromPlayerCard(model, Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 84.dp))
                     }
                 }
             }

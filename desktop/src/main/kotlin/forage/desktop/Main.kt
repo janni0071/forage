@@ -10,6 +10,7 @@ import androidx.compose.ui.res.useResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import forage.app.Settings
@@ -92,6 +93,15 @@ fun main(args: Array<String>) {
             },
         ) {
             val frame = if (ownFrame) remember(window, windowState) { WindowFrame(window, windowState, close) } else null
+            // Back from a player (mpv, the browser): the window getting focus again lets Forage ask about the video.
+            val current by androidx.compose.runtime.rememberUpdatedState(active)
+            androidx.compose.runtime.DisposableEffect(window) {
+                val listener = object : java.awt.event.WindowAdapter() {
+                    override fun windowGainedFocus(e: java.awt.event.WindowEvent?) = current.cameBack()
+                }
+                window.addWindowFocusListener(listener)
+                onDispose { window.removeWindowFocusListener(listener) }
+            }
             LaunchedEffect(Unit) {
                 window.minimumSize = java.awt.Dimension(860, 540)
                 // Some Linux desktops report the system frame's size only after the window appears, and

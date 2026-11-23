@@ -88,6 +88,12 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    /** Back from the player: Forage asks about the video just watched. */
+    override fun onResume() {
+        super.onResume()
+        app.model?.let { (it.privateModel ?: it).cameBack() }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
