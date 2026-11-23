@@ -26,6 +26,9 @@ class ExplainPlayerFailureTest {
         kotlin.test.assertTrue(explainPlayerFailure(refused)!!.contains("pipx inject yt-dlp curl_cffi"))
         val premium = listOf("[ytdl_hook] ERROR: [PornHub] abc: This video is only available for Premium members")
         kotlin.test.assertTrue(explainPlayerFailure(premium)!!.startsWith("This video is for Pornhub Premium"))
+        // As Pornhub words it.
+        val upgrade = listOf("[ytdl_hook] ERROR: [PornHub] 6517743391e1b: PornHub said: Upgrade now to enjoy this video Get Premium Now")
+        kotlin.test.assertTrue(explainPlayerFailure(upgrade)!!.startsWith("This video is for Pornhub Premium"))
         kotlin.test.assertEquals(null, explainPlayerFailure(listOf("Failed to recognize file format.")))
     }
 }
