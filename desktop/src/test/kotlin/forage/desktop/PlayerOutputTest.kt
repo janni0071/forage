@@ -18,3 +18,14 @@ class PlayerOutputTest {
         log.parentFile.parentFile.deleteRecursively()
     }
 }
+
+class ExplainPlayerFailureTest {
+    @Test
+    fun `known failures get a plain explanation`() {
+        val refused = listOf("[ytdl_hook] ERROR: [PornHub] 642e3afbbe228: Unable to download webpage: HTTP Error 410: Gone (caused by <HTTPError 410: Gone>)")
+        kotlin.test.assertTrue(explainPlayerFailure(refused)!!.contains("pipx inject yt-dlp curl_cffi"))
+        val premium = listOf("[ytdl_hook] ERROR: [PornHub] abc: This video is only available for Premium members")
+        kotlin.test.assertTrue(explainPlayerFailure(premium)!!.startsWith("This video is for Pornhub Premium"))
+        kotlin.test.assertEquals(null, explainPlayerFailure(listOf("Failed to recognize file format.")))
+    }
+}

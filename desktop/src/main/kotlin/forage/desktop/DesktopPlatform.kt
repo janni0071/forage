@@ -64,9 +64,11 @@ object DesktopPlatform : Platform {
         // A player that can't play the link usually quits within seconds; say why instead of doing nothing.
         Thread {
             if (process.waitFor(15, TimeUnit.SECONDS) && process.exitValue() != 0) {
-                val tail = output.tail().joinToString("\n")
+                val lines = output.tail()
+                val tail = lines.joinToString("\n")
                 report(
                     "${player.label} couldn't play the video (it quit with code ${process.exitValue()})." +
+                        (explainPlayerFailure(lines)?.let { "\n\n$it" } ?: "") +
                         (if (tail.isNotEmpty()) "\n\nWhat it said last:\n$tail" else "") +
                         (log?.let { "\n\nEverything it said is in ${it.path}" } ?: ""),
                 )
@@ -156,5 +158,19 @@ class PlayerOutput(process: Process, log: File?) {
     private companion object {
         val STATUS = listOf("AV:", "A:", "V:", "(Paused)", "(Buffering)")
         const val KEPT = 60
+    }
+}
+
+/** What a player's last lines mean, where it's a known case worth explaining; null otherwise. */
+internal fun explainPlayerFailure(lines: List<String>): String? {
+    val text = lines.joinToString("\n")
+    return when {
+        "premium" in text.lowercase() ->
+            "This video is for Pornhub Premium members only; Forage can't play it."
+        "[PornHub]" in text && "HTTP Error 410" in text ->
+            "Pornhub turns yt-dlp away (\"410 Gone\") unless it can pass for a browser, which takes the curl_cffi add-on. " +
+                "With yt-dlp from pipx: pipx inject yt-dlp curl_cffi (from pip: pip install curl_cffi). " +
+                "If the video still won't play, it may be for Premium members only."
+        else -> null
     }
 }
