@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import forage.app.AppModel
 import forage.app.Creator
+import forage.app.Player
 import forage.app.VideoPage
 import forage.core.profile.VideoState
 import forage.core.source.VideoStub
@@ -215,7 +216,14 @@ private fun Main(model: AppModel, page: VideoPage, maxWidth: Dp) {
             ) {
                 Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Accent.onAccent, modifier = Modifier.size(24.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(if (page.playing) "Playing" else "Play", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Accent.onAccent)
+                // Where it was left off, Play carries on from there.
+                val resume = model.positions[page.id]?.takeIf { model.player == Player.IN_APP }
+                val label = when {
+                    page.playing -> "Playing"
+                    resume != null -> "Resume from ${formatDuration(resume.seconds)}"
+                    else -> "Play"
+                }
+                Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Accent.onAccent)
             }
         }
         val liked = page.state == VideoState.LIKED

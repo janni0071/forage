@@ -54,6 +54,14 @@ CREATE TABLE preference (
     value TEXT NOT NULL
 );
 
+-- Where each video was left off in Forage's own player.
+CREATE TABLE playback_position (
+    video_id TEXT NOT NULL PRIMARY KEY,
+    position_seconds INTEGER NOT NULL,
+    duration_seconds INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
 -- Channels' pictures for video pages, also of channels nobody follows.
 CREATE TABLE channel_picture (
     channel_id TEXT NOT NULL PRIMARY KEY,
@@ -257,6 +265,18 @@ SELECT value FROM preference WHERE key = ?;
 
 setPreference:
 INSERT OR REPLACE INTO preference VALUES (?, ?);
+
+selectPlaybackPositions:
+SELECT video_id, position_seconds, duration_seconds FROM playback_position;
+
+upsertPlaybackPosition:
+INSERT OR REPLACE INTO playback_position VALUES (?, ?, ?, ?);
+
+deletePlaybackPosition:
+DELETE FROM playback_position WHERE video_id = ?;
+
+deletePlaybackPositions:
+DELETE FROM playback_position;
 
 selectChannelPicture:
 SELECT * FROM channel_picture WHERE channel_id = ?;

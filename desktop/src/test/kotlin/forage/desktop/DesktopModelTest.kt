@@ -716,6 +716,25 @@ class DesktopModelTest {
             m.chooseAudio(forage.core.source.AudioTrack("https://a/a-dub", "Spanish", original = false))
             assertEquals("https://a/a-dub", m.videoPage!!.playback?.audioUrl)
             assertEquals("https://v/a", m.videoPage!!.playback?.videoUrl)
+
+            // Where it was left off: kept, and played from (a little before) next time.
+            m.notePosition(id("a"), 5, 600)
+            assertNull(m.positions[id("a")])
+            m.notePosition(id("a"), 120, 600)
+            assertEquals(forage.core.library.PlaybackPosition(120, 600), m.positions[id("a")])
+            assertEquals(forage.core.library.PlaybackPosition(120, 600), m.library.playbackPositions()[id("a")])
+            m.stopPlaying()
+            m.playPage()
+            assertEquals(117L, m.videoPage!!.playFrom)
+            // Near the end it's played: nothing to carry on from.
+            m.notePosition(id("a"), 590, 600)
+            assertNull(m.positions[id("a")])
+            assertEquals(emptyMap(), m.library.playbackPositions())
+            // Clearing the history forgets where videos were left off, too.
+            m.notePosition(id("a"), 200, 600)
+            m.clearHistory()
+            assertEquals(emptyMap(), m.positions)
+            assertEquals(emptyMap(), m.library.playbackPositions())
         } finally {
             m.close()
         }

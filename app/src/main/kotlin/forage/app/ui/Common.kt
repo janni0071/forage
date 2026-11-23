@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -228,6 +229,16 @@ fun BoxScope.ThumbnailImage(
         ThumbnailState.Loading -> {}
     }
     if (preview) PreviewFrames(model, id, zoom)
+    // How far it got, where it was left off in Forage's player (the preview has its own bar).
+    else model.positions[id]?.let { ResumeBar(it.fraction) }
+}
+
+/** A thin bar along the bottom of a thumbnail: how much of the video was watched. */
+@Composable
+private fun BoxScope.ResumeBar(fraction: Float) {
+    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color.White.copy(alpha = 0.35f))) {
+        Box(Modifier.fillMaxHeight().fillMaxWidth(fraction.coerceAtLeast(0.02f)).background(Accent.pastelPink))
+    }
 }
 
 /**

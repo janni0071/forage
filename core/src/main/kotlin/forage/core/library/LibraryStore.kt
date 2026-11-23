@@ -202,13 +202,30 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
         }
     }
 
-    /** Takes videos out of the history. They may be recommended again afterwards. */
+    /** Takes videos out of the history (and forgets where they were left off). They may be recommended again afterwards. */
     fun forget(videos: Collection<PlatformId>) = queries.transaction {
-        videos.forEach { queries.deleteWatchEventsOfVideo(it.toString()) }
+        videos.forEach {
+            queries.deleteWatchEventsOfVideo(it.toString())
+            queries.deletePlaybackPosition(it.toString())
+        }
     }
 
-    /** Empties the history, imported entries included. */
-    fun clearHistory() = queries.deleteWatchEvents()
+    /** Empties the history, imported entries included, and where videos were left off. */
+    fun clearHistory() = queries.transaction {
+        queries.deleteWatchEvents()
+        queries.deletePlaybackPositions()
+    }
+
+    /** Where each video was left off in Forage's own player: seconds in, out of how many. */
+    fun playbackPositions(): Map<PlatformId, PlaybackPosition> =
+        queries.selectPlaybackPositions().executeAsList().associate {
+            PlatformId.parse(it.video_id) to PlaybackPosition(it.position_seconds, it.duration_seconds)
+        }
+
+    fun savePlaybackPosition(id: PlatformId, position: PlaybackPosition) =
+        queries.upsertPlaybackPosition(id.toString(), position.seconds, position.duration, clock().epochSecond)
+
+    fun clearPlaybackPosition(id: PlatformId) = queries.deletePlaybackPosition(id.toString())
 
     /** When each video was first watched or saved, where the import said so. */
     fun firstSeen(): Map<PlatformId, Instant> {
@@ -345,4 +362,9 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
     fun watchedVideoCount(): Long = queries.countWatchedVideos().executeAsOne()
 
     fun counts(): Pair<Long, Long> = queries.countLibraryVideos().executeAsOne() to queries.countWatchEvents().executeAsOne()
+}
+
+/** How far into a video it was left off: [seconds] in, out of [duration]. */
+data class PlaybackPosition(val seconds: Long, val duration: Long) {
+    val fraction: Float get() = if (duration <= 0) 0f else (seconds.toFloat() / duration).coerceIn(0f, 1f)
 }

@@ -51,16 +51,22 @@ import forage.core.source.Playback
  */
 interface VideoSurface {
     /**
-     * Shows [playback], filling [modifier]. [onFullscreen] asks to fill the screen or to leave it;
-     * [onProblem] says it won't play after all; [onEnded] says it played to the end.
+     * Shows [playback], filling [modifier], starting [startAt] seconds in (where it was left off)
+     * if it's not playing already. [expectedSeconds] is how long the video is, where known, to tell
+     * it from an ad before it. [onFullscreen] asks to fill the screen or to leave it; [onProblem]
+     * says it won't play after all; [onEnded] says it played to the end; [onPosition] says every
+     * few seconds, and on pausing, how far in it is (seconds, out of how many).
      */
     @Composable
     fun Player(
         playback: Playback,
         fullscreen: Boolean,
+        startAt: Long?,
+        expectedSeconds: Long?,
         onFullscreen: (Boolean) -> Unit,
         onProblem: (String) -> Unit,
         onEnded: () -> Unit,
+        onPosition: (seconds: Long, duration: Long) -> Unit,
         modifier: Modifier,
     )
 
@@ -109,9 +115,12 @@ fun PlayerArea(model: AppModel, page: VideoPage, modifier: Modifier = Modifier) 
             else -> surface.Player(
                 playback,
                 fullscreen = false,
+                startAt = page.playFrom,
+                expectedSeconds = page.shownDuration,
                 onFullscreen = { model.playerFullscreen = it },
                 onProblem = { model.playbackFailed(page.id, it) },
                 onEnded = {},
+                onPosition = { seconds, duration -> model.notePosition(page.id, seconds, duration) },
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -167,9 +176,12 @@ fun FullscreenPlayer(model: AppModel) {
         surface.Player(
             playback,
             fullscreen = true,
+            startAt = page.playFrom,
+            expectedSeconds = page.shownDuration,
             onFullscreen = { model.playerFullscreen = it },
             onProblem = { model.playbackFailed(page.id, it) },
             onEnded = { model.playerFullscreen = false },
+            onPosition = { seconds, duration -> model.notePosition(page.id, seconds, duration) },
             modifier = Modifier.fillMaxSize(),
         )
     }

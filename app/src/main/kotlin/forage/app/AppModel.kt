@@ -10,6 +10,7 @@ import forage.core.embedding.EmbeddingStore
 import forage.core.importer.TakeoutData
 import forage.core.importer.TakeoutFolder
 import forage.core.language.LanguageDetector
+import forage.core.library.PlaybackPosition
 import forage.core.library.LibraryStore
 import forage.core.library.VideoInLibrary
 import forage.core.library.FollowedChannel
@@ -167,6 +168,8 @@ data class VideoPage(
     val taggedCreators: List<Creator> = emptyList(),
     /** True while the video plays here, on its page, in Forage's own player. */
     val playing: Boolean = false,
+    /** Where this play started: where it was left off last time, or null for the start. */
+    val playFrom: Long? = null,
     /** What the player plays, once the platform said; null while it's being asked. */
     val playback: forage.core.source.Playback? = null,
     /** Why it won't play here, if it won't. */
@@ -1125,6 +1128,7 @@ class AppModel(
         loadRows()
         loadPicks()
         loadLater()
+        positions = library.playbackPositions()
         if (isPrivate) describeCatalogue()
     }
 
@@ -1280,6 +1284,7 @@ class AppModel(
     /** Takes [ids] out of the history. */
     fun forget(ids: List<PlatformId>) = launchQuiet {
         library.forget(ids)
+        positions = positions - ids.toSet()
         selection = emptySet()
         loadRows()
         message = if (ids.size == 1) "Removed 1 video from the history" else "Removed ${ids.size} videos from the history"
@@ -1289,6 +1294,7 @@ class AppModel(
         libraryDialog = null
         launchQuiet {
             library.clearHistory()
+            positions = emptyMap()
             loadRows()
             message = "Cleared the history. Your likes, playlists and watch later are unchanged."
         }
@@ -1828,7 +1834,9 @@ class AppModel(
     /** Plays the video on its page, opening the page first where it isn't on screen. */
     private fun playHere(id: PlatformId, record: Boolean = true) {
         if (videoPage?.id != id) showVideo(id)
-        updatePage(id) { it.copy(playing = true, playback = null, playbackProblem = null) }
+        // A little before where it was left off, to pick up the thread.
+        val from = positions[id]?.let { (it.seconds - RESUME_REWIND_SECONDS).coerceAtLeast(0) }?.takeIf { it > 0 }
+        updatePage(id) { it.copy(playing = true, playback = null, playbackProblem = null, playFrom = from) }
         launchQuiet {
             if (record && recordHistory) {
                 library.recordWatch(id)
@@ -1841,6 +1849,37 @@ class AppModel(
                 return@launchQuiet
             }
             updatePage(id) { it.copy(playback = playback) }
+        }
+    }
+
+    // Where videos were left off.
+
+    /** Where each video was left off in Forage's own player; shown as a bar along its thumbnail. */
+    var positions by mutableStateOf<Map<PlatformId, PlaybackPosition>>(emptyMap())
+        private set
+
+    /**
+     * The player says how far into [id] it is. Kept from ten seconds in (unless the history is
+     * paused); near the end, it's forgotten instead, as played to the end. A position for a
+     * video of another length (an ad before it, in an embedded player) isn't the video's.
+     */
+    fun notePosition(id: PlatformId, seconds: Long, duration: Long) {
+        if (!recordHistory || duration <= 0 || seconds < 0) return
+        val known = videoStack.lastOrNull { it.id == id }?.shownDuration
+        if (known != null && known > 0 && kotlin.math.abs(known - duration) > maxOf(15, known / 20)) return
+        val finished = seconds >= duration - END_SECONDS || seconds >= duration * 0.95
+        when {
+            finished -> {
+                if (id !in positions) return
+                positions = positions - id
+                launchQuiet { library.clearPlaybackPosition(id) }
+            }
+            seconds >= MIN_POSITION_SECONDS -> {
+                val position = PlaybackPosition(seconds, duration)
+                if (positions[id] == position) return
+                positions = positions + (id to position)
+                launchQuiet { library.savePlaybackPosition(id, position) }
+            }
         }
     }
 
@@ -2212,6 +2251,15 @@ class AppModel(
         private const val GUIDE_HIDDEN = "home.guideHidden"
         /** How many related videos a page shows where Forage finds them itself. */
         private const val RELATED_COUNT = 20
+        /** Positions closer than this to the start aren't kept: that's barely started. */
+        const val MIN_POSITION_SECONDS = 10L
+
+        /** Closer than this to the end counts as played to the end (the credits, an end screen). */
+        const val END_SECONDS = 20L
+
+        /** Picking up a little before where it was left off. */
+        const val RESUME_REWIND_SECONDS = 3L
+
         /** How long a video must have been away in a player before the "back from the player" card asks about it. */
         private const val AWAY_SECONDS = 15L
         /** Subscriptions are checked at most this often, unless asked. */

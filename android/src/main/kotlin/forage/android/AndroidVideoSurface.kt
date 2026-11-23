@@ -8,6 +8,7 @@ import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -16,6 +17,7 @@ import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
@@ -33,6 +35,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import forage.app.ui.VideoSurface
 import forage.core.source.Playback
 
@@ -58,6 +62,22 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
     private var problem: (String) -> Unit = {}
     private var ended: () -> Unit = {}
     private var wantsFullscreen: (Boolean) -> Unit = {}
+    private var report: (Long, Long) -> Unit = { _, _ -> }
+    private var startAt: Long? = null
+    private var expected: Long? = null
+
+    // Where each player says how far it got: the screen's that started it, so a player let go
+    // after the next video started still reports its own video.
+    private var streamReport: (Long, Long) -> Unit = { _, _ -> }
+    private var embeddedReport: (Long, Long) -> Unit = { _, _ -> }
+
+    /** Every few seconds while there's a player: how far it is. */
+    private val tick = object : Runnable {
+        override fun run() {
+            reportPositions()
+            if (exo != null || web != null) main.postDelayed(this, POSITION_EVERY_MS)
+        }
+    }
 
     private var shownBy = 0
     private val main = Handler(Looper.getMainLooper())
@@ -67,17 +87,24 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
     override fun Player(
         playback: Playback,
         fullscreen: Boolean,
+        startAt: Long?,
+        expectedSeconds: Long?,
         onFullscreen: (Boolean) -> Unit,
         onProblem: (String) -> Unit,
         onEnded: () -> Unit,
+        onPosition: (seconds: Long, duration: Long) -> Unit,
         modifier: Modifier,
     ) {
         val currentProblem by rememberUpdatedState(onProblem)
         val currentEnded by rememberUpdatedState(onEnded)
         val currentFullscreen by rememberUpdatedState(onFullscreen)
+        val currentPosition by rememberUpdatedState(onPosition)
         problem = { currentProblem(it) }
         ended = { currentEnded() }
         wantsFullscreen = { currentFullscreen(it) }
+        report = { seconds, duration -> currentPosition(seconds, duration) }
+        this.startAt = startAt
+        expected = expectedSeconds
         DisposableEffect(Unit) {
             shownBy++
             main.removeCallbacks(letGo)
@@ -121,9 +148,12 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
 
     private fun streamPlayer(playback: Playback): ExoPlayer {
         exo?.let { if (exoPlays == playback) return it }
-        // Another audio track for the same video: it carries on from where it was.
+        // Another audio track for the same video: it carries on from where it was. A new video
+        // starts where it was left off, if it was.
         val from = exo?.takeIf { exoPlays?.videoUrl == playback.videoUrl }?.let { it.currentPosition to it.playWhenReady }
+            ?: startAt?.let { it * 1000 to true }
         releaseStream()
+        streamReport = report
         val http = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(playback.headers - "User-Agent")
@@ -140,7 +170,15 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
                 }
 
                 override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_ENDED) ended()
+                    if (state == Player.STATE_ENDED) {
+                        reportStream()
+                        ended()
+                    }
+                }
+
+                // Paused: worth noting where, in case Forage is closed next.
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (!isPlaying) reportStream()
                 }
             })
             if (from != null) setMediaSource(source, from.first) else setMediaSource(source)
@@ -149,13 +187,43 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
         }
         exo = player
         exoPlays = playback
+        startTicking()
         return player
+    }
+
+    private fun startTicking() {
+        main.removeCallbacks(tick)
+        main.postDelayed(tick, POSITION_EVERY_MS)
+    }
+
+    private fun reportPositions() {
+        if (exo?.isPlaying == true) reportStream()
+        reportEmbedded()
+    }
+
+    private fun reportStream() {
+        val player = exo ?: return
+        val duration = player.duration
+        if (duration == C.TIME_UNSET || duration <= 0) return
+        streamReport(player.currentPosition / 1000, duration / 1000)
+    }
+
+    private fun reportEmbedded() {
+        val view = web ?: return
+        val reportTo = embeddedReport
+        view.evaluateJavascript(VIDEO_POSITION) { answer ->
+            // "12.3,845.1", or an empty answer before there's a video.
+            val parts = answer.trim('"').split(',').mapNotNull { it.toDoubleOrNull() }
+            if (parts.size == 2 && parts[1].isFinite() && parts[1] > 0) reportTo(parts[0].toLong(), parts[1].toLong())
+        }
     }
 
     @Composable
     private fun Embedded(playback: Playback, fullscreen: Boolean, modifier: Modifier) {
         val view = embeddedPage(playback)
         AndroidView({ FrameLayout(it).apply { setBackgroundColor(Color.BLACK) } }, modifier, update = { it.holdOnly(view) }, onRelease = { it.removeAllViews() })
+        // Out of full screen some other way (Back, the phone upright): the page's player is told.
+        LaunchedEffect(fullscreen) { if (!fullscreen) view.evaluateJavascript("window.__forageLeft && window.__forageLeft()", null) }
     }
 
     /** True while the embedded player's own full screen (its button) covers the window. */
@@ -200,6 +268,9 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
         releaseEmbedded()
         val url = playback.embedUrl!!
         val embed = android.net.Uri.parse(url)
+        embeddedReport = report
+        val resumeAt = startAt
+        val length = expected
         val view = WebView(activity).apply {
             keepScreenOn = true
             setBackgroundColor(Color.BLACK)
@@ -215,9 +286,13 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) =
                     request.isForMainFrame && !(request.url.host == embed.host && request.url.path == embed.path)
 
-                // Presses the player's own Play, so one tap on Forage's is enough.
+                // Presses the player's own Play, so one tap on Forage's is enough, then goes to
+                // where it was left off.
                 override fun onPageFinished(view: WebView, url: String) {
-                    if (url != "about:blank") main.postDelayed({ tapToStart(view, 0) }, 1200)
+                    if (url == "about:blank") return
+                    if (!startScriptSupported) view.evaluateJavascript(FULLSCREEN, null)
+                    main.postDelayed({ tapToStart(view, 0) }, 1200)
+                    if (resumeAt != null) main.postDelayed({ resumeEmbedded(view, resumeAt, length, 0) }, 1500)
                 }
             }
             webChromeClient = object : WebChromeClient() {
@@ -225,11 +300,37 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
 
                 override fun onHideCustomView() = hidePageFullscreen()
             }
+            // The player's full-screen button asks the browser for full screen, which a web view
+            // inside an app can't give well; the script hands the request to Forage's own.
+            addJavascriptInterface(FullscreenBridge(), "ForageFullscreen")
+            if (startScriptSupported) WebViewCompat.addDocumentStartJavaScript(this, FULLSCREEN, setOf("*"))
             loadUrl(url)
         }
         web = view
         webPlays = playback
+        startTicking()
         return view
+    }
+
+    private val startScriptSupported get() = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+
+    /** What the page's script calls when its player goes full screen or leaves it. */
+    private inner class FullscreenBridge {
+        @JavascriptInterface
+        fun change(on: Boolean) {
+            main.post { wantsFullscreen(on) }
+        }
+    }
+
+    /**
+     * Goes to [seconds] in once the page's video plays and is the video (as long as it should be,
+     * not an ad before it): tries every second for a minute and a half.
+     */
+    private fun resumeEmbedded(view: WebView, seconds: Long, length: Long?, attempt: Int) {
+        if (web !== view || attempt >= 90) return
+        view.evaluateJavascript("($SEEK_WHEN_READY)($seconds, ${length ?: 0})") { answer ->
+            if (web === view && "done" !in answer) main.postDelayed({ resumeEmbedded(view, seconds, length, attempt + 1) }, 1000)
+        }
     }
 
     /**
@@ -253,9 +354,10 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
         }
     }
 
-    /** Forage went to the background: the video waits. */
+    /** Forage went to the background: the video waits, and where it is is noted. */
     fun pause() {
         exo?.pause()
+        reportEmbedded()
         web?.onPause()
     }
 
@@ -265,11 +367,13 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
 
     override fun release() {
         main.removeCallbacks(letGo)
+        main.removeCallbacks(tick)
         releaseStream()
         releaseEmbedded()
     }
 
     private fun releaseStream() {
+        reportStream()
         exo?.release()
         exo = null
         exoPlays = null
@@ -292,5 +396,68 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
             var video = document.querySelector('video');
             return !video ? 'none' : video.paused ? 'paused' : 'playing';
         })()"""
+
+        /** Where the page's video is, as "seconds,duration"; empty before there's a video. */
+        const val VIDEO_POSITION = """(function () {
+            var video = document.querySelector('video');
+            return video && isFinite(video.duration) ? video.currentTime + ',' + video.duration : '';
+        })()"""
+
+        /** Goes to a moment in the page's video once it plays and is as long as the video should be. */
+        const val SEEK_WHEN_READY = """function (seconds, length) {
+            var video = document.querySelector('video');
+            if (!video || video.paused || !isFinite(video.duration) || video.duration <= 0) return 'wait';
+            if (length > 0 && Math.abs(video.duration - length) > Math.max(15, length / 20)) return 'wait';
+            video.currentTime = seconds;
+            return 'done';
+        }"""
+
+        /**
+         * Hands the page's full-screen requests to Forage: the player believes it's full screen
+         * (the element, the events), Forage fills the screen with the web view.
+         */
+        const val FULLSCREEN = """(function () {
+            if (window.__forageFullscreen || !window.ForageFullscreen) return;
+            window.__forageFullscreen = true;
+            var current = null;
+            function changed(element) {
+                ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (name) {
+                    (element || document).dispatchEvent(new Event(name, { bubbles: true }));
+                });
+            }
+            function enter() {
+                current = this;
+                ForageFullscreen.change(true);
+                changed(current);
+                return Promise.resolve();
+            }
+            function leave() {
+                var was = current;
+                current = null;
+                ForageFullscreen.change(false);
+                if (was) changed(was);
+                return Promise.resolve();
+            }
+            ['requestFullscreen', 'webkitRequestFullscreen', 'webkitRequestFullScreen'].forEach(function (name) {
+                Element.prototype[name] = enter;
+            });
+            if (window.HTMLVideoElement) HTMLVideoElement.prototype.webkitEnterFullscreen = enter;
+            ['exitFullscreen', 'webkitExitFullscreen', 'webkitCancelFullScreen'].forEach(function (name) {
+                Document.prototype[name] = leave;
+            });
+            ['fullscreenElement', 'webkitFullscreenElement', 'webkitCurrentFullScreenElement'].forEach(function (name) {
+                Object.defineProperty(Document.prototype, name, { configurable: true, get: function () { return current; } });
+            });
+            ['fullscreenEnabled', 'webkitFullscreenEnabled'].forEach(function (name) {
+                Object.defineProperty(Document.prototype, name, { configurable: true, get: function () { return true; } });
+            });
+            window.__forageLeft = function () {
+                var was = current;
+                current = null;
+                if (was) changed(was);
+            };
+        })();"""
+
+        const val POSITION_EVERY_MS = 5000L
     }
 }
