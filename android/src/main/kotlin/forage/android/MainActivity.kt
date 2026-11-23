@@ -135,7 +135,8 @@ class MainActivity : ComponentActivity() {
      * screen follows it again, so turning it upright leaves full screen. (Not with auto-rotate off:
      * the screen would turn upright at once. Back leaves full screen then.)
      */
-    private val heldSideways = object : OrientationEventListener(this) {
+    // Made on first use: the sensors it asks for aren't there before the activity is created.
+    private val heldSideways by lazy { object : OrientationEventListener(this) {
         override fun onOrientationChanged(degrees: Int) {
             if (degrees == ORIENTATION_UNKNOWN || !(degrees in 60..120 || degrees in 240..300)) return
             disable()
@@ -144,7 +145,7 @@ class MainActivity : ComponentActivity() {
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
             }
         }
-    }
+    } }
 
     /** Full screen: the video across the whole screen, sideways, without the system's bars. */
     private fun fillScreen(on: Boolean) {
