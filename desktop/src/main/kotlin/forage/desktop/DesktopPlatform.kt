@@ -50,9 +50,9 @@ object DesktopPlatform : Platform {
 
     override fun playerProblem(player: Player): String? = Players.problem(player)
 
-    /** mpv says how far it got over its control socket; FreeTube and the browser can't. Only YouTube goes to mpv. */
+    /** mpv says how far it got over its control socket (for every platform it plays); FreeTube and the browser can't. */
     override fun reportsBack(player: Player, id: PlatformId) =
-        player == Player.MPV && id.platform == forage.core.Platforms.YOUTUBE && Players.problem(Player.MPV) == null
+        player == Player.MPV && Players.problem(Player.MPV) == null
 
     override fun openVideo(id: PlatformId, url: String, player: Player, log: File?, report: (String) -> Unit, watching: forage.app.Watching?) {
         val socket = if (watching != null && reportsBack(player, id)) MpvWatcher.newSocket() else null

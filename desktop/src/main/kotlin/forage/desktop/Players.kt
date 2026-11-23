@@ -53,13 +53,13 @@ object Players {
     private const val MPV_FLATPAK = "io.mpv.Mpv"
 
     /**
-     * Opens [url], the link to [id], in [player]. FreeTube and mpv are for YouTube; videos from
-     * other platforms open in the browser. Returns the started process, so the caller can report
+     * Opens [url], the link to [id], in [player]. FreeTube is for YouTube; mpv plays whatever its
+     * yt-dlp knows (YouTube and Pornhub both). The rest opens in the browser. Returns the started process, so the caller can report
      * it if it quits with an error; null for the browser. Throws with a readable message when
      * the player can't be started at all.
      */
     fun open(player: Player, id: PlatformId, url: String, log: File?, mpvArgs: List<String> = emptyList()): Process? {
-        val player = if (id.platform == Platforms.YOUTUBE) player else BROWSER
+        val player = if (id.platform == Platforms.YOUTUBE || player == MPV) player else BROWSER
         if (player == BROWSER) {
             if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
                 error("This system can't open a browser from Java; copy the link instead: $url")

@@ -92,6 +92,10 @@ fun SettingsDialog(model: AppModel) {
                             ) { model.choosePlayer(p) }
                         }
                     }
+                    // The vault's videos come from Pornhub too, which FreeTube doesn't play.
+                    if (model.isPrivate && model.player == Player.FREETUBE) {
+                        Hint("FreeTube plays YouTube only: Pornhub videos open in the browser. mpv plays both, without the website.")
+                    }
                     if (model.player == Player.MPV && problems[Player.MPV] == "needs yt-dlp") {
                         Hint("mpv needs a current yt-dlp to play YouTube videos. Install it with 'pipx install yt-dlp', or use mpv from Flathub, which includes it.")
                     }
