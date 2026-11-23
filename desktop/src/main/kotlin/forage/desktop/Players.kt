@@ -18,7 +18,8 @@ object Players {
         data class Unavailable(val reason: String) : Launch
     }
 
-    fun launch(player: Player, url: String): Launch = when (player) {
+    /** [mpvArgs] go to mpv before the link (to report back, say). */
+    fun launch(player: Player, url: String, mpvArgs: List<String> = emptyList()): Launch = when (player) {
         FREETUBE -> onPath("freetube")?.let { Launch.Command(listOf(it, url)) }
             ?: flatpak(FREETUBE_FLATPAK, url)
             ?: Launch.Unavailable("not installed")
@@ -27,9 +28,9 @@ object Players {
             // mpv hands YouTube links to yt-dlp; without it, it quits without playing anything.
             val ytdlp = onPath("yt-dlp") ?: onPath("youtube-dl")
             when {
-                mpv != null && ytdlp != null -> Launch.Command(listOf(mpv, url))
-                // The Flatpak build ships its own yt-dlp.
-                else -> flatpak(MPV_FLATPAK, url)
+                mpv != null && ytdlp != null -> Launch.Command(listOf(mpv) + mpvArgs + url)
+                // The Flatpak build ships its own yt-dlp; its sandbox is opened to where the socket goes.
+                else -> flatpak(MPV_FLATPAK, url, mpvArgs, listOf(MpvWatcher.flatpakAccess).takeIf { mpvArgs.isNotEmpty() }.orEmpty())
                     ?: if (mpv != null) Launch.Unavailable("needs yt-dlp") else Launch.Unavailable("not installed")
             }
         }
@@ -49,7 +50,7 @@ object Players {
      * it if it quits with an error; null for the browser. Throws with a readable message when
      * the player can't be started at all.
      */
-    fun open(player: Player, id: PlatformId, url: String, log: File?): Process? {
+    fun open(player: Player, id: PlatformId, url: String, log: File?, mpvArgs: List<String> = emptyList()): Process? {
         val player = if (id.platform == Platforms.YOUTUBE) player else BROWSER
         if (player == BROWSER) {
             if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
@@ -58,7 +59,7 @@ object Players {
             Desktop.getDesktop().browse(URI(url))
             return null
         }
-        return when (val launch = launch(player, url)) {
+        return when (val launch = launch(player, url, mpvArgs)) {
             is Launch.Unavailable -> error(
                 when (launch.reason) {
                     "needs yt-dlp" -> "mpv needs a current yt-dlp to play YouTube videos. Install it (e.g. 'pipx install yt-dlp'; " +
@@ -74,8 +75,8 @@ object Players {
         }
     }
 
-    private fun flatpak(app: String, url: String): Launch? =
-        if (flatpakHas(app)) Launch.Command(listOf("flatpak", "run", app, url)) else null
+    private fun flatpak(app: String, url: String, args: List<String> = emptyList(), access: List<String> = emptyList()): Launch? =
+        if (flatpakHas(app)) Launch.Command(listOf("flatpak", "run") + access + app + args + url) else null
 
     private fun onPath(name: String): String? =
         System.getenv("PATH").orEmpty().split(File.pathSeparator)

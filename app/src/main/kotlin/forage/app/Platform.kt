@@ -35,9 +35,13 @@ interface Platform {
 
     /**
      * Opens [url], the link to [id]. Throws with a readable message when it can't be opened;
-     * [report] gets problems noticed later, such as a player quitting with an error.
+     * [report] gets problems noticed later, such as a player quitting with an error. Players that
+     * report back (see [reportsBack]) start where [watching] says and tell it how far they got.
      */
-    fun openVideo(id: PlatformId, url: String, player: Player, log: File?, report: (String) -> Unit)
+    fun openVideo(id: PlatformId, url: String, player: Player, log: File?, report: (String) -> Unit, watching: Watching? = null)
+
+    /** Whether [player] says how far into [id] it got, and when it closes (mpv does). */
+    fun reportsBack(player: Player, id: PlatformId): Boolean = false
 
     /** Opens [dir] in a file manager. False where that isn't possible. */
     fun openFolder(dir: File): Boolean
@@ -66,6 +70,16 @@ interface Platform {
     /** How this platform opens plain SQLite files, such as the catalogue. */
     val sqlFiles: SqlFile.Opener
 }
+
+/**
+ * A video handed to a player that reports back: where it should start (seconds in, or null for
+ * the start), and what it's told: how far in it is now and then, and that the player closed.
+ */
+class Watching(
+    val startAt: Long?,
+    val position: (seconds: Long, duration: Long) -> Unit,
+    val closed: () -> Unit,
+)
 
 /** A file the user picked: its name and size, and how to read it (a phone's picker gives streams, not paths). */
 class PickedFile(val name: String, val size: Long, val open: () -> InputStream)

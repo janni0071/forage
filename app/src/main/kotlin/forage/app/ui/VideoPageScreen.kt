@@ -78,7 +78,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import forage.app.AppModel
 import forage.app.Creator
-import forage.app.Player
 import forage.app.VideoPage
 import forage.core.profile.VideoState
 import forage.core.source.VideoStub
@@ -217,7 +216,7 @@ private fun Main(model: AppModel, page: VideoPage, maxWidth: Dp) {
                 Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Accent.onAccent, modifier = Modifier.size(24.dp))
                 Spacer(Modifier.width(8.dp))
                 // Where it was left off, Play carries on from there.
-                val resume = model.positions[page.id]?.takeIf { model.player == Player.IN_APP }
+                val resume = model.positions[page.id]?.takeIf { model.resumes(page.id) }
                 val label = when {
                     page.playing -> "Playing"
                     resume != null -> "Resume from ${formatDuration(resume.seconds)}"

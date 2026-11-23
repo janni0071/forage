@@ -1813,13 +1813,22 @@ class AppModel(
     /** Hands the video to the player, and notes it in the history unless that's paused. */
     fun open(id: PlatformId) {
         if (player == Player.IN_APP && Player.IN_APP in platform.players) return playHere(id)
+        // A player that reports back (mpv) starts where the video was left off and says how far it got.
+        val watching = if (platform.reportsBack(player, id)) {
+            Watching(
+                startAt = resumeFrom(id),
+                position = { seconds, duration -> scope.launch { notePosition(id, seconds, duration) } },
+                closed = { scope.launch { playerClosed(id) } },
+            )
+        } else null
         try {
-            platform.openVideo(id, source.watchUrl(id), player, storage.playerLog) { problem -> message = problem }
+            platform.openVideo(id, source.watchUrl(id), player, storage.playerLog, { problem -> message = problem }, watching)
         } catch (e: Exception) {
             message = e.message
             return
         }
         notePlayed(id)
+        playerOpenWith = id.takeIf { watching != null }
         if (recordHistory) launchQuiet {
             library.recordWatch(id)
             if (currentSource == LibrarySource.History) loadRows()
@@ -1834,9 +1843,7 @@ class AppModel(
     /** Plays the video on its page, opening the page first where it isn't on screen. */
     private fun playHere(id: PlatformId, record: Boolean = true) {
         if (videoPage?.id != id) showVideo(id)
-        // A little before where it was left off, to pick up the thread.
-        val from = positions[id]?.let { (it.seconds - RESUME_REWIND_SECONDS).coerceAtLeast(0) }?.takeIf { it > 0 }
-        updatePage(id) { it.copy(playing = true, playback = null, playbackProblem = null, playFrom = from) }
+        updatePage(id) { it.copy(playing = true, playback = null, playbackProblem = null, playFrom = resumeFrom(id)) }
         launchQuiet {
             if (record && recordHistory) {
                 library.recordWatch(id)
@@ -1854,7 +1861,15 @@ class AppModel(
 
     // Where videos were left off.
 
-    /** Where each video was left off in Forage's own player; shown as a bar along its thumbnail. */
+    /** Where to start [id]: a little before where it was left off, to pick up the thread; null for the start. */
+    private fun resumeFrom(id: PlatformId): Long? =
+        positions[id]?.let { (it.seconds - RESUME_REWIND_SECONDS).coerceAtLeast(0) }?.takeIf { it > 0 }
+
+    /** Whether Play carries on where [id] was left off: Forage's own player does, and so do players that report back. */
+    fun resumes(id: PlatformId): Boolean =
+        (player == Player.IN_APP && Player.IN_APP in platform.players) || platform.reportsBack(player, id)
+
+    /** Where each video was left off in Forage's own player (or one that reports back); shown as a bar along its thumbnail. */
     var positions by mutableStateOf<Map<PlatformId, PlaybackPosition>>(emptyMap())
         private set
 
@@ -1919,7 +1934,7 @@ class AppModel(
         val page = videoPage ?: return
         stopPlaying()
         try {
-            platform.openVideo(page.id, source.watchUrl(page.id), Player.OTHER_APP, storage.playerLog) { problem -> message = problem }
+            platform.openVideo(page.id, source.watchUrl(page.id), Player.OTHER_APP, storage.playerLog, { problem -> message = problem })
         } catch (e: Exception) {
             message = e.message
             return
@@ -1955,10 +1970,21 @@ class AppModel(
      */
     fun cameBack(now: Instant = Instant.now()) {
         val played = lastPlayed ?: return
+        // A player that reports back says when it closed: looking at Forage meanwhile isn't coming back.
+        if (playerOpenWith == played.id) return
         if (java.time.Duration.between(played.at, now) < java.time.Duration.ofSeconds(AWAY_SECONDS)) return
         lastPlayed = null
         val state = profiles.entries(profile).firstOrNull { it.video == played.id }?.state
         backFromPlayer = BackFromPlayer(played, state, later.any { it.id == played.id })
+    }
+
+    /** The video handed to a player that reports back, while that player is open. */
+    private var playerOpenWith: PlatformId? = null
+
+    /** That player closed: the card asks about the video (if it was open a while). */
+    internal fun playerClosed(id: PlatformId, now: Instant = Instant.now()) {
+        if (playerOpenWith == id) playerOpenWith = null
+        cameBack(now)
     }
 
     fun dismissBackFromPlayer() {

@@ -56,7 +56,7 @@ class AndroidPlatform(private val context: Context) : Platform {
 
     override fun playerProblem(player: Player): String? = null
 
-    override fun openVideo(id: PlatformId, url: String, player: Player, log: File?, report: (String) -> Unit) {
+    override fun openVideo(id: PlatformId, url: String, player: Player, log: File?, report: (String) -> Unit, watching: forage.app.Watching?) {
         try {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: ActivityNotFoundException) {

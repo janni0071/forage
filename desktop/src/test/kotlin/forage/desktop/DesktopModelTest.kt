@@ -668,7 +668,7 @@ class DesktopModelTest {
         val opened = ArrayList<PlatformId>()
         val phone = object : Platform by DesktopPlatform {
             override val players = listOf(Player.IN_APP, Player.OTHER_APP)
-            override fun openVideo(id: PlatformId, url: String, player: Player, log: java.io.File?, report: (String) -> Unit) {
+            override fun openVideo(id: PlatformId, url: String, player: Player, log: java.io.File?, report: (String) -> Unit, watching: Watching?) {
                 opened += id
             }
         }
@@ -735,6 +735,37 @@ class DesktopModelTest {
             m.clearHistory()
             assertEquals(emptyMap(), m.positions)
             assertEquals(emptyMap(), m.library.playbackPositions())
+        } finally {
+            m.close()
+        }
+    }
+
+    @Test
+    fun `a player that reports back resumes, notes how far it got and says when it closed`() {
+        var watching: Watching? = null
+        val desktop = object : Platform by DesktopPlatform {
+            override val players = listOf(Player.MPV, Player.BROWSER)
+            override fun playerProblem(player: Player): String? = null
+            override fun reportsBack(player: Player, id: PlatformId) = player == Player.MPV
+            override fun openVideo(id: PlatformId, url: String, player: Player, log: java.io.File?, report: (String) -> Unit, w: Watching?) {
+                watching = w
+            }
+        }
+        val m = AppModel(dir, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined, DesktopStorage.plain(dir), Models(dir, desktop), desktop) { offline }
+        try {
+            runBlocking { m.reload() }
+            m.choosePlayer(Player.MPV)
+            assertTrue(m.resumes(id("b")))
+            m.notePosition(id("b"), 300, 900)
+            m.open(id("b"))
+            assertEquals(297L, watching!!.startAt)
+            watching!!.position(420, 900)
+            assertEquals(forage.core.library.PlaybackPosition(420, 900), m.positions[id("b")])
+            // Looking at Forage while mpv still plays isn't coming back from it.
+            m.cameBack(Instant.now().plusSeconds(600))
+            assertNull(m.backFromPlayer)
+            m.playerClosed(id("b"), Instant.now().plusSeconds(600))
+            assertEquals(id("b"), m.backFromPlayer?.video?.id)
         } finally {
             m.close()
         }
