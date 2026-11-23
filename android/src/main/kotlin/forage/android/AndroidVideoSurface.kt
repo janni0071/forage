@@ -22,6 +22,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.AudioAttributes
@@ -70,6 +72,12 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
     // after the next video started still reports its own video.
     private var streamReport: (Long, Long) -> Unit = { _, _ -> }
     private var embeddedReport: (Long, Long) -> Unit = { _, _ -> }
+
+    /**
+     * Where the embedded video is, once Forage has taken over its controls (the page then shows
+     * the video alone); null while the page's own player is in charge (starting, an ad).
+     */
+    private var embedState by mutableStateOf<EmbedState?>(null)
 
     /** Every few seconds while there's a player: how far it is. */
     private val tick = object : Runnable {
@@ -221,7 +229,17 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
     @Composable
     private fun Embedded(playback: Playback, fullscreen: Boolean, modifier: Modifier) {
         val view = embeddedPage(playback)
-        AndroidView({ FrameLayout(it).apply { setBackgroundColor(Color.BLACK) } }, modifier, update = { it.holdOnly(view) }, onRelease = { it.removeAllViews() })
+        Box(modifier) {
+            AndroidView({ FrameLayout(it).apply { setBackgroundColor(Color.BLACK) } }, Modifier.fillMaxSize(), update = { it.holdOnly(view) }, onRelease = { it.removeAllViews() })
+            embedState?.let { state ->
+                EmbedControls(
+                    state, fullscreen,
+                    onPlayPause = { view.evaluateJavascript(PLAY_PAUSE, null) },
+                    onSeek = { seconds -> view.evaluateJavascript("(function(){var v=document.querySelector('video'); if (v) v.currentTime = $seconds;})()", null) },
+                    onFullscreen = { wantsFullscreen(it) },
+                )
+            }
+        }
         // Out of full screen some other way (Back, the phone upright): the page's player is told.
         LaunchedEffect(fullscreen) { if (!fullscreen) view.evaluateJavascript("window.__forageLeft && window.__forageLeft()", null) }
     }
@@ -292,6 +310,7 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
                     if (url == "about:blank") return
                     if (!startScriptSupported) view.evaluateJavascript(FULLSCREEN, null)
                     main.postDelayed({ tapToStart(view, 0) }, 1200)
+                    main.postDelayed({ takeOver(view, length, 0) }, 1500)
                     if (resumeAt != null) main.postDelayed({ resumeEmbedded(view, resumeAt, length, 0) }, 1500)
                 }
             }
@@ -303,6 +322,7 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
             // The player's full-screen button asks the browser for full screen, which a web view
             // inside an app can't give well; the script hands the request to Forage's own.
             addJavascriptInterface(FullscreenBridge(), "ForageFullscreen")
+            addJavascriptInterface(VideoBridge(), "ForageVideo")
             if (startScriptSupported) WebViewCompat.addDocumentStartJavaScript(this, FULLSCREEN, setOf("*"))
             loadUrl(url)
         }
@@ -313,6 +333,26 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
     }
 
     private val startScriptSupported get() = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+
+    /** What the page's video reports once Forage has its controls: where it is, and whether it plays. */
+    private inner class VideoBridge {
+        @JavascriptInterface
+        fun state(seconds: Double, duration: Double, paused: Boolean) {
+            main.post { if (web != null) embedState = EmbedState(seconds, duration, paused) }
+        }
+    }
+
+    /**
+     * Once the page's video plays and is the video (not an ad before it), the page shows the video
+     * alone and Forage's controls go over it: the site's are made for a mouse, always showing, and
+     * a tap pauses. Tries every second for two minutes.
+     */
+    private fun takeOver(view: WebView, length: Long?, attempt: Int) {
+        if (web !== view || attempt >= 120) return
+        view.evaluateJavascript("($TAKE_OVER)(${length ?: 0})") { answer ->
+            if (web === view && "done" !in answer) main.postDelayed({ takeOver(view, length, attempt + 1) }, 1000)
+        }
+    }
 
     /** What the page's script calls when its player goes full screen or leaves it. */
     private inner class FullscreenBridge {
@@ -388,6 +428,7 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
         }
         web = null
         webPlays = null
+        embedState = null
     }
 
     private companion object {
@@ -457,6 +498,36 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
                 if (was) changed(was);
             };
         })();"""
+
+        /**
+         * Hides everything on the page but its video, and has the video report to Forage, once it
+         * plays and is as long as the video should be (at least half a minute when that's unknown).
+         */
+        const val TAKE_OVER = """function (length) {
+            var video = document.querySelector('video');
+            if (!video || video.paused || !isFinite(video.duration) || video.duration <= 0) return 'wait';
+            if (length > 0 ? Math.abs(video.duration - length) > Math.max(15, length / 20) : video.duration < 30) return 'wait';
+            if (!document.getElementById('forage-video-only')) {
+                var style = document.createElement('style');
+                style.id = 'forage-video-only';
+                style.textContent = '* { visibility: hidden !important; } video { visibility: visible !important; }';
+                (document.head || document.documentElement).appendChild(style);
+            }
+            if (!video.__forage) {
+                video.__forage = true;
+                var send = function () { ForageVideo.state(video.currentTime, video.duration, video.paused); };
+                ['timeupdate', 'play', 'pause', 'seeked', 'durationchange', 'ended'].forEach(function (name) {
+                    video.addEventListener(name, send);
+                });
+                send();
+            }
+            return 'done';
+        }"""
+
+        const val PLAY_PAUSE = """(function () {
+            var video = document.querySelector('video');
+            if (video) { if (video.paused) video.play(); else video.pause(); }
+        })()"""
 
         const val POSITION_EVERY_MS = 5000L
     }
