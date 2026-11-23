@@ -5,6 +5,7 @@ import android.app.Activity
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
@@ -205,23 +206,21 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
-            // The page is there to play the video and nothing else: no pop-ups (a window it asks
-            // for is never made), and it stays on the embed (a tap on the paused video would
-            // otherwise open the site's own page for it, ads and all).
-            settings.setSupportMultipleWindows(true)
+            // The page is there to play the video and nothing else: it stays on the embed (a tap on
+            // the paused video would otherwise open the site's own page for it, ads and all). A
+            // window it opens would load in its place, and is stopped the same way.
+            settings.setSupportMultipleWindows(false)
             settings.javaScriptCanOpenWindowsAutomatically = false
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) =
                     request.isForMainFrame && !(request.url.host == embed.host && request.url.path == embed.path)
 
-                // Starts the video itself, so one tap on Play is enough.
+                // Presses the player's own Play, so one tap on Forage's is enough.
                 override fun onPageFinished(view: WebView, url: String) {
-                    view.evaluateJavascript(AUTOPLAY, null)
+                    if (url != "about:blank") main.postDelayed({ tapToStart(view, 0) }, 1200)
                 }
             }
             webChromeClient = object : WebChromeClient() {
-                override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message) = false
-
                 override fun onShowCustomView(view: View, callback: CustomViewCallback) = showPageFullscreen(view, callback)
 
                 override fun onHideCustomView() = hidePageFullscreen()
@@ -231,6 +230,27 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
         web = view
         webPlays = playback
         return view
+    }
+
+    /**
+     * Taps the middle of the embedded player until its video plays (a few times at most). A real
+     * tap, not a script calling play(): the player loads the video only once its own Play is
+     * pressed, and a video started behind its back waits for data that never comes.
+     */
+    private fun tapToStart(view: WebView, attempt: Int) {
+        if (web !== view || attempt >= 4) return
+        view.evaluateJavascript(VIDEO_STATE) { state ->
+            // Playing, or loading after Play (a video that was asked to play isn't paused): done.
+            if (web !== view || "playing" in state) return@evaluateJavascript
+            if (view.width > 0 && view.height > 0 && view.isAttachedToWindow) {
+                val x = view.width / 2f
+                val y = view.height / 2f
+                val down = android.os.SystemClock.uptimeMillis()
+                MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0).also { view.dispatchTouchEvent(it); it.recycle() }
+                MotionEvent.obtain(down, down + 60, MotionEvent.ACTION_UP, x, y, 0).also { view.dispatchTouchEvent(it); it.recycle() }
+            }
+            main.postDelayed({ tapToStart(view, attempt + 1) }, 2000)
+        }
     }
 
     /** Forage went to the background: the video waits. */
@@ -267,15 +287,10 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
     }
 
     private companion object {
-        /** Plays the page's video as soon as it has one, for up to 15 seconds after the page loads. */
-        const val AUTOPLAY = """(function () {
-            var tries = 0;
-            var timer = setInterval(function () {
-                var video = document.querySelector('video');
-                if (video && !video.paused) { clearInterval(timer); return; }
-                if (video) { var started = video.play(); if (started && started.catch) started.catch(function () {}); }
-                if (++tries > 30) clearInterval(timer);
-            }, 500);
-        })();"""
+        /** Whether the page's video plays: "playing", "paused", or "none" before the player made one. */
+        const val VIDEO_STATE = """(function () {
+            var video = document.querySelector('video');
+            return !video ? 'none' : video.paused ? 'paused' : 'playing';
+        })()"""
     }
 }
