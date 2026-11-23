@@ -46,7 +46,7 @@ object DesktopPlatform : Platform {
 
     override fun loadLanguageDetector(): LanguageDetector = LinguaDetector()
 
-    override val players = Player.entries.toList()
+    override val players = listOf(Player.FREETUBE, Player.MPV, Player.BROWSER)
 
     override fun playerProblem(player: Player): String? = Players.problem(player)
 

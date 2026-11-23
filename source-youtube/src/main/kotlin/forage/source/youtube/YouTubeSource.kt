@@ -18,6 +18,7 @@ import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabInfo
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabs
 import forage.core.source.ChannelFeed
+import forage.core.source.Playback
 import org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
 import org.schabi.newpipe.extractor.exceptions.SignInConfirmNotBotException
@@ -100,6 +101,40 @@ class YouTubeSource : ExtractorSource {
         }
     }
 
+    /**
+     * The best video stream up to 1080p (H.264 first, which every phone decodes in hardware) and
+     * the best audio stream, both plain HTTP files; a stream with both where there's no separate one.
+     */
+    override fun playback(id: PlatformId): Playback = guarded("streams of $id") {
+        val info = StreamInfo.getInfo(ServiceList.YouTube, watchUrl(id))
+        fun plain(s: org.schabi.newpipe.extractor.stream.Stream) =
+            s.isUrl && s.deliveryMethod == org.schabi.newpipe.extractor.stream.DeliveryMethod.PROGRESSIVE_HTTP
+        val videos = info.videoOnlyStreams.orEmpty().filter { plain(it) && it.height in 1..1080 }
+        val video = videos.filter { it.format == org.schabi.newpipe.extractor.MediaFormat.MPEG_4 }.maxByOrNull { it.height }
+            ?: videos.maxByOrNull { it.height }
+        val audio = info.audioStreams.orEmpty().filter(::plain)
+            .sortedWith(compareBy<org.schabi.newpipe.extractor.stream.AudioStream>({ it.format != org.schabi.newpipe.extractor.MediaFormat.M4A }, { -it.averageBitrate }))
+            .firstOrNull()
+        if (video != null && audio != null) {
+            return@guarded Playback(video.content, audio.content, quality = "${video.height}p", headers = streamHeaders(video.content))
+        }
+        val muxed = info.videoStreams.orEmpty().filter(::plain).maxByOrNull { it.height }
+            ?: throw SourceException("YouTube offered no stream Forage can play for $id")
+        Playback(muxed.content, quality = "${muxed.height}p", headers = streamHeaders(muxed.content))
+    }
+
+    /**
+     * YouTube serves a stream only to the kind of client it was given to: the same user agent for
+     * the streams the extractor got as the visionOS app, the site's origin for those it got as the web.
+     */
+    private fun streamHeaders(url: String): Map<String, String> = when {
+        org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper.isVisionOsStreamingUrl(url) ->
+            mapOf("User-Agent" to org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper.getVisionOsUserAgent(null))
+        org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper.isWebStreamingUrl(url) ->
+            mapOf("User-Agent" to WEB_AGENT, "Origin" to "https://www.youtube.com", "Referer" to "https://www.youtube.com/")
+        else -> mapOf("User-Agent" to WEB_AGENT)
+    }
+
     /** The channel page, for its picture alone. */
     override fun channelPicture(channel: PlatformId): String? = guarded("channel ${channel.id}") {
         if (channel.platform != platform) return@guarded null
@@ -170,5 +205,6 @@ class YouTubeSource : ExtractorSource {
     private companion object {
         val BARE_ID = Regex("[A-Za-z0-9_-]{11}")
         val CHANNEL_LINK = Regex("""youtube\.com/(channel/|@|c/|user/)""", RegexOption.IGNORE_CASE)
+        const val WEB_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
     }
 }

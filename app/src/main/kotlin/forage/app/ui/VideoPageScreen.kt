@@ -118,9 +118,16 @@ fun VideoPageScreen(model: AppModel, page: VideoPage) {
             val gutter = 24.dp
             val mainColumn = minOf(mainWidth + gutter, maxWidth - 48.dp - relatedWidth)
             Row(Modifier.fillMaxSize().padding(screenPadding())) {
-                LazyColumn(Modifier.width(mainColumn).fillMaxHeight(), state = listState, contentPadding = PaddingValues(end = gutter, bottom = 48.dp)) {
-                    item { BackRow(model) }
-                    item { Main(model, page, mainWidth) }
+                Column(Modifier.width(mainColumn).fillMaxHeight()) {
+                    // A playing video stays put while the rest scrolls.
+                    if (page.playing) {
+                        BackRow(model)
+                        PlayerArea(model, page, Modifier.widthIn(max = mainWidth).padding(end = gutter))
+                    }
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(end = gutter, bottom = 48.dp)) {
+                        if (!page.playing) item { BackRow(model) }
+                        item { Main(model, page, mainWidth) }
+                    }
                 }
                 val sideState = rememberLazyListState()
                 LaunchedEffect(page.id) { sideState.scrollToItem(0) }
@@ -132,20 +139,29 @@ fun VideoPageScreen(model: AppModel, page: VideoPage) {
                 }
             }
         } else {
-            Box(Modifier.fillMaxSize()) {
-                LazyColumn(
-                    Modifier.fillMaxSize().padding(end = scrollbarGap()),
-                    state = listState,
-                    contentPadding = PaddingValues(
-                        start = if (compact) 16.dp else 32.dp, end = if (compact) 16.dp else 16.dp,
-                        top = if (compact) 4.dp else 24.dp, bottom = 48.dp,
-                    ),
-                ) {
-                    item { BackRow(model) }
-                    item { Main(model, page, mainWidth) }
-                    relatedItems(model, page, related)
+            Column(Modifier.fillMaxSize()) {
+                // A playing video stays at the top while the rest scrolls beneath it, as on YouTube.
+                if (page.playing) {
+                    Column(Modifier.padding(start = if (compact) 16.dp else 32.dp, end = if (compact) 16.dp else 32.dp, top = if (compact) 4.dp else 24.dp)) {
+                        BackRow(model)
+                        PlayerArea(model, page, Modifier.widthIn(max = mainWidth))
+                    }
                 }
-                Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(
+                        Modifier.fillMaxSize().padding(end = scrollbarGap()),
+                        state = listState,
+                        contentPadding = PaddingValues(
+                            start = if (compact) 16.dp else 32.dp, end = if (compact) 16.dp else 16.dp,
+                            top = if (page.playing) 0.dp else if (compact) 4.dp else 24.dp, bottom = 48.dp,
+                        ),
+                    ) {
+                        if (!page.playing) item { BackRow(model) }
+                        item { Main(model, page, mainWidth) }
+                        relatedItems(model, page, related)
+                    }
+                    Scrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+                }
             }
         }
     }
@@ -162,7 +178,8 @@ private fun Main(model: AppModel, page: VideoPage, maxWidth: Dp) {
     val metadata = page.details?.metadata
     // Wide enough for a big picture, narrow enough that Play stays in view.
     Column(Modifier.widthIn(max = maxWidth)) {
-        BigVideoThumbnail(model, page)
+        // While it plays, the player sits above the page instead.
+        if (!page.playing) BigVideoThumbnail(model, page)
 
         Text(
             page.shownTitle ?: "Untitled video",
@@ -198,7 +215,7 @@ private fun Main(model: AppModel, page: VideoPage, maxWidth: Dp) {
             ) {
                 Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Accent.onAccent, modifier = Modifier.size(24.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Play", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Accent.onAccent)
+                Text(if (page.playing) "Playing" else "Play", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Accent.onAccent)
             }
         }
         val liked = page.state == VideoState.LIKED

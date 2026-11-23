@@ -27,6 +27,8 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.OndemandVideo
 import androidx.compose.material.icons.outlined.SmartDisplay
@@ -72,9 +74,12 @@ fun SettingsDialog(model: AppModel) {
                     IconButton(onClick = { model.settingsOpen = false }) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
                 }
 
-                // Phones open videos in the app the system has for the link, so there's nothing to choose.
                 if (model.platform.players.isNotEmpty()) {
-                    Section("Playback", "Where videos open. Forage only finds and organizes them.")
+                    Section(
+                        "Playback",
+                        if (Player.IN_APP in model.platform.players) "Play videos here, on their page, or hand them to another app (LibreTube, NewPipe, a browser)."
+                        else "Where videos open. Forage only finds and organizes them.",
+                    )
                     // Checking for players starts small processes, so do it once per opening.
                     val problems = remember { model.platform.players.associateWith { model.platform.playerProblem(it) } }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -257,6 +262,8 @@ private fun PlayerCard(player: Player, problem: String?, selected: Boolean, modi
         Player.FREETUBE -> Icons.Outlined.SmartDisplay
         Player.MPV -> Icons.Outlined.OndemandVideo
         Player.BROWSER -> Icons.Outlined.Language
+        Player.IN_APP -> Icons.Outlined.PlayCircle
+        Player.OTHER_APP -> Icons.Outlined.OpenInNew
     }
     Column(
         modifier

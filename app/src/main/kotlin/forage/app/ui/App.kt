@@ -112,7 +112,8 @@ fun App(model: AppModel, onImport: () -> Unit, chrome: WindowChrome? = null) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxWidth < 640.dp
         CompositionLocalProvider(LocalCompact provides compact) {
-            if (compact) PhoneApp(model, onImport) else WideApp(model, onImport, chrome)
+            if (model.playerFullscreen) FullscreenPlayer(model)
+            else if (compact) PhoneApp(model, onImport) else WideApp(model, onImport, chrome)
         }
     }
 }

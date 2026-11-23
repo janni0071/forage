@@ -662,4 +662,58 @@ class DesktopModelTest {
         model.laterFromBackFromPlayer()
         assertEquals(emptyList(), model.later)
     }
+
+    @Test
+    fun `where Forage has its own player, Play plays on the video's page`() {
+        val opened = ArrayList<PlatformId>()
+        val phone = object : Platform by DesktopPlatform {
+            override val players = listOf(Player.IN_APP, Player.OTHER_APP)
+            override fun openVideo(id: PlatformId, url: String, player: Player, log: java.io.File?, report: (String) -> Unit) {
+                opened += id
+            }
+        }
+        var refuse = false
+        val streams = object : ExtractorSource by offline {
+            override fun playback(id: PlatformId) =
+                if (refuse) throw SourceException("no streams today") else forage.core.source.Playback("https://v/${id.id}", "https://a/${id.id}")
+        }
+        val m = AppModel(dir, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined, DesktopStorage.plain(dir), Models(dir, phone), phone) { streams }
+        try {
+            runBlocking { m.reload() }
+            assertEquals(Player.IN_APP, m.player)
+            val watched = m.library.counts().second
+            m.open(id("a"))
+            val page = m.videoPage!!
+            assertEquals(id("a"), page.id)
+            assertTrue(page.playing)
+            assertEquals("https://v/a", page.playback?.videoUrl)
+            assertEquals(emptyList(), opened)
+            assertEquals(watched + 1, m.library.counts().second)
+            // Nothing was handed away, so there's nothing to ask about on coming back.
+            m.cameBack(Instant.now().plusSeconds(600))
+            assertNull(m.backFromPlayer)
+
+            // Back leaves full screen first, then the page.
+            m.playerFullscreen = true
+            assertTrue(m.canGoBack)
+            m.back()
+            assertEquals(false, m.playerFullscreen)
+            assertEquals(id("a"), m.videoPage?.id)
+
+            // Another app after all: the page stays, and Forage asks about it on coming back.
+            m.playElsewhere()
+            assertEquals(listOf(id("a")), opened)
+            assertEquals(false, m.videoPage!!.playing)
+
+            refuse = true
+            m.playPage()
+            assertEquals("no streams today", m.videoPage!!.playbackProblem)
+            refuse = false
+            m.retryPlayback()
+            assertNull(m.videoPage!!.playbackProblem)
+            assertEquals("https://v/a", m.videoPage!!.playback?.videoUrl)
+        } finally {
+            m.close()
+        }
+    }
 }

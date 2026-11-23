@@ -165,6 +165,12 @@ data class VideoPage(
     val state: VideoState? = null,
     /** Performers you follow whose name is only among the video's tags (amateur models often are). */
     val taggedCreators: List<Creator> = emptyList(),
+    /** True while the video plays here, on its page, in Forage's own player. */
+    val playing: Boolean = false,
+    /** What the player plays, once the platform said; null while it's being asked. */
+    val playback: forage.core.source.Playback? = null,
+    /** Why it won't play here, if it won't. */
+    val playbackProblem: String? = null,
     val inLibrary: VideoInLibrary = VideoInLibrary(),
     /** Which of [creators] the library follows. */
     val following: Set<PlatformId> = emptySet(),
@@ -544,10 +550,11 @@ class AppModel(
     }
 
     /** Whether Back has somewhere to go inside the app: a video page, search results or a library list. */
-    val canGoBack: Boolean get() = videoPage != null || searchShown || (screen == Screen.LIBRARY && libraryView != LibraryView.HUB)
+    val canGoBack: Boolean get() = playerFullscreen || videoPage != null || searchShown || (screen == Screen.LIBRARY && libraryView != LibraryView.HUB)
 
     fun back() {
         when {
+            playerFullscreen -> playerFullscreen = false
             videoPage != null -> closeVideo()
             searchShown -> searchShown = false
             screen == Screen.LIBRARY && libraryView == LibraryView.PLAYLIST && reorderingPlaylist -> reorderingPlaylist = false
@@ -779,7 +786,9 @@ class AppModel(
         uploadedAt: Instant? = null,
     ) {
         if (videoPage?.id == id) return
-        videoStack = videoStack + VideoPage(id, title, channel, channelName, durationSeconds, uploadedAt, loading = true)
+        // Only the page on screen plays.
+        videoStack = videoStack.map { if (it.playing) it.copy(playing = false, playback = null) else it } +
+            VideoPage(id, title, channel, channelName, durationSeconds, uploadedAt, loading = true)
         launchQuiet { loadPage(id, fetch = true) }
     }
 
@@ -794,10 +803,12 @@ class AppModel(
 
     /** Back from the page on screen to the one before, or to the screen it was opened from. */
     fun closeVideo() {
+        playerFullscreen = false
         if (videoStack.isNotEmpty()) videoStack = videoStack.dropLast(1)
     }
 
     fun closeAllVideos() {
+        playerFullscreen = false
         if (videoStack.isNotEmpty()) videoStack = emptyList()
     }
 
@@ -943,6 +954,8 @@ class AppModel(
     /** Plays the video on screen. */
     fun playPage() {
         val page = videoPage ?: return
+        // Already playing here: Play has nothing more to do.
+        if (page.playing && page.playbackProblem == null) return
         launchQuiet { rememberPage(page) }
         open(page.id)
         if (recordHistory) {
@@ -1793,6 +1806,7 @@ class AppModel(
 
     /** Hands the video to the player, and notes it in the history unless that's paused. */
     fun open(id: PlatformId) {
+        if (player == Player.IN_APP && Player.IN_APP in platform.players) return playHere(id)
         try {
             platform.openVideo(id, source.watchUrl(id), player, storage.playerLog) { problem -> message = problem }
         } catch (e: Exception) {
@@ -1804,6 +1818,68 @@ class AppModel(
             library.recordWatch(id)
             if (currentSource == LibrarySource.History) loadRows()
         }
+    }
+
+    // Forage's own player (Android): the video plays on its page.
+
+    /** True while the playing video fills the screen. */
+    var playerFullscreen by mutableStateOf(false)
+
+    /** Plays the video on its page, opening the page first where it isn't on screen. */
+    private fun playHere(id: PlatformId, record: Boolean = true) {
+        if (videoPage?.id != id) showVideo(id)
+        updatePage(id) { it.copy(playing = true, playback = null, playbackProblem = null) }
+        launchQuiet {
+            if (record && recordHistory) {
+                library.recordWatch(id)
+                if (currentSource == LibrarySource.History) loadRows()
+            }
+            val playback = try {
+                source.playback(id) ?: throw SourceException("${source.displayName} offers nothing Forage can play")
+            } catch (e: SourceException) {
+                updatePage(id) { it.copy(playbackProblem = e.message ?: "It won't play here") }
+                return@launchQuiet
+            }
+            updatePage(id) { it.copy(playback = playback) }
+        }
+    }
+
+    /** Asks for the streams again after a problem; it's the same watch, so the history stays as it is. */
+    fun retryPlayback() {
+        val page = videoPage ?: return
+        playHere(page.id, record = false)
+    }
+
+    /** The phone turned sideways while a video plays on its page: it fills the screen, as on YouTube. */
+    fun turnedSideways() {
+        val page = videoPage ?: return
+        if (page.playing && page.playback != null && page.playbackProblem == null) playerFullscreen = true
+    }
+
+    /** The player couldn't play it after all (a stream refused, say). */
+    fun playbackFailed(id: PlatformId, problem: String) {
+        updatePage(id) { it.copy(playbackProblem = problem) }
+        playerFullscreen = false
+    }
+
+    /** Stops playing here; the page stays. */
+    fun stopPlaying() {
+        val page = videoPage ?: return
+        playerFullscreen = false
+        updatePage(page.id) { it.copy(playing = false, playback = null, playbackProblem = null) }
+    }
+
+    /** Hands the video on screen to another app after all (LibreTube, NewPipe, a browser). */
+    fun playElsewhere() {
+        val page = videoPage ?: return
+        stopPlaying()
+        try {
+            platform.openVideo(page.id, source.watchUrl(page.id), Player.OTHER_APP, storage.playerLog) { problem -> message = problem }
+        } catch (e: Exception) {
+            message = e.message
+            return
+        }
+        notePlayed(page.id)
     }
 
     // Back from the player: what was handed to a player, to ask about once Forage is in front again.

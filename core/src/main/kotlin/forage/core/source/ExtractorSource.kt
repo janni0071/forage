@@ -68,6 +68,12 @@ interface ExtractorSource {
     /** A channel's picture, for a video page; null where the platform has none. May ask the platform. */
     fun channelPicture(channel: PlatformId): String? = null
 
+    /**
+     * What a player inside Forage needs to play the video: its streams, or a page the platform
+     * offers for embedding. Null where the platform offers neither. Asks the platform.
+     */
+    fun playback(id: PlatformId): Playback? = null
+
     /** The video a pasted link (or bare ID) points to, if it is one of this platform's. */
     fun parseLink(text: String): PlatformId? = null
 
@@ -91,6 +97,20 @@ enum class Capability {
     /** [ExtractorSource.channelFeed]: a followed channel's or performer's latest uploads. */
     CHANNEL_FEED,
 }
+
+/**
+ * How to play a video inside Forage: a video stream with a separate [audioUrl] (or one with both),
+ * or else a page made for embedding, which plays in a web view with the platform's own controls.
+ */
+data class Playback(
+    val videoUrl: String? = null,
+    val audioUrl: String? = null,
+    val embedUrl: String? = null,
+    /** "1080p", say, for the player to show. */
+    val quality: String? = null,
+    /** Headers the streams want with every request (YouTube's answer to whichever client asked). */
+    val headers: Map<String, String> = emptyMap(),
+)
 
 /** A channel's latest uploads, newest first, with what the platform says about the channel. */
 data class ChannelFeed(val videos: List<VideoStub>, val name: String? = null, val avatarUrl: String? = null)

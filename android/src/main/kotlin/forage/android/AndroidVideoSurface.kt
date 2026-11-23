@@ -1,0 +1,247 @@
+package forage.android
+
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import androidx.annotation.OptIn
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.ui.PlayerView
+import forage.app.ui.VideoSurface
+import forage.core.source.Playback
+
+/**
+ * Forage's own player on Android: ExoPlayer for streams (YouTube's video and audio, played
+ * together), a web view for pages made for embedding (Pornhub's), with the site's own controls.
+ *
+ * One of each at a time, kept here rather than in the screen, so the page and full screen show the
+ * same player: it carries on where it was. Once nothing shows it for a moment, it's let go.
+ */
+@OptIn(UnstableApi::class)
+class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
+    private var exo: ExoPlayer? = null
+    private var exoPlays: Playback? = null
+    private var web: WebView? = null
+    private var webPlays: Playback? = null
+
+    /** The embedded page's own full-screen view, while it shows one. */
+    private var pageFullscreen by mutableStateOf<View?>(null)
+    private var pageFullscreenCallback: WebChromeClient.CustomViewCallback? = null
+
+    // What the screen showing the player wants told; the newest screen's.
+    private var problem: (String) -> Unit = {}
+    private var ended: () -> Unit = {}
+    private var wantsFullscreen: (Boolean) -> Unit = {}
+
+    private var shownBy = 0
+    private val main = Handler(Looper.getMainLooper())
+    private val letGo = Runnable { if (shownBy == 0) release() }
+
+    @Composable
+    override fun Player(
+        playback: Playback,
+        fullscreen: Boolean,
+        onFullscreen: (Boolean) -> Unit,
+        onProblem: (String) -> Unit,
+        onEnded: () -> Unit,
+        modifier: Modifier,
+    ) {
+        val currentProblem by rememberUpdatedState(onProblem)
+        val currentEnded by rememberUpdatedState(onEnded)
+        val currentFullscreen by rememberUpdatedState(onFullscreen)
+        problem = { currentProblem(it) }
+        ended = { currentEnded() }
+        wantsFullscreen = { currentFullscreen(it) }
+        DisposableEffect(Unit) {
+            shownBy++
+            main.removeCallbacks(letGo)
+            // Going full screen swaps one screen for another: wait a moment before letting go.
+            onDispose {
+                shownBy--
+                main.postDelayed(letGo, 500)
+            }
+        }
+        when {
+            playback.videoUrl != null -> Stream(playback, fullscreen, modifier)
+            playback.embedUrl != null -> Embedded(playback, fullscreen, modifier)
+            else -> DisposableEffect(playback) {
+                problem("Nothing to play")
+                onDispose {}
+            }
+        }
+    }
+
+    @Composable
+    private fun Stream(playback: Playback, fullscreen: Boolean, modifier: Modifier) {
+        val player = streamPlayer(playback)
+        AndroidView(
+            factory = { context ->
+                PlayerView(context).apply {
+                    keepScreenOn = true
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                    setShowNextButton(false)
+                    setShowPreviousButton(false)
+                }
+            },
+            update = { view ->
+                if (view.player !== player) view.player = player
+                view.setFullscreenButtonState(fullscreen)
+                view.setFullscreenButtonClickListener { wantsFullscreen(it) }
+            },
+            onRelease = { it.player = null },
+            modifier = modifier,
+        )
+    }
+
+    private fun streamPlayer(playback: Playback): ExoPlayer {
+        exo?.let { if (exoPlays == playback) return it }
+        releaseStream()
+        val http = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setDefaultRequestProperties(playback.headers - "User-Agent")
+        playback.headers["User-Agent"]?.let(http::setUserAgent)
+        val streams = ProgressiveMediaSource.Factory(http)
+        val video = streams.createMediaSource(MediaItem.fromUri(playback.videoUrl!!))
+        val source = playback.audioUrl?.let { MergingMediaSource(video, streams.createMediaSource(MediaItem.fromUri(it))) } ?: video
+        val player = ExoPlayer.Builder(activity).build().apply {
+            setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
+            setHandleAudioBecomingNoisy(true)
+            addListener(object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    problem("The stream didn't play (${error.errorCodeName.removePrefix("ERROR_CODE_").lowercase().replace('_', ' ')})")
+                }
+
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (state == Player.STATE_ENDED) ended()
+                }
+            })
+            setMediaSource(source)
+            prepare()
+            playWhenReady = true
+        }
+        exo = player
+        exoPlays = playback
+        return player
+    }
+
+    @Composable
+    private fun Embedded(playback: Playback, fullscreen: Boolean, modifier: Modifier) {
+        val own = pageFullscreen
+        if (fullscreen && own != null) {
+            // The page's own full screen (its player's button): its view, until either side leaves it.
+            AndroidView({ FrameLayout(it).apply { setBackgroundColor(Color.BLACK) } }, modifier, update = { it.holdOnly(own) }, onRelease = { it.removeAllViews() })
+            DisposableEffect(own) {
+                onDispose { if (pageFullscreen === own) pageFullscreenCallback?.onCustomViewHidden() }
+            }
+        } else {
+            val view = embeddedPage(playback)
+            AndroidView({ FrameLayout(it).apply { setBackgroundColor(Color.BLACK) } }, modifier, update = { it.holdOnly(view) }, onRelease = { it.removeAllViews() })
+        }
+    }
+
+    /** Puts [child] in this frame alone, taking it from wherever it was. */
+    private fun FrameLayout.holdOnly(child: View) {
+        if (child.parent === this) return
+        (child.parent as? ViewGroup)?.removeView(child)
+        removeAllViews()
+        addView(child, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun embeddedPage(playback: Playback): WebView {
+        web?.let { if (webPlays == playback) return it }
+        releaseEmbedded()
+        val url = playback.embedUrl!!
+        val host = android.net.Uri.parse(url).host
+        val view = WebView(activity).apply {
+            keepScreenOn = true
+            setBackgroundColor(Color.BLACK)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            // No pop-ups, and the page doesn't wander off to other sites: it's there to play the video.
+            settings.setSupportMultipleWindows(false)
+            settings.javaScriptCanOpenWindowsAutomatically = false
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) =
+                    request.isForMainFrame && request.url.host != host
+            }
+            webChromeClient = object : WebChromeClient() {
+                override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                    pageFullscreen = view
+                    pageFullscreenCallback = callback
+                    wantsFullscreen(true)
+                }
+
+                override fun onHideCustomView() {
+                    pageFullscreen = null
+                    pageFullscreenCallback = null
+                    wantsFullscreen(false)
+                }
+            }
+            loadUrl(url)
+        }
+        web = view
+        webPlays = playback
+        return view
+    }
+
+    /** Forage went to the background: the video waits. */
+    fun pause() {
+        exo?.pause()
+        web?.onPause()
+    }
+
+    fun resume() {
+        web?.onResume()
+    }
+
+    override fun release() {
+        main.removeCallbacks(letGo)
+        releaseStream()
+        releaseEmbedded()
+    }
+
+    private fun releaseStream() {
+        exo?.release()
+        exo = null
+        exoPlays = null
+    }
+
+    private fun releaseEmbedded() {
+        web?.let { view ->
+            (view.parent as? ViewGroup)?.removeView(view)
+            view.loadUrl("about:blank")
+            view.destroy()
+        }
+        web = null
+        webPlays = null
+        pageFullscreen = null
+        pageFullscreenCallback = null
+    }
+}

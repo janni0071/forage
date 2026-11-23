@@ -50,8 +50,9 @@ class AndroidPlatform(private val context: Context) : Platform {
 
     override fun loadLanguageDetector(): LanguageDetector = SystemLanguageDetector(context)
 
-    // The system opens video links in whatever app the user has for them (LibreTube, NewPipe, a browser…).
-    override val players = emptyList<Player>()
+    // Forage's own player (see AndroidVideoSurface), or whatever app the system has for video links
+    // (LibreTube, NewPipe, a browser…).
+    override val players = listOf(Player.IN_APP, Player.OTHER_APP)
 
     override fun playerProblem(player: Player): String? = null
 

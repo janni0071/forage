@@ -3,6 +3,7 @@ package forage.source.pornhub
 import forage.core.PlatformId
 import forage.core.source.Capability
 import forage.core.source.ChannelFeed
+import forage.core.source.Playback
 import forage.core.source.ExtractorSource
 import forage.core.source.SourceException
 import forage.core.source.VideoDetails
@@ -167,6 +168,10 @@ class PornhubSource(
         if (!pageFound) throw SourceException.NotAvailable("No profile page found for $slug")
         return null
     }
+
+    /** The site's own embed player: the officially permitted way to show its videos elsewhere. */
+    override fun playback(id: PlatformId): Playback? =
+        if (id.platform != platform) null else Playback(embedUrl = "$SITE/embed/${URLEncoder.encode(id.id, Charsets.UTF_8)}")
 
     override fun watchUrl(id: PlatformId): String {
         require(id.platform == platform) { "Not a $displayName id: $id" }

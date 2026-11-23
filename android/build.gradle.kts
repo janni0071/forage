@@ -13,8 +13,8 @@ android {
         // The shared code is built for Java 21; Android has all of its library methods from Android 15 (API 35) on.
         minSdk = 35
         targetSdk = 36
-        versionCode = 22
-        versionName = "0.7.1"
+        versionCode = 23
+        versionName = "0.8.0"
         // Phones of the last decade; leaving out the other processor types saves over 100 MB of ONNX Runtime.
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -74,6 +74,8 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.icons)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
 }
 
 configurations.configureEach {

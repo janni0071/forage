@@ -1,5 +1,7 @@
 package forage.android
 
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -20,6 +22,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -27,6 +31,10 @@ import androidx.compose.ui.Modifier
 import forage.app.Theme
 import forage.app.ui.App
 import forage.app.ui.ForageTheme
+import forage.app.ui.LocalVideoSurface
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import forage.core.importer.TakeoutFolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -83,9 +91,47 @@ class MainActivity : ComponentActivity() {
         }
     }.getOrNull()
 
+    /** Forage's own player, kept by the activity so the page and full screen share it. */
+    private val videos by lazy { AndroidVideoSurface(this) }
+
     override fun onDestroy() {
-        if (isFinishing) app.platform.picker = null
+        if (isFinishing) {
+            app.platform.picker = null
+            videos.release()
+        }
         super.onDestroy()
+    }
+
+    override fun onStop() {
+        videos.pause()
+        super.onStop()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        videos.resume()
+    }
+
+    private var sideways = false
+
+    /** Turning the phone sideways while a video plays fills the screen with it. */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val nowSideways = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (nowSideways && !sideways) app.model?.let { (it.privateModel ?: it).turnedSideways() }
+        sideways = nowSideways
+    }
+
+    /** Full screen: the video across the whole screen, sideways, without the system's bars. */
+    private fun fillScreen(on: Boolean) {
+        requestedOrientation = if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        val bars = WindowCompat.getInsetsController(window, window.decorView)
+        if (on) {
+            bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            bars.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            bars.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     /** Back from the player: Forage asks about the video just watched. */
@@ -97,6 +143,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        sideways = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         app.platform.picker = { mimeTypes, then ->
             picked = then
             pickFile.launch(mimeTypes)
@@ -113,10 +160,18 @@ class MainActivity : ComponentActivity() {
             // The system's back gesture steps back inside the app (a video page, search results, a
             // library list) before it leaves it.
             BackHandler(enabled = active.canGoBack) { active.back() }
+            val fullscreen = active.playerFullscreen
+            LaunchedEffect(fullscreen) { fillScreen(fullscreen) }
             ForageTheme(dark = dark, vault = active.vaultLook) {
-                // Drawn edge to edge; the content keeps clear of the status and navigation bars.
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
-                    App(active, onImport = { pickImport.launch(arrayOf("application/zip", "application/x-sqlite3", "application/octet-stream", "*/*")) })
+                // Drawn edge to edge; the content keeps clear of the status and navigation bars
+                // (all but a video playing full screen, which hides them).
+                Box(
+                    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+                        .then(if (fullscreen) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing)),
+                ) {
+                    CompositionLocalProvider(LocalVideoSurface provides videos) {
+                        App(active, onImport = { pickImport.launch(arrayOf("application/zip", "application/x-sqlite3", "application/octet-stream", "*/*")) })
+                    }
                 }
                 pendingDatabase?.let { uri ->
                     AlertDialog(

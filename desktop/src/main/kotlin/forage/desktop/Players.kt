@@ -33,7 +33,8 @@ object Players {
                     ?: if (mpv != null) Launch.Unavailable("needs yt-dlp") else Launch.Unavailable("not installed")
             }
         }
-        BROWSER -> Launch.Command(emptyList())
+        // Android's choices; the desktop treats them as the browser.
+        BROWSER, Player.IN_APP, Player.OTHER_APP -> Launch.Command(emptyList())
     }
 
     /** Null when the player can be used, otherwise a short reason. */
