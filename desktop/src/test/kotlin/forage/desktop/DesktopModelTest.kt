@@ -712,6 +712,10 @@ class DesktopModelTest {
             m.retryPlayback()
             assertNull(m.videoPage!!.playbackProblem)
             assertEquals("https://v/a", m.videoPage!!.playback?.videoUrl)
+            // Another audio track: the same video, other sound.
+            m.chooseAudio(forage.core.source.AudioTrack("https://a/a-dub", "Spanish", original = false))
+            assertEquals("https://a/a-dub", m.videoPage!!.playback?.audioUrl)
+            assertEquals("https://v/a", m.videoPage!!.playback?.videoUrl)
         } finally {
             m.close()
         }

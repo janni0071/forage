@@ -120,6 +120,8 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
 
     private fun streamPlayer(playback: Playback): ExoPlayer {
         exo?.let { if (exoPlays == playback) return it }
+        // Another audio track for the same video: it carries on from where it was.
+        val from = exo?.takeIf { exoPlays?.videoUrl == playback.videoUrl }?.let { it.currentPosition to it.playWhenReady }
         releaseStream()
         val http = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
@@ -140,9 +142,9 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
                     if (state == Player.STATE_ENDED) ended()
                 }
             })
-            setMediaSource(source)
+            if (from != null) setMediaSource(source, from.first) else setMediaSource(source)
             prepare()
-            playWhenReady = true
+            playWhenReady = from?.second ?: true
         }
         exo = player
         exoPlays = playback
@@ -151,17 +153,36 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
 
     @Composable
     private fun Embedded(playback: Playback, fullscreen: Boolean, modifier: Modifier) {
-        val own = pageFullscreen
-        if (fullscreen && own != null) {
-            // The page's own full screen (its player's button): its view, until either side leaves it.
-            AndroidView({ FrameLayout(it).apply { setBackgroundColor(Color.BLACK) } }, modifier, update = { it.holdOnly(own) }, onRelease = { it.removeAllViews() })
-            DisposableEffect(own) {
-                onDispose { if (pageFullscreen === own) pageFullscreenCallback?.onCustomViewHidden() }
-            }
-        } else {
-            val view = embeddedPage(playback)
-            AndroidView({ FrameLayout(it).apply { setBackgroundColor(Color.BLACK) } }, modifier, update = { it.holdOnly(view) }, onRelease = { it.removeAllViews() })
-        }
+        val view = embeddedPage(playback)
+        AndroidView({ FrameLayout(it).apply { setBackgroundColor(Color.BLACK) } }, modifier, update = { it.holdOnly(view) }, onRelease = { it.removeAllViews() })
+    }
+
+    /** True while the embedded player's own full screen (its button) covers the window. */
+    val inPageFullscreen: Boolean get() = pageFullscreen != null
+
+    /** Leaves the embedded player's own full screen (Back, or the phone turned upright). */
+    fun leavePageFullscreen() {
+        val callback = pageFullscreenCallback
+        hidePageFullscreen()
+        callback?.onCustomViewHidden()
+    }
+
+    /**
+     * The page's full screen goes over the whole window, on top of Forage, with the web view left
+     * where it is: taking the web view away would end the page's full screen at once.
+     */
+    private fun showPageFullscreen(view: View, callback: WebChromeClient.CustomViewCallback) {
+        hidePageFullscreen()
+        view.setBackgroundColor(Color.BLACK)
+        (activity.window.decorView as ViewGroup).addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        pageFullscreen = view
+        pageFullscreenCallback = callback
+    }
+
+    private fun hidePageFullscreen() {
+        pageFullscreen?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        pageFullscreen = null
+        pageFullscreenCallback = null
     }
 
     /** Puts [child] in this frame alone, taking it from wherever it was. */
@@ -177,32 +198,33 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
         web?.let { if (webPlays == playback) return it }
         releaseEmbedded()
         val url = playback.embedUrl!!
-        val host = android.net.Uri.parse(url).host
+        val embed = android.net.Uri.parse(url)
         val view = WebView(activity).apply {
             keepScreenOn = true
             setBackgroundColor(Color.BLACK)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
-            // No pop-ups, and the page doesn't wander off to other sites: it's there to play the video.
-            settings.setSupportMultipleWindows(false)
+            // The page is there to play the video and nothing else: no pop-ups (a window it asks
+            // for is never made), and it stays on the embed (a tap on the paused video would
+            // otherwise open the site's own page for it, ads and all).
+            settings.setSupportMultipleWindows(true)
             settings.javaScriptCanOpenWindowsAutomatically = false
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) =
-                    request.isForMainFrame && request.url.host != host
+                    request.isForMainFrame && !(request.url.host == embed.host && request.url.path == embed.path)
+
+                // Starts the video itself, so one tap on Play is enough.
+                override fun onPageFinished(view: WebView, url: String) {
+                    view.evaluateJavascript(AUTOPLAY, null)
+                }
             }
             webChromeClient = object : WebChromeClient() {
-                override fun onShowCustomView(view: View, callback: CustomViewCallback) {
-                    pageFullscreen = view
-                    pageFullscreenCallback = callback
-                    wantsFullscreen(true)
-                }
+                override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message) = false
 
-                override fun onHideCustomView() {
-                    pageFullscreen = null
-                    pageFullscreenCallback = null
-                    wantsFullscreen(false)
-                }
+                override fun onShowCustomView(view: View, callback: CustomViewCallback) = showPageFullscreen(view, callback)
+
+                override fun onHideCustomView() = hidePageFullscreen()
             }
             loadUrl(url)
         }
@@ -234,6 +256,7 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
     }
 
     private fun releaseEmbedded() {
+        leavePageFullscreen()
         web?.let { view ->
             (view.parent as? ViewGroup)?.removeView(view)
             view.loadUrl("about:blank")
@@ -241,7 +264,18 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
         }
         web = null
         webPlays = null
-        pageFullscreen = null
-        pageFullscreenCallback = null
+    }
+
+    private companion object {
+        /** Plays the page's video as soon as it has one, for up to 15 seconds after the page loads. */
+        const val AUTOPLAY = """(function () {
+            var tries = 0;
+            var timer = setInterval(function () {
+                var video = document.querySelector('video');
+                if (video && !video.paused) { clearInterval(timer); return; }
+                if (video) { var started = video.play(); if (started && started.catch) started.catch(function () {}); }
+                if (++tries > 30) clearInterval(timer);
+            }, 500);
+        })();"""
     }
 }

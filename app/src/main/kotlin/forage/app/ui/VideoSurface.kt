@@ -23,7 +23,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -104,6 +114,34 @@ fun PlayerArea(model: AppModel, page: VideoPage, modifier: Modifier = Modifier) 
                 onEnded = {},
                 modifier = Modifier.fillMaxSize(),
             )
+        }
+        // YouTube's dubbed tracks: the original plays first, the others are a tap away.
+        val tracks = playback?.audioTracks.orEmpty()
+        if (problem == null && tracks.size > 1) {
+            var open by remember { mutableStateOf(false) }
+            val playing = tracks.firstOrNull { it.url == playback?.audioUrl } ?: tracks.first()
+            Box(Modifier.align(Alignment.TopStart).padding(6.dp)) {
+                Row(
+                    Modifier.height(36.dp).clip(RoundedCornerShape(18.dp)).background(Color.Black.copy(alpha = 0.45f))
+                        .clickable { open = true }.padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.Translate, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Text("  ${playing.label}", style = MaterialTheme.typography.labelLarge, color = Color.White, maxLines = 1)
+                }
+                DropdownMenu(open, onDismissRequest = { open = false }) {
+                    for (track in tracks) {
+                        DropdownMenuItem(
+                            text = { Text(track.label) },
+                            leadingIcon = { if (track == playing) Icon(Icons.Outlined.Check, contentDescription = null) },
+                            onClick = {
+                                open = false
+                                if (track != playing) model.chooseAudio(track)
+                            },
+                        )
+                    }
+                }
+            }
         }
         // Stops it and brings the picture back.
         IconButton(

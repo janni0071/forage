@@ -18,6 +18,7 @@ import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabInfo
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabs
 import forage.core.source.ChannelFeed
+import forage.core.source.AudioTrack
 import forage.core.source.Playback
 import org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
@@ -112,16 +113,48 @@ class YouTubeSource : ExtractorSource {
         val videos = info.videoOnlyStreams.orEmpty().filter { plain(it) && it.height in 1..1080 }
         val video = videos.filter { it.format == org.schabi.newpipe.extractor.MediaFormat.MPEG_4 }.maxByOrNull { it.height }
             ?: videos.maxByOrNull { it.height }
-        val audio = info.audioStreams.orEmpty().filter(::plain)
-            .sortedWith(compareBy<org.schabi.newpipe.extractor.stream.AudioStream>({ it.format != org.schabi.newpipe.extractor.MediaFormat.M4A }, { -it.averageBitrate }))
-            .firstOrNull()
-        if (video != null && audio != null) {
-            return@guarded Playback(video.content, audio.content, quality = "${video.height}p", headers = streamHeaders(video.content))
+        val tracks = audioTracks(
+            info.audioStreams.orEmpty().filter(::plain).map {
+                AudioCandidate(
+                    it.content, it.audioTrackId, it.audioTrackName, it.audioLocale,
+                    original = it.audioTrackType == org.schabi.newpipe.extractor.stream.AudioTrackType.ORIGINAL,
+                    secondary = it.audioTrackType == org.schabi.newpipe.extractor.stream.AudioTrackType.DESCRIPTIVE,
+                    m4a = it.format == org.schabi.newpipe.extractor.MediaFormat.M4A, bitrate = it.averageBitrate,
+                )
+            },
+        )
+        if (video != null && tracks.isNotEmpty()) {
+            return@guarded Playback(
+                video.content, tracks.first().url, quality = "${video.height}p", headers = streamHeaders(video.content),
+                audioTracks = tracks.takeIf { it.size > 1 }.orEmpty(),
+            )
         }
         val muxed = info.videoStreams.orEmpty().filter(::plain).maxByOrNull { it.height }
             ?: throw SourceException("YouTube offered no stream Forage can play for $id")
         Playback(muxed.content, quality = "${muxed.height}p", headers = streamHeaders(muxed.content))
     }
+
+    /**
+     * One stream per audio track (the best of each: M4A first, then the higher bitrate), the
+     * original first: YouTube adds dubbed tracks, often made by machine, and the extractor lists
+     * them in no particular order.
+     */
+    internal fun audioTracks(candidates: List<AudioCandidate>): List<AudioTrack> {
+        val best = candidates.groupBy { it.trackId }.values.map { group ->
+            group.sortedWith(compareBy<AudioCandidate>({ !it.m4a }, { -it.bitrate })).first()
+        }
+        return best.sortedWith(compareBy<AudioCandidate>({ !it.original }, { it.secondary })).mapIndexed { i, it ->
+            val name = it.name?.takeIf { n -> n.isNotBlank() }
+                ?: it.locale?.getDisplayName(java.util.Locale.ENGLISH)?.takeIf { n -> n.isNotBlank() }
+                ?: "Track ${i + 1}"
+            AudioTrack(it.url, if (it.original && "original" !in name.lowercase()) "$name (original)" else name, it.original)
+        }
+    }
+
+    internal data class AudioCandidate(
+        val url: String, val trackId: String?, val name: String?, val locale: java.util.Locale?,
+        val original: Boolean, val secondary: Boolean, val m4a: Boolean, val bitrate: Int,
+    )
 
     /**
      * YouTube serves a stream only to the kind of client it was given to: the same user agent for

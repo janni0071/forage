@@ -1844,6 +1844,12 @@ class AppModel(
         }
     }
 
+    /** Plays [track] instead of the audio playing now (the original rather than a dub, say), from where it is. */
+    fun chooseAudio(track: forage.core.source.AudioTrack) {
+        val page = videoPage ?: return
+        updatePage(page.id) { p -> p.copy(playback = p.playback?.copy(audioUrl = track.url)) }
+    }
+
     /** Asks for the streams again after a problem; it's the same watch, so the history stays as it is. */
     fun retryPlayback() {
         val page = videoPage ?: return

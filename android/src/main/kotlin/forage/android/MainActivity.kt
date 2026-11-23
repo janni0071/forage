@@ -3,6 +3,8 @@ package forage.android
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.net.Uri
+import android.provider.Settings
+import android.view.OrientationEventListener
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -118,13 +120,36 @@ class MainActivity : ComponentActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         val nowSideways = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
-        if (nowSideways && !sideways) app.model?.let { (it.privateModel ?: it).turnedSideways() }
+        val active = app.model?.let { it.privateModel ?: it }
+        if (nowSideways && !sideways) active?.turnedSideways()
+        // Upright again: full screen ends, as on YouTube.
+        if (!nowSideways && sideways) {
+            videos.leavePageFullscreen()
+            active?.playerFullscreen = false
+        }
         sideways = nowSideways
+    }
+
+    /**
+     * Full screen starts sideways whichever way the phone is held; once it's held sideways, the
+     * screen follows it again, so turning it upright leaves full screen. (Not with auto-rotate off:
+     * the screen would turn upright at once. Back leaves full screen then.)
+     */
+    private val heldSideways = object : OrientationEventListener(this) {
+        override fun onOrientationChanged(degrees: Int) {
+            if (degrees == ORIENTATION_UNKNOWN || !(degrees in 60..120 || degrees in 240..300)) return
+            disable()
+            val autoRotate = runCatching { Settings.System.getInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION) == 1 }.getOrDefault(false)
+            if (autoRotate && requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE) {
+                requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+            }
+        }
     }
 
     /** Full screen: the video across the whole screen, sideways, without the system's bars. */
     private fun fillScreen(on: Boolean) {
         requestedOrientation = if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (on && heldSideways.canDetectOrientation()) heldSideways.enable() else heldSideways.disable()
         val bars = WindowCompat.getInsetsController(window, window.decorView)
         if (on) {
             bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -160,8 +185,11 @@ class MainActivity : ComponentActivity() {
             // The system's back gesture steps back inside the app (a video page, search results, a
             // library list) before it leaves it.
             BackHandler(enabled = active.canGoBack) { active.back() }
+            // The embedded player's own full screen, over everything: Back leaves it first.
+            BackHandler(enabled = videos.inPageFullscreen) { videos.leavePageFullscreen() }
             val fullscreen = active.playerFullscreen
-            LaunchedEffect(fullscreen) { fillScreen(fullscreen) }
+            val anyFullscreen = fullscreen || videos.inPageFullscreen
+            LaunchedEffect(anyFullscreen) { fillScreen(anyFullscreen) }
             ForageTheme(dark = dark, vault = active.vaultLook) {
                 // Drawn edge to edge; the content keeps clear of the status and navigation bars
                 // (all but a video playing full screen, which hides them).

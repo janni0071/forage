@@ -110,7 +110,12 @@ data class Playback(
     val quality: String? = null,
     /** Headers the streams want with every request (YouTube's answer to whichever client asked). */
     val headers: Map<String, String> = emptyMap(),
+    /** Every audio track there is to choose from, when there's more than one (dubbed ones, say); [audioUrl] is the one playing. */
+    val audioTracks: List<AudioTrack> = emptyList(),
 )
+
+/** One of a video's audio tracks: its stream, its name ("English (original)", say), and whether it's the one it was made with. */
+data class AudioTrack(val url: String, val label: String, val original: Boolean)
 
 /** A channel's latest uploads, newest first, with what the platform says about the channel. */
 data class ChannelFeed(val videos: List<VideoStub>, val name: String? = null, val avatarUrl: String? = null)
