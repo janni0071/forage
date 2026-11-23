@@ -9,6 +9,8 @@ import java.io.File
  */
 class Storage(
     val db: ForageDatabase,
+    /** The same database, for reading and writing it whole (backups). */
+    val driver: app.cash.sqldelight.db.SqlDriver,
     val settings: Settings,
     /** Null keeps thumbnails in memory only. */
     val thumbnailsDir: File?,
@@ -27,6 +29,7 @@ class Storage(
         /** The private vault's storage. Settings start as a copy of [settings] and aren't written anywhere. */
         fun private(database: EncryptedStore, settings: Settings) = Storage(
             db = database.db,
+            driver = database.driver,
             settings = Settings(null, copyOf = settings),
             thumbnailsDir = null,
             playerLog = null,
@@ -38,6 +41,7 @@ class Storage(
 /** A private vault's database, kept decrypted while unlocked and written back encrypted. */
 interface EncryptedStore : AutoCloseable {
     val db: ForageDatabase
+    val driver: app.cash.sqldelight.db.SqlDriver
 
     /** Writes the vault if anything changed since the last save. Returns whether it did. */
     fun saveIfChanged(): Boolean

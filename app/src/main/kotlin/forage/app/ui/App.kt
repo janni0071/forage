@@ -117,6 +117,7 @@ fun App(model: AppModel, onImport: () -> Unit, chrome: WindowChrome? = null) {
             if (model.playerFullscreen) FullscreenPlayer(model)
             else if (compact) PhoneApp(model, onImport) else WideApp(model, onImport, chrome)
             model.playerFailure?.let { PlayerFailureDialog(model, it) }
+            BackupDialogs(model)
         }
     }
 }

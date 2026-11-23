@@ -65,6 +65,7 @@ fun main(args: Array<String>) {
         val model = remember { DesktopModel(dir, scope) }
         LaunchedEffect(model) {
             model.reload()
+            model.backUpAutomatically()
             model.warmUp()
         }
         // While the private vault is unlocked, it replaces the normal one on screen.

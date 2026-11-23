@@ -770,4 +770,44 @@ class DesktopModelTest {
             m.close()
         }
     }
+
+    @Test
+    fun `a backup restores the library as it was, after a copy of how it is now`() {
+        val saved = java.io.File(dir, "chosen")
+        val desktop = object : Platform by DesktopPlatform {
+            override fun saveFile(title: String, name: String, mimeType: String, chosen: (SaveTarget) -> Unit) {
+                val file = java.io.File(saved, name).also { it.parentFile.mkdirs() }
+                chosen(SaveTarget(name) { file.outputStream() })
+            }
+        }
+        val m = AppModel(dir, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined, DesktopStorage.plain(dir), Models(dir, desktop), desktop) { offline }
+        try {
+            runBlocking { m.reload() }
+            m.backUpAutomatically()
+            assertEquals(1, m.automaticBackups.size)
+            // Once a day: starting again the same day adds none.
+            m.backUpAutomatically()
+            assertEquals(1, m.automaticBackups.size)
+
+            m.library.saveForLater(id("a"))
+            m.backUp()
+            val backup = saved.listFiles()!!.single { it.name.endsWith(".forage") }
+            m.library.removeFromWatchLater(id("a"))
+            m.library.saveForLater(id("b"))
+
+            m.offerRestore(PickedFile(backup.name, backup.length()) { backup.inputStream() })
+            val offer = m.restoreOffer!!
+            assertTrue("1 saved for later" in offer.summary)
+            m.confirmRestore()
+            assertEquals(listOf(id("a")), m.library.watchLater())
+            // The library as it was before is kept, to go back to.
+            assertTrue(m.automaticBackups.any { "before-restore" in it.name })
+
+            m.exportLibrary()
+            val export = saved.listFiles()!!.single { it.name.endsWith(".json") }.readText()
+            assertTrue("Hand-cut dovetails" in export && "\"watchLater\"" in export)
+        } finally {
+            m.close()
+        }
+    }
 }

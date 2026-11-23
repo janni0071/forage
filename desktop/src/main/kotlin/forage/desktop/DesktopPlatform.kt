@@ -100,6 +100,27 @@ object DesktopPlatform : Platform {
     }
 
     override val sqlFiles: SqlFile.Opener = JdbcSqlFile
+
+    override fun scratchDatabase(): app.cash.sqldelight.db.SqlDriver =
+        app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver(app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver.IN_MEMORY)
+
+    override fun saveFile(title: String, name: String, mimeType: String, chosen: (forage.app.SaveTarget) -> Unit) {
+        val chooser = javax.swing.JFileChooser().apply {
+            dialogTitle = title
+            currentDirectory = File(System.getProperty("user.home"), "Documents").takeIf { it.isDirectory } ?: File(System.getProperty("user.home"))
+            selectedFile = File(currentDirectory, name)
+        }
+        if (chooser.showSaveDialog(null) != javax.swing.JFileChooser.APPROVE_OPTION) return
+        val file = chooser.selectedFile
+        if (file.exists() && javax.swing.JOptionPane.showConfirmDialog(
+                null, "${file.name} exists already. Replace it?", title, javax.swing.JOptionPane.YES_NO_OPTION,
+            ) != javax.swing.JOptionPane.YES_OPTION
+        ) return
+        chosen(forage.app.SaveTarget(file.name) { file.outputStream() })
+    }
+
+    override val deviceName: String? =
+        System.getenv("HOSTNAME") ?: runCatching { java.net.InetAddress.getLocalHost().hostName }.getOrNull()
 }
 
 /** The shared model, as the desktop app (and its tests) create it. */

@@ -16,6 +16,7 @@ object DesktopStorage {
         val driver = openDriver(File(dataDir, "forage.db"))
         return Storage(
             db = ForageDatabase(driver),
+            driver = driver,
             settings = Settings(File(dataDir, "settings.properties")),
             thumbnailsDir = File(dataDir, "thumbnails"),
             playerLog = File(dataDir, "logs/player.log"),
@@ -49,7 +50,7 @@ object DesktopStorage {
  * All use must come from one thread at a time: the in-memory database is a single connection.
  */
 class EncryptedDatabase(private val vaults: PrivateVaults, private val vault: PrivateVaults.Unlocked) : EncryptedStore {
-    private val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY, Properties())
+    override val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY, Properties())
     private val connection = driver.getConnection().unwrap(SQLiteConnection::class.java)
     override val db: ForageDatabase
     private var savedChanges = -1L

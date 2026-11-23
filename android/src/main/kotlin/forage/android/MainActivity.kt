@@ -63,9 +63,16 @@ class MainActivity : ComponentActivity() {
                     contentResolver.openInputStream(uri)?.use(TakeoutFolder::readZip) ?: error("Couldn't read $name")
                 }
             }
+            // A Forage backup: restored into what's on screen (the private vault, if it's unlocked).
+            forage.core.backup.Backups.isBackup(head) -> {
+                val name = fileName(uri) ?: "the backup"
+                (model.privateModel ?: model).offerRestore(forage.app.PickedFile(name, -1) {
+                    contentResolver.openInputStream(uri) ?: error("Couldn't read $name")
+                })
+            }
             head.decodeToString(0, minOf(head.size, 15)) == "SQLite format 3" ->
                 if (model.libraryEmpty) replaceDatabase(uri) else pendingDatabase = uri
-            else -> Toast.makeText(this, "Pick a Takeout zip from Google, or a forage.db from your computer", Toast.LENGTH_LONG).show()
+            else -> Toast.makeText(this, "Pick a Takeout zip from Google, a Forage backup, or a forage.db from your computer", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -74,6 +81,17 @@ class MainActivity : ComponentActivity() {
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val then = picked
         picked = null
+        if (uri != null) then?.invoke(uri)
+    }
+
+    /** The system's "save as" for the shared screens (backups, exports); the type is set per file. */
+    private var saveType = "application/octet-stream"
+    private var saved: ((Uri) -> Unit)? = null
+    private val saveFile = registerForActivityResult(object : ActivityResultContracts.CreateDocument("application/octet-stream") {
+        override fun createIntent(context: android.content.Context, input: String) = super.createIntent(context, input).setType(saveType)
+    }) { uri ->
+        val then = saved
+        saved = null
         if (uri != null) then?.invoke(uri)
     }
 
@@ -99,6 +117,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (isFinishing) {
             app.platform.picker = null
+            app.platform.saver = null
             videos.release()
         }
         super.onDestroy()
@@ -173,6 +192,11 @@ class MainActivity : ComponentActivity() {
         app.platform.picker = { mimeTypes, then ->
             picked = then
             pickFile.launch(mimeTypes)
+        }
+        app.platform.saver = { name, mimeType, then ->
+            saveType = mimeType
+            saved = then
+            saveFile.launch(name)
         }
         setContent {
             val model = app.model ?: return@setContent

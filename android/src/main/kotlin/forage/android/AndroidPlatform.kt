@@ -95,6 +95,7 @@ class AndroidPlatform(private val context: Context) : Platform {
         return Storage.private(
             object : EncryptedStore {
                 override val db = db
+                override val driver = driver
                 // Every change is encrypted as it's written; there's nothing to save later.
                 override fun saveIfChanged() = false
                 override fun close() = driver.close()
@@ -123,6 +124,32 @@ class AndroidPlatform(private val context: Context) : Platform {
     }
 
     override val sqlFiles: SqlFile.Opener = AndroidSqlFile
+
+    /** In memory, with SQLCipher's SQLite (no key: nothing is written anywhere to encrypt). */
+    override fun scratchDatabase(): app.cash.sqldelight.db.SqlDriver {
+        System.loadLibrary("sqlcipher")
+        val helper = SupportOpenHelperFactory(ByteArray(0)).create(
+            androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context).name(null).callback(
+                object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(1) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) = Unit
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                },
+            ).build(),
+        )
+        return AndroidSqliteDriver(helper)
+    }
+
+    /** Set by the open screen: asks the system where to save, and passes on where. */
+    var saver: ((name: String, mimeType: String, saved: (Uri) -> Unit) -> Unit)? = null
+
+    override fun saveFile(title: String, name: String, mimeType: String, chosen: (forage.app.SaveTarget) -> Unit) {
+        val ask = saver ?: return
+        ask(name, mimeType) { uri ->
+            chosen(forage.app.SaveTarget(name) { context.contentResolver.openOutputStream(uri, "wt") ?: error("Couldn't write $name") })
+        }
+    }
+
+    override val deviceName: String? = android.os.Build.MODEL
 
     private companion object {
         // Many file managers label SQLite files as plain binary data.

@@ -11,6 +11,9 @@ import forage.core.importer.TakeoutData
 import forage.core.importer.TakeoutFolder
 import forage.core.language.LanguageDetector
 import forage.core.library.PlaybackPosition
+import forage.core.backup.Backups
+import forage.core.backup.Export
+import forage.core.backup.WrongPinException
 import forage.core.library.LibraryStore
 import forage.core.library.VideoInLibrary
 import forage.core.library.FollowedChannel
@@ -271,6 +274,174 @@ class AppModel(
     /** Opens the folder the vault lives in, in the system's file manager. */
     fun openDataFolder() {
         if (!platform.openFolder(dataDir.absoluteFile)) message = "Couldn't open the folder: ${dataDir.absolutePath}"
+    }
+
+    // Backups and exports.
+
+    /**
+     * Where the main library's automatic backups go (one a day, the last [KEPT_BACKUPS] kept). The
+     * private vault has none: they'd need its PIN, which Forage doesn't keep.
+     */
+    val backupsDir: File? get() = if (isPrivate) null else File(dataDir, "backups")
+
+    /** The automatic backups there are, newest first. */
+    var automaticBackups by mutableStateOf<List<File>>(emptyList())
+        private set
+
+    /** The vault's "Back up now" waits for the PIN to seal the backup with. */
+    var askingBackupPin by mutableStateOf(false)
+
+    /** A backup picked to restore, sealed: waiting for its PIN (with why the last one didn't open it). */
+    var restorePinFor by mutableStateOf<Pair<PickedFile, String?>?>(null)
+        private set
+
+    /** A backup read and ready to restore, once the user says yes. */
+    var restoreOffer by mutableStateOf<RestoreOffer?>(null)
+        private set
+
+    class RestoreOffer(val contents: Backups.Contents, val name: String) {
+        val about get() = contents.about
+        /** What it holds, in a line. */
+        val summary: String
+            get() = listOf(
+                contents.rowCount("profile_video", "state", "liked") to "liked",
+                contents.rowCount("watch_event") to "in the history",
+                contents.rowCount("playlist") to "playlists",
+                contents.rowCount("watch_later") to "saved for later",
+                contents.rowCount("subscription") to "followed",
+            ).filter { it.first > 0 }.joinToString(", ") { (n, what) -> "%,d %s".format(n, what) }.ifEmpty { "nothing yet" }
+    }
+
+    private fun backupName(kind: String = "backup") =
+        "forage-${if (isPrivate) "vault-" else ""}$kind-${java.time.LocalDate.now()}.${if (kind == "backup") "forage" else "json"}"
+
+    /** Back up now: to a file the user chooses (somewhere safe, another device, a cloud folder). */
+    fun backUp() {
+        if (isPrivate) {
+            askingBackupPin = true
+            return
+        }
+        saveBackup(null)
+    }
+
+    /** The vault's backup, sealed with [pin] (it can be the vault's own). */
+    fun backUpWithPin(pin: CharArray) {
+        askingBackupPin = false
+        saveBackup(pin)
+    }
+
+    private fun saveBackup(pin: CharArray?) {
+        platform.saveFile("Back up your library", backupName(), "application/octet-stream") { target ->
+            runJob("Backing up") {
+                target.open().use { Backups.write(storage.driver, it, platform.deviceName, pin) }
+                pin?.fill(' ')
+                "Backed up to ${target.name}"
+            }
+        }
+    }
+
+    /** Once a day, as Forage starts: a backup into [backupsDir], keeping the last few. */
+    fun backUpAutomatically(now: Instant = Instant.now()) = launchQuiet {
+        val dir = backupsDir ?: return@launchQuiet
+        val newest = listBackups(dir).firstOrNull()
+        if (newest == null || newest.lastModified() < now.minus(java.time.Duration.ofHours(20)).toEpochMilli()) {
+            writeAutomaticBackup(dir, "forage-${java.time.LocalDate.ofInstant(now, java.time.ZoneId.systemDefault())}.forage")
+        }
+        automaticBackups = listBackups(dir)
+    }
+
+    private fun writeAutomaticBackup(dir: File, name: String) {
+        dir.mkdirs()
+        val partial = File(dir, "$name.part")
+        partial.outputStream().use { Backups.write(storage.driver, it, platform.deviceName) }
+        val file = File(dir, name)
+        file.delete()
+        check(partial.renameTo(file)) { "Couldn't finish the backup $name" }
+        listBackups(dir).drop(KEPT_BACKUPS).forEach { it.delete() }
+    }
+
+    private fun listBackups(dir: File): List<File> =
+        dir.listFiles { f -> f.isFile && f.name.endsWith(".forage") }.orEmpty().sortedByDescending { it.lastModified() }
+
+    /** Restore from a backup file the user picks. */
+    fun chooseBackup() = platform.chooseFile("Restore from a backup", listOf("forage")) { offerRestore(it) }
+
+    /** Restore one of the automatic backups. */
+    fun restoreAutomatic(file: File) = offerRestore(PickedFile(file.name, file.length()) { file.inputStream() })
+
+    /** Reads [file] and offers to restore it, asking for its PIN first if it's sealed. */
+    fun offerRestore(file: PickedFile, pin: CharArray? = null) = launchQuiet {
+        restorePinFor = null
+        val bytes = file.open().use { it.readBytes() }
+        if (Backups.isSealed(bytes) && pin == null) {
+            restorePinFor = file to null
+            return@launchQuiet
+        }
+        val contents = try {
+            Backups.read(java.io.ByteArrayInputStream(bytes), pin)
+        } catch (e: WrongPinException) {
+            restorePinFor = file to e.message
+            return@launchQuiet
+        } catch (e: Exception) {
+            message = e.message ?: "Couldn't read that backup"
+            return@launchQuiet
+        } finally {
+            pin?.fill(' ')
+        }
+        // Each library takes its own: a vault's backup would land unencrypted in the main library.
+        when {
+            contents.about.private && !isPrivate -> message = "That's a backup of a private vault: restore it from inside the private vault"
+            !contents.about.private && isPrivate -> message = "That's a backup of the main library: restore it outside the private vault"
+            else -> restoreOffer = RestoreOffer(contents, file.name)
+        }
+    }
+
+    fun cancelRestore() {
+        restoreOffer = null
+        restorePinFor = null
+    }
+
+    /**
+     * Replaces the library with the backup offered. The main library is backed up first, so the
+     * restore can be undone (from the automatic backups).
+     */
+    fun confirmRestore() {
+        val offer = restoreOffer ?: return
+        restoreOffer = null
+        closeAllVideos()
+        runJob("Restoring the backup") {
+            backupsDir?.let { writeAutomaticBackup(it, "forage-before-restore-${java.time.LocalDate.now()}.forage") }
+            Backups.restore(offer.contents, storage.driver, db, platform.scratchDatabase())
+            storage.encrypted?.saveIfChanged()
+            reload()
+            backupsDir?.let { automaticBackups = listBackups(it) }
+            "Restored the backup from ${java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm").withZone(java.time.ZoneId.systemDefault()).format(offer.about.createdAt)}"
+        }
+    }
+
+    /** Everything in the library as readable JSON, for other programs or just to look at. */
+    fun exportLibrary() {
+        platform.saveFile("Export your library", backupName("library"), "application/json") { target ->
+            runJob("Exporting") {
+                val json = Export.libraryJson(library, profiles, { source.watchUrl(it) })
+                target.open().use { it.write(json.toByteArray()) }
+                "Exported to ${target.name}"
+            }
+        }
+    }
+
+    /** How many YouTube channels an export for other apps would hold. */
+    val youTubeFollowing: Int get() = following.count { it.channel.platform == forage.core.Platforms.YOUTUBE }
+
+    /** The YouTube channels followed, for NewPipe, FreeTube or LibreTube to import. */
+    fun exportSubscriptions() {
+        platform.saveFile("Export your subscriptions", "subscriptions-${java.time.LocalDate.now()}.json", "application/json") { target ->
+            runJob("Exporting") {
+                val json = Export.subscriptionsNewPipe(library)
+                target.open().use { it.write(json.toByteArray()) }
+                "Exported ${Export.youTubeSubscriptions(library)} subscriptions to ${target.name}"
+            }
+        }
     }
 
     var profileMenuOpen by mutableStateOf(false)
@@ -2283,6 +2454,9 @@ class AppModel(
         private const val GUIDE_HIDDEN = "home.guideHidden"
         /** How many related videos a page shows where Forage finds them itself. */
         private const val RELATED_COUNT = 20
+        /** Automatic backups kept: a week's worth. */
+        const val KEPT_BACKUPS = 7
+
         /** Positions closer than this to the start aren't kept: that's barely started. */
         const val MIN_POSITION_SECONDS = 10L
 

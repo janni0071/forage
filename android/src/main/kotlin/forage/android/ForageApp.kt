@@ -39,6 +39,7 @@ class ForageApp : Application() {
         val driver = AndroidSqliteDriver(ForageDatabase.Schema, this, DATABASE)
         return Storage(
             db = ForageDatabase(driver),
+            driver = driver,
             settings = Settings(File(filesDir, "settings.properties")),
             thumbnailsDir = File(cacheDir, "thumbnails"),
             playerLog = null,
@@ -51,6 +52,7 @@ class ForageApp : Application() {
         model = opened
         scope.launch {
             opened.reload()
+            opened.backUpAutomatically()
             opened.warmUp()
         }
     }

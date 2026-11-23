@@ -209,6 +209,11 @@ fun SettingsDialog(model: AppModel) {
                     }
                 }
 
+                Section("Backup", if (model.isPrivate) "Everything in this vault, in one encrypted file, to restore if anything goes wrong." else "Everything in your library, in one file, to restore if anything goes wrong, here or on another device.")
+                BackupCard(model)
+                Section("Export", null)
+                ExportCard(model)
+
                 if (model.isPrivate) {
                     Section(
                         "This private vault",

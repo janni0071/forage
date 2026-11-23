@@ -69,7 +69,22 @@ interface Platform {
 
     /** How this platform opens plain SQLite files, such as the catalogue. */
     val sqlFiles: SqlFile.Opener
+
+    /** An empty database in memory, for putting a backup together before it's restored. */
+    fun scratchDatabase(): app.cash.sqldelight.db.SqlDriver
+
+    /**
+     * Asks the user where to save a file called [name] (of [mimeType]); [chosen] gets where, perhaps
+     * later, and isn't called when they cancel.
+     */
+    fun saveFile(title: String, name: String, mimeType: String, chosen: (SaveTarget) -> Unit)
+
+    /** This device's name, for telling backups apart ("laptop", "Pixel 9"). */
+    val deviceName: String?
 }
+
+/** Where the user chose to save a file: its name, and how to write it. */
+class SaveTarget(val name: String, val open: () -> java.io.OutputStream)
 
 /**
  * A video handed to a player that reports back: where it should start (seconds in, or null for
