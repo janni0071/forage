@@ -19,18 +19,19 @@ object Players {
     }
 
     /** [mpvArgs] go to mpv before the link (to report back, say). */
-    fun launch(player: Player, url: String, mpvArgs: List<String> = emptyList()): Launch = when (player) {
+    fun launch(player: Player, url: String, extraMpvArgs: List<String> = emptyList()): Launch = when (player) {
         FREETUBE -> onPath("freetube")?.let { Launch.Command(listOf(it, url)) }
             ?: flatpak(FREETUBE_FLATPAK, url)
             ?: Launch.Unavailable("not installed")
         MPV -> {
+            val mpvArgs = MPV_ARGS + extraMpvArgs
             val mpv = onPath("mpv")
             // mpv hands YouTube links to yt-dlp; without it, it quits without playing anything.
             val ytdlp = onPath("yt-dlp") ?: onPath("youtube-dl")
             when {
                 mpv != null && ytdlp != null -> Launch.Command(listOf(mpv) + mpvArgs + url)
                 // The Flatpak build ships its own yt-dlp; its sandbox is opened to where the socket goes.
-                else -> flatpak(MPV_FLATPAK, url, mpvArgs, listOf(MpvWatcher.flatpakAccess).takeIf { mpvArgs.isNotEmpty() }.orEmpty())
+                else -> flatpak(MPV_FLATPAK, url, mpvArgs, listOf(MpvWatcher.flatpakAccess).takeIf { extraMpvArgs.isNotEmpty() }.orEmpty())
                     ?: if (mpv != null) Launch.Unavailable("needs yt-dlp") else Launch.Unavailable("not installed")
             }
         }
@@ -40,6 +41,13 @@ object Players {
 
     /** Null when the player can be used, otherwise a short reason. */
     fun problem(player: Player): String? = (launch(player, "x") as? Launch.Unavailable)?.reason
+
+    /**
+     * Anything but AV1 where YouTube has it (VP9 or H.264, as good or nearly): graphics cards'
+     * AV1 decoders are young, and one that fails takes FFmpeg down with it ("Assertion ... failed
+     * at libavcodec/decode.c"), so the video never plays. Where there's nothing else, AV1 it is.
+     */
+    internal val MPV_ARGS = listOf("--ytdl-format=bestvideo[vcodec!^=av01]+bestaudio/best[vcodec!^=av01]/bestvideo+bestaudio/best")
 
     private const val FREETUBE_FLATPAK = "io.freetubeapp.FreeTube"
     private const val MPV_FLATPAK = "io.mpv.Mpv"
