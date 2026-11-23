@@ -47,7 +47,10 @@ object Players {
      * AV1 decoders are young, and one that fails takes FFmpeg down with it ("Assertion ... failed
      * at libavcodec/decode.c"), so the video never plays. Where there's nothing else, AV1 it is.
      */
-    internal val MPV_ARGS = listOf("--ytdl-format=bestvideo[vcodec!^=av01]+bestaudio/best[vcodec!^=av01]/bestvideo+bestaudio/best")
+    internal val MPV_ARGS = listOf(
+        // No status line redrawn several times a second: what it says is then what matters.
+        "--quiet",
+        "--ytdl-format=bestvideo[vcodec!^=av01]+bestaudio/best[vcodec!^=av01]/bestvideo+bestaudio/best")
 
     private const val FREETUBE_FLATPAK = "io.freetubeapp.FreeTube"
     private const val MPV_FLATPAK = "io.mpv.Mpv"
@@ -58,7 +61,7 @@ object Players {
      * it if it quits with an error; null for the browser. Throws with a readable message when
      * the player can't be started at all.
      */
-    fun open(player: Player, id: PlatformId, url: String, log: File?, mpvArgs: List<String> = emptyList()): Process? {
+    fun open(player: Player, id: PlatformId, url: String, mpvArgs: List<String> = emptyList()): Process? {
         val player = if (id.platform == Platforms.YOUTUBE || player == MPV) player else BROWSER
         if (player == BROWSER) {
             if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
@@ -75,11 +78,9 @@ object Players {
                     else -> "${player.label} isn't installed"
                 }
             )
-            is Launch.Command -> {
-                log?.parentFile?.mkdirs()
-                ProcessBuilder(launch.args).redirectErrorStream(true)
-                    .redirectOutput(log?.let(ProcessBuilder.Redirect::to) ?: ProcessBuilder.Redirect.DISCARD).start()
-            }
+            // Its output is read as it comes (see PlayerOutput): kept in memory, and in the log
+            // where there is one.
+            is Launch.Command -> ProcessBuilder(launch.args).redirectErrorStream(true).start()
         }
     }
 

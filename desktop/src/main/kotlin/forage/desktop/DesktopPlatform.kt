@@ -56,15 +56,15 @@ object DesktopPlatform : Platform {
 
     override fun openVideo(id: PlatformId, url: String, player: Player, log: File?, report: (String) -> Unit, watching: forage.app.Watching?) {
         val socket = if (watching != null && reportsBack(player, id)) MpvWatcher.newSocket() else null
-        val process = Players.open(player, id, url, log, socket?.let { mpvReportArgs(it, watching?.startAt) }.orEmpty()) ?: return
+        val process = Players.open(player, id, url, socket?.let { mpvReportArgs(it, watching?.startAt) }.orEmpty()) ?: return
+        // The private vault has no log (nothing about its videos on disk): what the player says is
+        // then kept in memory only, for as long as it's needed to say why it failed.
+        val output = PlayerOutput(process, log)
         if (socket != null && watching != null) MpvWatcher(socket, watching, alive = process::isAlive).start()
         // A player that can't play the link usually quits within seconds; say why instead of doing nothing.
         Thread {
             if (process.waitFor(15, TimeUnit.SECONDS) && process.exitValue() != 0) {
-                // What it said last names the error; the progress lines mpv redraws say nothing.
-                val lines = runCatching { log?.readLines().orEmpty().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("(Paused)") && !it.startsWith("AV:") && !it.startsWith("V:") } }
-                    .getOrDefault(emptyList())
-                val tail = lines.takeLast(15).joinToString("\n")
+                val tail = output.tail().joinToString("\n")
                 report(
                     "${player.label} couldn't play the video (it quit with code ${process.exitValue()})." +
                         (if (tail.isNotEmpty()) "\n\nWhat it said last:\n$tail" else "") +
@@ -113,3 +113,48 @@ fun DesktopModel(
     privateSourceFactory: () -> ExtractorSource = { Sources(YouTubeSource(), PornhubSource()) },
     sourceFactory: () -> ExtractorSource = { YouTubeSource() },
 ): AppModel = AppModel(dataDir, scope, io, storage, models, DesktopPlatform, privateSourceFactory, sourceFactory)
+
+/**
+ * What a player says, read as it comes: written to [log] where there is one, and the last lines
+ * kept in memory, for the error dialog. Status lines a player redraws (mpv's "AV: 00:03:25 / ...")
+ * say nothing and are left out.
+ */
+class PlayerOutput(process: Process, log: File?) {
+    private val last = ArrayDeque<String>()
+    private val finished = java.util.concurrent.CountDownLatch(1)
+
+    init {
+        Thread({
+            try {
+                val writer = log?.let { runCatching { it.parentFile?.mkdirs(); it.bufferedWriter() }.getOrNull() }
+                writer.use {
+                    // mpv ends its status lines with a carriage return; reading lines splits on it too.
+                    process.inputStream.bufferedReader().forEachLine { raw ->
+                        val line = raw.trim()
+                        if (line.isEmpty() || STATUS.any { line.startsWith(it) }) return@forEachLine
+                        writer?.apply { write(line); newLine(); flush() }
+                        synchronized(last) {
+                            last.addLast(line)
+                            while (last.size > KEPT) last.removeFirst()
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // The player went away mid-line: what came before is what there is.
+            } finally {
+                finished.countDown()
+            }
+        }, "player-output").apply { isDaemon = true }.start()
+    }
+
+    /** Its last lines, once it's done talking (or after a moment, if it isn't). */
+    fun tail(lines: Int = 15): List<String> {
+        finished.await(2, TimeUnit.SECONDS)
+        return synchronized(last) { last.toList().takeLast(lines) }
+    }
+
+    private companion object {
+        val STATUS = listOf("AV:", "A:", "V:", "(Paused)", "(Buffering)")
+        const val KEPT = 60
+    }
+}
