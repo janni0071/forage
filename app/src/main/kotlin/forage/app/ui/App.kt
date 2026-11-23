@@ -70,6 +70,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -114,6 +116,7 @@ fun App(model: AppModel, onImport: () -> Unit, chrome: WindowChrome? = null) {
         CompositionLocalProvider(LocalCompact provides compact) {
             if (model.playerFullscreen) FullscreenPlayer(model)
             else if (compact) PhoneApp(model, onImport) else WideApp(model, onImport, chrome)
+            model.playerFailure?.let { PlayerFailureDialog(model, it) }
         }
     }
 }
@@ -455,4 +458,31 @@ private fun StatusToast(model: AppModel, modifier: Modifier) {
             }
         }
     }
+}
+
+/** A player quit with an error: what it said, in full, to read or copy, until it's closed. */
+@Composable
+private fun PlayerFailureDialog(model: AppModel, text: String) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by remember(text) { mutableStateOf(false) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { model.playerFailure = null },
+        title = { Text("The player couldn't play it") },
+        text = {
+            androidx.compose.foundation.text.selection.SelectionContainer {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                    modifier = Modifier.heightIn(max = 360.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                )
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { model.playerFailure = null }) { Text("Close") } },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                copied = true
+            }) { Text(if (copied) "Copied" else "Copy") }
+        },
+    )
 }

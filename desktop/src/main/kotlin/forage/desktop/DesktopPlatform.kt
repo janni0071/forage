@@ -61,10 +61,15 @@ object DesktopPlatform : Platform {
         // A player that can't play the link usually quits within seconds; say why instead of doing nothing.
         Thread {
             if (process.waitFor(15, TimeUnit.SECONDS) && process.exitValue() != 0) {
-                // The last line is usually a generic "Exiting"; the line naming the error says more.
-                val lines = runCatching { log?.readLines().orEmpty().map { it.trim() }.filter { it.isNotEmpty() } }.getOrDefault(emptyList())
-                val last = lines.lastOrNull { "ERROR" in it } ?: lines.lastOrNull()
-                report("${player.label} couldn't play the video" + (last?.let { ": $it" } ?: "") + (log?.let { " (full output: ${it.path})" } ?: ""))
+                // What it said last names the error; the progress lines mpv redraws say nothing.
+                val lines = runCatching { log?.readLines().orEmpty().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("(Paused)") && !it.startsWith("AV:") && !it.startsWith("V:") } }
+                    .getOrDefault(emptyList())
+                val tail = lines.takeLast(15).joinToString("\n")
+                report(
+                    "${player.label} couldn't play the video (it quit with code ${process.exitValue()})." +
+                        (if (tail.isNotEmpty()) "\n\nWhat it said last:\n$tail" else "") +
+                        (log?.let { "\n\nEverything it said is in ${it.path}" } ?: ""),
+                )
             }
         }.apply { isDaemon = true }.start()
     }

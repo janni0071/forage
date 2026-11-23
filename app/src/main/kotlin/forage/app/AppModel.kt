@@ -1103,6 +1103,12 @@ class AppModel(
         private set
     var message by mutableStateOf<String?>(null)
 
+    /**
+     * A player quit with an error, with what it said last: shown until it's closed, in full and
+     * copyable (a toast is gone before a long error can be read).
+     */
+    var playerFailure by mutableStateOf<String?>(null)
+
     /** Small tasks running without a progress bar, e.g. fetching details after feedback. */
     var background by mutableStateOf<String?>(null)
         private set
@@ -1822,7 +1828,7 @@ class AppModel(
             )
         } else null
         try {
-            platform.openVideo(id, source.watchUrl(id), player, storage.playerLog, { problem -> message = problem }, watching)
+            platform.openVideo(id, source.watchUrl(id), player, storage.playerLog, { problem -> playerFailure = problem }, watching)
         } catch (e: Exception) {
             message = e.message
             return
