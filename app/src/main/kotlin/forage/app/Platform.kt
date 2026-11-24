@@ -82,6 +82,13 @@ interface Platform {
     /** This device's name, for telling backups apart ("laptop", "Pixel 9"). */
     val deviceName: String?
 
+    /**
+     * Something that tells this installation from others even when the data folder was copied
+     * (the machine's id, on Linux); null where that can't be known. Sync notices a library copied
+     * in from elsewhere by it.
+     */
+    val installationId: String? get() = null
+
     /** Sync starts or stops listening on the network (Android lets broadcasts through to an app only while it asks). */
     fun listening(on: Boolean) {}
 

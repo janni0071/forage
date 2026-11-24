@@ -271,6 +271,8 @@ class SyncServer(
     private fun pair(message: JsonObject): JsonObject? {
         val library = pairingInto ?: return null
         val id = message["id"]!!.jsonPrimitive.content
+        // This library's own identity, from another device: a copy of it. The other side says so.
+        if (id == library.run { library.log.device }) return null
         val theirs = SyncProtocol.unb64(message["key"]!!.jsonPrimitive.content)
         val mine = SyncCrypto.newKeyPair()
         val paired = SyncCrypto.pair(mine, theirs)
@@ -324,7 +326,8 @@ class SyncServer(
     private fun waitForChanges(library: Library, peer: Peer, since: Long): Boolean {
         val until = System.currentTimeMillis() + waitMs
         while (running && library in libraries && System.currentTimeMillis() < until) {
-            if (library.run { library.log.hasChangesSince(since, peer.id) }) return true
+            // More than this device ever made: its count is another's (see sync); a sync sets it right.
+            if (library.run { since > library.log.counter || library.log.hasChangesSince(since, peer.id) }) return true
             Thread.sleep(400)
         }
         return false
@@ -335,9 +338,13 @@ class SyncServer(
     private fun sync(library: Library, peer: Peer, request: JsonObject): JsonObject {
         val acked = request["acked"]!!.jsonPrimitive.long
         val upTo = request["upTo"]!!.jsonPrimitive.long
-        val since = request["since"]!!.jsonPrimitive.long
+        val asked = request["since"]!!.jsonPrimitive.long
         val incoming = SyncProtocol.decode(request["changes"])
         val (applied, outgoing, counter, updated) = library.run {
+            // Asked for changes after more than this device ever made: the other side's count is of
+            // another device going by this one's identity (a library copied from here), or of this
+            // library before it was restored. Everything goes, then; the latest still wins.
+            val since = if (asked > library.log.counter) 0 else asked
             val applied = library.log.apply(incoming)
             // Changes of theirs this device never got (it was restored, say): they send them again.
             val received = if (acked > peer.received) peer.received else upTo
@@ -378,9 +385,17 @@ class SyncClient(
     private val hostId: () -> String = { log.device },
     private val discoveryPort: Int = SyncProtocol.DISCOVERY_PORT,
 ) {
-    /** Asks the home network for Forage, for [timeoutMs]; every computer that answers. */
+    /**
+     * Devices that answered the last search under an id another device answered under too: one's
+     * library was copied from the other's, so both go by one identity.
+     */
+    @Volatile var twins: List<Found> = emptyList()
+        private set
+
+    /** Asks the home network for Forage, for [timeoutMs]; every device that answers. */
     fun discover(timeoutMs: Int = 1500, targets: List<InetAddress> = broadcastAddresses()): List<Found> {
         val found = LinkedHashMap<String, Found>()
+        val doubles = LinkedHashMap<String, Found>()
         DatagramSocket().use { socket ->
             socket.broadcast = true
             val ask = SyncProtocol.ASK.toByteArray()
@@ -401,9 +416,17 @@ class SyncClient(
                 if (json["forage"] == null) continue
                 val id = json["id"]!!.jsonPrimitive.content
                 if (id == log.device) continue
-                found[id] = Found(id, json["name"]!!.jsonPrimitive.content, packet.address, json["port"]!!.jsonPrimitive.int, json["kind"]?.jsonPrimitive?.content)
+                val answer = Found(id, json["name"]!!.jsonPrimitive.content, packet.address, json["port"]!!.jsonPrimitive.int, json["kind"]?.jsonPrimitive?.content)
+                val earlier = found[id]
+                if (earlier != null && (earlier.address != answer.address || earlier.port != answer.port)) {
+                    doubles["${earlier.address}:${earlier.port}"] = earlier
+                    doubles["${answer.address}:${answer.port}"] = answer
+                } else {
+                    found[id] = answer
+                }
             }
         }
+        twins = doubles.values.toList()
         return found.values.toList()
     }
 
@@ -411,7 +434,7 @@ class SyncClient(
      * A pairing begun: the code to show, until the computer's user accepts or declines. [peerId]
      * is the library's id on the computer (its private vault has one of its own).
      */
-    class Pairing(val with: Found, val code: String, internal val key: ByteArray, internal val peerId: String, internal val kind: String? = null)
+    class Pairing(val with: Found, val code: String, internal val key: ByteArray, val peerId: String, internal val kind: String? = null)
 
     /** Starts pairing with [computer]: both now show the same code. */
     fun startPairing(computer: Found): Pairing {
@@ -426,7 +449,11 @@ class SyncClient(
         })
         if (reply["type"]?.jsonPrimitive?.content != "pairing") throw SyncException("${computer.name} isn't pairing: open Pair a device there too")
         val paired = SyncCrypto.pair(mine, SyncProtocol.unb64(reply["key"]!!.jsonPrimitive.content))
-        return Pairing(computer, paired.code, paired.key, reply["id"]!!.jsonPrimitive.content, reply["kind"]?.jsonPrimitive?.content ?: computer.kind ?: "computer")
+        val theirs = reply["id"]!!.jsonPrimitive.content
+        if (theirs == log.device) {
+            throw SyncException("${computer.name} goes by this device's own sync identity: one's library was copied from the other's. On one of them, choose Reset sync (in Settings, Sync), then pair again.")
+        }
+        return Pairing(computer, paired.code, paired.key, theirs, reply["kind"]?.jsonPrimitive?.content ?: computer.kind ?: "computer")
     }
 
     /**

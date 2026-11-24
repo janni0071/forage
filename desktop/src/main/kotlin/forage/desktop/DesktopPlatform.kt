@@ -119,6 +119,9 @@ object DesktopPlatform : Platform {
         chosen(forage.app.SaveTarget(file.name) { file.outputStream() })
     }
 
+    /** The machine's own id (systemd's), the same for as long as the system is installed. */
+    override val installationId: String? = runCatching { File("/etc/machine-id").readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() }
+
     override val deviceName: String? =
         System.getenv("HOSTNAME") ?: runCatching { java.net.InetAddress.getLocalHost().hostName }.getOrNull()
 }

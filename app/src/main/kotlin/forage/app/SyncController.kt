@@ -24,10 +24,10 @@ import kotlinx.coroutines.withContext
  * Sync between devices, for one library: the main one, or a private vault. Any two devices pair:
  * a computer with a phone, a tablet or another computer, a phone with a tablet. Every device
  * listens on the home network (a computer whenever Forage runs, a phone or tablet while Forage is
- * open on it) and reaches out to the devices it's paired with. Of each pair, one side reaches out
- * and the other is reached: a phone or tablet reaches out to a computer (which can't reach it
- * once Forage goes to the back); between two of a kind, the one with the smaller id. Changes that
- * arrive refresh what's on screen, and a computer passes changes on between its other devices.
+ * open on it) and reaches out to the devices it's paired with, both sides of a pair alike: where a
+ * firewall lets connections through one way only, the side that gets through does the syncing.
+ * Changes that arrive refresh what's on screen, and a computer passes changes on between its other
+ * devices.
  *
  * A private vault pairs and syncs on its own, with its own id and key, and only while it's
  * unlocked: it joins the main library's listener while unlocked ([host]).
@@ -75,14 +75,15 @@ class SyncController(
     val reachesOut: Boolean get() = devices.any(::reachesOutTo)
 
     /**
-     * Whether this device reaches out to [peer] (else [peer] reaches out here): a phone or tablet
-     * to a computer; between two of a kind, the one with the smaller id. A device from an older
-     * Forage that didn't say what it is: a computer to a phone, a phone to a computer, as before.
+     * Whether this device reaches out to [peer]: always, both sides of every pair. Not only the
+     * side one would pick: a firewall may let connections through one way only (pairing worked,
+     * from the side that got through), and then the other side's attempts are what syncs.
      */
-    private fun reachesOutTo(peer: Peer): Boolean {
-        val theyRoam = peer.kind?.let { it != "computer" } ?: !isPhone
-        return if (isPhone != theyRoam) isPhone else device < peer.id
-    }
+    @Suppress("UNUSED_PARAMETER")
+    private fun reachesOutTo(peer: Peer): Boolean = true
+
+    /** A phone or tablet: often not there (Forage closed on it), so not asked as often, nor worth a warning. */
+    private fun roams(peer: Peer) = peer.kind == "phone" || peer.kind == "tablet" || (peer.kind == null && !isPhone)
 
     /** This library's id on this device. */
     private val device by lazy { log.device }
@@ -154,6 +155,17 @@ class SyncController(
     /** As Forage starts (or the vault unlocks): keeps noting changes where there's a paired device; a computer listens and reaches out. */
     fun start() = scope.launch {
         withContext(io) {
+            // A library copied over from another computer brings that computer's sync identity:
+            // two devices with one identity get each other's changes mixed up. This one starts afresh.
+            val here = platform.installationId
+            if (here != null && !vault) {
+                val stored = sqlString("SELECT installation FROM sync_state")
+                if (stored != null && stored != here && peers.all().isNotEmpty()) {
+                    forgetIdentity()
+                    problem = "This library was copied here from another computer, so its pairings were reset (they belonged to that computer). Pair this computer again."
+                }
+                storage.driver.execute(null, "UPDATE sync_state SET installation = ?", 1) { bindString(0, here) }
+            }
             devices = peers.all()
             if (devices.isNotEmpty()) log.start()
         }
@@ -173,6 +185,25 @@ class SyncController(
             return
         }
         stopListening()
+    }
+
+    private fun sqlString(sql: String): String? = storage.driver.executeQuery(null, sql, { c ->
+        app.cash.sqldelight.db.QueryResult.Value(if (c.next().value) c.getString(0) else null)
+    }, 0).value
+
+    /** "Reset sync" is asking whether it's meant. */
+    var confirmingReset by mutableStateOf(false)
+
+    /**
+     * Gives this device a sync identity of its own, unpairing everything: the way out when a
+     * library was copied from another device and both now go by one identity.
+     */
+    fun reset() {
+        confirmingReset = false
+        scope.launch {
+            withContext(io) { forgetIdentity() }
+            problem = null
+        }
     }
 
     /** A library put in place from another device's file: this device's sync starts afresh. */
@@ -255,6 +286,7 @@ class SyncController(
         searching = scope.launch {
             while (true) {
                 val answered = withContext(net) { runCatching { client.discover(timeoutMs = 1500) }.getOrNull() }
+                noteTwins()
                 if (answered != null) {
                     val paired = devices.map { it.host ?: it.id }.toSet()
                     found = answered.filter { it.id != hostId && it.id !in paired }
@@ -300,6 +332,16 @@ class SyncController(
                 pairing = Pairing.Failed(it.message ?: "Couldn't reach ${other.name}")
                 return@launch
             }
+            // A device going by an identity this one already knows under another device's name:
+            // one library was copied from the other.
+            val twin = withContext(io) { peers.get(begun.peerId) }?.takeIf { (it.host ?: it.id) != other.id }
+            if (twin != null) {
+                pairing = Pairing.Failed(
+                    "${other.name} goes by the same sync identity as ${twin.name}: one's library was copied from the other's. " +
+                        "On ${other.name}, choose Reset sync (in Settings, Sync), then pair again.",
+                )
+                return@launch
+            }
             pairing = Pairing.Confirming(other, begun.code)
             val accepted = withContext(net) { runCatching { client.awaitPairing(begun) { pairing !is Pairing.Confirming } } }
             if (pairing !is Pairing.Confirming) return@launch
@@ -330,6 +372,12 @@ class SyncController(
         /** After a device couldn't be reached: asking again after this, doubling up to the most. */
         const val RETRY_MS = 2_000L
         const val MAX_RETRY_MS = 20_000L
+
+        /** A phone or tablet with Forage closed doesn't answer for a while: asked at most every minute. */
+        const val MAX_ROAMING_RETRY_MS = 60_000L
+
+        /** A device that synced this recently (either side reaching out) isn't shown as unreachable. */
+        const val RECENT_SECONDS = 180L
     }
 
     /** This device's change number when it last synced: changes after it haven't been sent yet. */
@@ -371,6 +419,7 @@ class SyncController(
         var pause = RETRY_MS
         while (true) {
             val peer = withContext(io) { peers.get(id) } ?: return
+            val most = if (roams(peer)) MAX_ROAMING_RETRY_MS else MAX_RETRY_MS
             val changed = withContext(net) { runCatching { client.waitForChanges(peer) } }
             when {
                 changed.getOrNull() == true -> {
@@ -387,9 +436,18 @@ class SyncController(
                 // Not reachable (asleep, away, Forage closed there): again soon, then less often.
                 else -> {
                     delay(pause)
-                    pause = minOf(pause * 2, MAX_RETRY_MS)
+                    pause = minOf(pause * 2, most)
                 }
             }
+        }
+    }
+
+    /** Says so when two devices answered under one identity (a library copied from another device). */
+    private fun noteTwins() {
+        val twins = client.twins.ifEmpty { return }
+        problem = twins.joinToString(" and ") { it.name }.let { names ->
+            "$names go by the same sync identity: one's library was copied from the other's, so their changes get mixed up. " +
+                "On one of them, choose Reset sync on this device (in Settings, Sync), then pair it again."
         }
     }
 
@@ -405,7 +463,8 @@ class SyncController(
 
     /** Syncs with the devices this one reaches out to, after any sync already running; true if it all worked. */
     private suspend fun syncOnce(manual: Boolean = false): Boolean = syncLock.withLock {
-        val paired = devices.filter(::reachesOutTo).ifEmpty { return@withLock true }
+        // Computers first: a phone or tablet with Forage closed takes a moment to give up on.
+        val paired = devices.filter(::reachesOutTo).sortedBy { roams(it) }.ifEmpty { return@withLock true }
         syncing = true
         sentUpTo = withContext(io) { log.counter }
         var arrived = 0
@@ -423,8 +482,10 @@ class SyncController(
                         trouble = e.message
                     }
                 } catch (e: Exception) {
-                    // A phone or tablet with Forage closed can't be reached: that's expected, not a problem to show.
-                    if (peer.kind == "computer" || peer.kind == null) trouble = e.message ?: "Couldn't sync"
+                    // Not a problem to show: a phone or tablet with Forage closed (that's expected), or a
+                    // device that syncs anyway from its side (a firewall letting connections through one way).
+                    val recently = peers.get(peer.id)?.syncedAt?.isAfter(java.time.Instant.now().minusSeconds(RECENT_SECONDS)) == true
+                    if (!roams(peer) && !recently) trouble = e.message ?: "Couldn't sync"
                 }
             }
             devices = peers.all()
@@ -433,6 +494,8 @@ class SyncController(
         syncing = false
         // A note that the other device's Forage is older stays until a sync goes wrong or one is asked for.
         if (trouble != null || manual || problem?.contains("older Forage") != true) problem = trouble
+        // Looking for a device that moved may have come across two going by one identity.
+        noteTwins()
         // What arrived counts as sent: it came from there.
         if (trouble == null) sentUpTo = maxOf(sentUpTo, withContext(io) { log.counter })
         if (arrived > 0) refresh()

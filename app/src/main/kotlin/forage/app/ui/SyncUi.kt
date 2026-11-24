@@ -179,6 +179,8 @@ fun SyncCard(sync: SyncController) {
             color = c.onSurfaceVariant,
             modifier = Modifier.padding(top = 12.dp),
         )
+        // The way out when a library was copied from another device and both go by one identity.
+        TextButton(onClick = { sync.confirmingReset = true }, modifier = Modifier.padding(top = 4.dp)) { Text("Reset sync on this device…") }
     }
 }
 
@@ -193,6 +195,21 @@ internal fun kindIcon(kind: String?): androidx.compose.ui.graphics.vector.ImageV
 @Composable
 fun SyncDialogs(sync: SyncController) {
     if (sync.pairingOpen) PairDialog(sync)
+    if (sync.confirmingReset) {
+        AlertDialog(
+            onDismissRequest = { sync.confirmingReset = false },
+            title = { Text("Reset sync on this device?") },
+            text = {
+                Text(
+                    "This ${sync.kind} gets a sync identity of its own and forgets every pairing" + (if (sync.vault) " of this vault" else "") +
+                        "; your library stays as it is. It's for a library that was copied from another device (both then go by one " +
+                        "identity, and their changes get mixed up). Pair it again afterwards, and remove it on the other devices.",
+                )
+            },
+            confirmButton = { TextButton(onClick = sync::reset) { Text("Reset") } },
+            dismissButton = { TextButton(onClick = { sync.confirmingReset = false }) { Text("Cancel") } },
+        )
+    }
 }
 
 /**
