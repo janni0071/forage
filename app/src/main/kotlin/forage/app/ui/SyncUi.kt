@@ -74,10 +74,10 @@ internal fun rememberNow(everyMs: Long = 30_000): Instant {
 @Composable
 internal fun syncLine(sync: SyncController): String {
     val now = rememberNow()
-    val device = sync.devices.maxByOrNull { it.syncedAt ?: Instant.EPOCH } ?: return if (sync.isPhone) "Not paired with a computer yet" else "Not paired yet"
+    val device = sync.devices.maxByOrNull { it.syncedAt ?: Instant.EPOCH } ?: return "Not paired yet"
     return when {
         sync.problem != null -> "${device.name}: can't sync right now"
-        sync.syncing && sync.isPhone -> "Syncing with ${device.name}…"
+        sync.syncing && sync.reachesOut -> "Syncing with ${device.name}…"
         device.syncedAt == null -> "${device.name} · not synced yet"
         else -> "${device.name} · " + shortAgo(device.syncedAt!!, now)
     }
@@ -89,7 +89,7 @@ internal enum class SyncState { OFF, SYNCED, SYNCING, TROUBLE }
 internal fun syncState(sync: SyncController): SyncState = when {
     sync.devices.isEmpty() -> SyncState.OFF
     sync.problem != null -> SyncState.TROUBLE
-    sync.syncing && sync.isPhone -> SyncState.SYNCING
+    sync.syncing && sync.reachesOut -> SyncState.SYNCING
     else -> SyncState.SYNCED
 }
 
@@ -139,6 +139,7 @@ internal fun shortAgo(at: Instant, now: Instant = Instant.now()): String {
 @Composable
 fun SyncCard(sync: SyncController) {
     val c = MaterialTheme.colorScheme
+    val now = rememberNow()
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(16.dp)) {
         for (device in sync.devices) {
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -146,7 +147,7 @@ fun SyncCard(sync: SyncController) {
                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
                     Text(device.name, style = MaterialTheme.typography.titleSmall)
                     Text(
-                        if (sync.syncing && sync.isPhone) "Syncing…" else formatSynced(device.syncedAt),
+                        if (sync.syncing && sync.reachesOut) "Syncing…" else formatSynced(device.syncedAt, now),
                         style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant,
                     )
                 }
@@ -154,13 +155,9 @@ fun SyncCard(sync: SyncController) {
             }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (sync.isPhone) {
-                AccentButton(if (sync.devices.isEmpty()) "Pair with a computer" else "Pair another computer", null, onClick = sync::findComputers)
-                if (sync.devices.isNotEmpty()) {
-                    OutlinedButton(onClick = { sync.syncNow(manual = true) }, enabled = !sync.syncing, shape = RoundedCornerShape(12.dp)) { Text("Sync now") }
-                }
-            } else {
-                AccentButton(if (sync.devices.isEmpty()) "Pair a phone or tablet" else "Pair another device", null, onClick = sync::openPairing)
+            AccentButton(if (sync.devices.isEmpty()) "Pair a device" else "Pair another device", null, onClick = sync::openPairing)
+            if (sync.reachesOut) {
+                OutlinedButton(onClick = { sync.syncNow(manual = true) }, enabled = !sync.syncing, shape = RoundedCornerShape(12.dp)) { Text("Sync now") }
             }
         }
         sync.problem?.let {
@@ -168,15 +165,15 @@ fun SyncCard(sync: SyncController) {
         }
         Text(
             if (sync.vault) {
-                "This vault syncs with the private vault on each paired device while it's unlocked on both, " +
-                    "paired apart from the main library with a key of its own. While it's locked, nothing about it shows on the network, " +
-                    "not even that there is one; changes wait until both are unlocked again."
+                "This vault syncs with the private vault on each paired device while it's unlocked on both, paired apart from the " +
+                    "main library with a key of its own. While it's locked, nothing about it shows on the network, not even that " +
+                    "there is one; changes wait until both are unlocked again."
             } else {
-                "Likes, the history, the queue, playlists, subscriptions and where you left off stay the same on both, over your " +
-                    "home Wi-Fi, encrypted, with no account or server in between. " +
-                    (if (sync.isPhone) "This ${sync.kind} syncs while Forage is open on it and on the computer. Other phones and tablets paired with the same computer stay in step too, through it."
-                    else "Phones and tablets sync while Forage is open on them; this computer just has to be on, and passes changes on between them, so all your devices stay in step.") +
-                    " The private vault syncs on its own: pair it from inside the vault."
+                "Likes, the history, the queue, playlists, subscriptions and where you left off stay the same on your devices, " +
+                    "over your home Wi-Fi, encrypted, with no account or server in between. A computer syncs whenever Forage runs " +
+                    "on it; a phone or tablet while Forage is open on it. So two phones or tablets sync when Forage is open on both " +
+                    "at once; with a computer paired too, it passes changes on between them at any time. The private vault syncs " +
+                    "on its own: pair it from inside the vault."
             },
             style = MaterialTheme.typography.bodySmall,
             color = c.onSurfaceVariant,
@@ -186,134 +183,110 @@ fun SyncCard(sync: SyncController) {
 }
 
 /** A device's icon: a phone, a tablet, a computer. */
-internal fun kindIcon(kind: String): androidx.compose.ui.graphics.vector.ImageVector = when (kind) {
+internal fun kindIcon(kind: String?): androidx.compose.ui.graphics.vector.ImageVector = when (kind) {
     "tablet" -> Icons.Outlined.TabletAndroid
     "computer" -> Icons.Outlined.Computer
     else -> Icons.Outlined.PhoneAndroid
 }
 
-/** The pairing dialogs: the computer waiting for a phone or tablet and comparing codes, the phone or tablet finding the computer. */
+/** The pairing dialog, while "Pair a device" is open. */
 @Composable
 fun SyncDialogs(sync: SyncController) {
-    if (!sync.isPhone && sync.pairingOpen) ComputerPairing(sync)
-    sync.pairing?.let { PhonePairing(sync, it) }
+    if (sync.pairingOpen) PairDialog(sync)
 }
 
+/**
+ * Pairing, the same on every device: open "Pair a device" on both; each lists the other; pick it
+ * on one, and the other asks whether the codes match. A device asking to pair comes first.
+ */
 @Composable
-private fun ComputerPairing(sync: SyncController) {
+private fun PairDialog(sync: SyncController) {
+    val c = MaterialTheme.colorScheme
     val request = sync.request
+    val pairing = sync.pairing
     AlertDialog(
         onDismissRequest = sync::closePairing,
-        title = { Text(if (request == null) "Pair a phone or tablet" else "Pair with ${request.name}?") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (request == null) {
-                    Text(
-                        if (sync.vault) "On the phone or tablet, unlock the private vault, then open Settings, Sync, and tap Pair with a computer. It needs to be on the same Wi-Fi as this computer."
-                        else "On the phone or tablet, open Forage, then Settings, Sync, and tap Pair with a computer. It needs to be on the same Wi-Fi as this computer.",
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Text("  Waiting for it…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (sync.notFindable) {
-                        Text(
-                            "Another program uses the port phones and tablets look for Forage on (47731), so they may not find this computer.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
-                        )
-                    } else {
-                        Text(
-                            "If it doesn't find this computer, a firewall may be in the way: Forage needs ports 47731 (UDP) and 47732 (TCP) on the home network.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    Text("Pair if ${request.name} shows the same code:")
-                    Code(request.code)
-                    Text(
-                        "A different code means another device is answering in between: don't pair then.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            if (request != null) TextButton(onClick = { sync.answer(true) }) { Text("Pair") }
-            else TextButton(onClick = sync::closePairing) { Text("Cancel") }
-        },
-        dismissButton = { if (request != null) TextButton(onClick = { sync.answer(false) }) { Text("Don't pair") } },
-    )
-}
-
-@Composable
-private fun PhonePairing(sync: SyncController, state: SyncController.Pairing) {
-    val c = MaterialTheme.colorScheme
-    AlertDialog(
-        onDismissRequest = sync::closePhonePairing,
         title = {
             Text(
-                when (state) {
-                    is SyncController.Pairing.Confirming -> "Compare the codes"
-                    is SyncController.Pairing.Paired -> "Paired"
-                    else -> "Pair with a computer"
+                when {
+                    request != null -> "Pair with ${request.name}?"
+                    pairing is SyncController.Pairing.Confirming -> "Compare the codes"
+                    pairing is SyncController.Pairing.Paired -> "Paired"
+                    else -> "Pair a device"
                 },
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                when (state) {
-                    SyncController.Pairing.Searching -> {
+                when {
+                    request != null -> {
+                        Text("Pair if ${request.name} shows the same code:")
+                        Code(request.code)
                         Text(
-                            if (sync.vault) "On the computer, unlock the private vault, then open Settings, Sync, and choose Pair a phone or tablet. Both need to be on the same Wi-Fi."
-                            else "On the computer, open Forage, then Settings, Sync, and choose Pair a phone or tablet. Both need to be on the same Wi-Fi.",
+                            "A different code means another device is answering in between: don't pair then.",
+                            style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant,
                         )
+                    }
+                    pairing is SyncController.Pairing.Confirming -> {
+                        Text("${pairing.device.name} shows a code too. If it's this one, choose Pair there:")
+                        Code(pairing.code)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Text("  Looking for it…", style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
+                            Text("  Waiting for ${pairing.device.name}…", style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
                         }
                     }
-                    is SyncController.Pairing.Found -> {
-                        Text("Choose your computer:")
-                        for (computer in state.computers) {
+                    pairing is SyncController.Pairing.Paired -> Text(
+                        "This ${sync.kind} and ${pairing.name} now stay in step. The first sync is running; the next ones happen by themselves.",
+                    )
+                    pairing is SyncController.Pairing.Failed -> {
+                        Text(pairing.message)
+                        Text(
+                            "Is " + (if (sync.vault) "the private vault unlocked there, with Pair a device open in its Settings" else "Pair a device open there too") +
+                                ", and are both on the same Wi-Fi?",
+                            style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant,
+                        )
+                    }
+                    else -> {
+                        Text(
+                            if (sync.vault) "On the other device, unlock the private vault, then open Settings, Sync, Pair a device. Both need to be on the same Wi-Fi."
+                            else "On the other device, open Forage, then Settings, Sync, Pair a device. Both need to be on the same Wi-Fi.",
+                        )
+                        for (other in sync.found) {
                             Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.surfaceContainerHigh)
-                                    .clickable { sync.pairWith(computer) }.padding(14.dp),
+                                    .clickable { sync.pairWith(other) }.padding(14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(Icons.Outlined.Computer, contentDescription = null)
-                                Text(computer.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 12.dp))
+                                Icon(kindIcon(other.kind ?: "computer"), contentDescription = null)
+                                Text(other.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 12.dp))
                             }
                         }
-                    }
-                    is SyncController.Pairing.Confirming -> {
-                        Text("${state.computer.name} shows a code too. If it's this one, choose Pair there:")
-                        Code(state.code)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Text("  Waiting for the computer…", style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
+                            Text(
+                                if (sync.found.isEmpty()) "  Looking for other devices…" else "  Still looking…",
+                                style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant,
+                            )
                         }
-                    }
-                    is SyncController.Pairing.Paired -> Text("This ${sync.kind} and ${state.name} now stay in step. The first sync is running; the next ones happen by themselves while Forage is open on both.")
-                    is SyncController.Pairing.Failed -> {
-                        Text(state.message)
                         Text(
-                            if (sync.vault) "Is the private vault unlocked on the computer, with Pair a phone or tablet showing in its Settings, and are both on the same Wi-Fi?"
-                            else "Is Forage open on the computer, with Pair a phone or tablet showing, and are both on the same Wi-Fi?",
-                            style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant,
+                            if (sync.notFindable) "Another program uses the port Forage is looked for on (47731), so other devices may not find this one."
+                            else "If they don't find each other, a firewall may be in the way: Forage uses ports 47731 (UDP) and 47732 (TCP) on the home network.",
+                            style = MaterialTheme.typography.bodySmall, color = if (sync.notFindable) c.error else c.onSurfaceVariant,
                         )
                     }
                 }
             }
         },
         confirmButton = {
-            when (state) {
-                is SyncController.Pairing.Failed -> TextButton(onClick = sync::findComputers) { Text("Search again") }
-                is SyncController.Pairing.Paired -> TextButton(onClick = sync::closePhonePairing) { Text("Done") }
-                else -> {}
+            when {
+                request != null -> TextButton(onClick = { sync.answer(true) }) { Text("Pair") }
+                pairing is SyncController.Pairing.Paired -> TextButton(onClick = sync::closePairing) { Text("Done") }
+                pairing is SyncController.Pairing.Failed -> TextButton(onClick = sync::dismissPairing) { Text("Back") }
+                else -> TextButton(onClick = sync::closePairing) { Text("Cancel") }
             }
         },
         dismissButton = {
-            if (state !is SyncController.Pairing.Paired) TextButton(onClick = sync::closePhonePairing) { Text("Cancel") }
+            if (request != null) TextButton(onClick = { sync.answer(false) }) { Text("Don't pair") }
         },
     )
 }

@@ -144,8 +144,11 @@ class SyncServer(
         const val WAIT_MS = 25_000L
     }
 
-    /** A phone or tablet asking to pair ([kind] says which), with the code both show. */
-    class PairingRequest(val id: String, val name: String, val code: String, internal val key: ByteArray, internal val library: Library, val kind: String? = null) {
+    /** A device asking to pair ([kind] says what it is; [host] is how it's found on the network), with the code both show. */
+    class PairingRequest(
+        val id: String, val name: String, val code: String, internal val key: ByteArray, internal val library: Library,
+        val kind: String? = null, internal val host: String? = null,
+    ) {
         @Volatile internal var answer: Boolean? = null
         internal val at: Instant = Instant.now()
     }
@@ -220,7 +223,7 @@ class SyncServer(
     fun accept(request: PairingRequest) {
         val library = request.library
         library.run {
-            library.peers.save(Peer(request.id, request.name, request.key, kind = request.kind))
+            library.peers.save(Peer(request.id, request.name, request.key, kind = request.kind, host = request.host))
             library.log.start()
         }
         request.answer = true
@@ -244,6 +247,7 @@ class SyncServer(
                 put("forage", 1)
                 put("id", hostId())
                 put("name", name())
+                put("kind", kind())
                 put("port", listeningPort)
             }.toString().toByteArray()
             runCatching { socket.send(DatagramPacket(answer, answer.size, packet.address, packet.port)) }
@@ -274,6 +278,7 @@ class SyncServer(
         library.requests.values.removeIf { it.at.isBefore(Instant.now().minusSeconds(300)) }
         val request = PairingRequest(
             id, message["name"]?.jsonPrimitive?.content ?: "A device", paired.code, paired.key, library, message["kind"]?.jsonPrimitive?.content,
+            message["host"]?.jsonPrimitive?.content ?: id,
         )
         library.requests[id] = request
         library.listener.pairingRequested(request)
@@ -356,8 +361,8 @@ class SyncServer(
     private data class Quad(val applied: Int, val outgoing: List<Change>, val counter: Long, val peer: Peer)
 }
 
-/** A computer running Forage, found on the home network. */
-data class Found(val id: String, val name: String, val address: InetAddress, val port: Int)
+/** A device running Forage, found on the home network: its id, name, what it is, and where it listens. */
+data class Found(val id: String, val name: String, val address: InetAddress, val port: Int, val kind: String? = null)
 
 /**
  * The phone's side: it finds the computer on the home network, pairs with it once, and then syncs
@@ -367,8 +372,10 @@ class SyncClient(
     private val log: SyncLog,
     private val peers: SyncPeers,
     private val name: () -> String,
-    /** What this device is ("phone" or "tablet"), as the computer is told. */
+    /** What this device is ("phone", "tablet", "computer"), as the other is told. */
     private val kind: () -> String = { "phone" },
+    /** The id this device is found by on the network (its main library's), so the other can find it too. */
+    private val hostId: () -> String = { log.device },
     private val discoveryPort: Int = SyncProtocol.DISCOVERY_PORT,
 ) {
     /** Asks the home network for Forage, for [timeoutMs]; every computer that answers. */
@@ -394,7 +401,7 @@ class SyncClient(
                 if (json["forage"] == null) continue
                 val id = json["id"]!!.jsonPrimitive.content
                 if (id == log.device) continue
-                found[id] = Found(id, json["name"]!!.jsonPrimitive.content, packet.address, json["port"]!!.jsonPrimitive.int)
+                found[id] = Found(id, json["name"]!!.jsonPrimitive.content, packet.address, json["port"]!!.jsonPrimitive.int, json["kind"]?.jsonPrimitive?.content)
             }
         }
         return found.values.toList()
@@ -412,13 +419,14 @@ class SyncClient(
         val reply = request(computer.address.hostAddress, computer.port, buildJsonObject {
             put("type", "pair")
             put("id", log.device)
+            put("host", hostId())
             put("name", name())
             put("kind", kind())
             put("key", SyncProtocol.b64(mine.public))
         })
-        if (reply["type"]?.jsonPrimitive?.content != "pairing") throw SyncException("${computer.name} isn't pairing: choose Pair a phone or tablet there first")
+        if (reply["type"]?.jsonPrimitive?.content != "pairing") throw SyncException("${computer.name} isn't pairing: open Pair a device there too")
         val paired = SyncCrypto.pair(mine, SyncProtocol.unb64(reply["key"]!!.jsonPrimitive.content))
-        return Pairing(computer, paired.code, paired.key, reply["id"]!!.jsonPrimitive.content, reply["kind"]?.jsonPrimitive?.content ?: "computer")
+        return Pairing(computer, paired.code, paired.key, reply["id"]!!.jsonPrimitive.content, reply["kind"]?.jsonPrimitive?.content ?: computer.kind ?: "computer")
     }
 
     /**
@@ -449,6 +457,24 @@ class SyncClient(
      * has, false when nothing came. Throws when it can't be reached.
      */
     fun waitForChanges(peer: Peer): Boolean {
+        val attempt = runCatching { waitAt(peer) }
+        attempt.getOrNull()?.let { return it }
+        val problem = attempt.exceptionOrNull()
+        if (problem is UnpairedException) throw problem
+        // Not where it was: look for it, as a sync would.
+        val moved = locate(peer) ?: throw SyncException("${peer.name} isn't on this network right now, or Forage isn't open there", problem)
+        return waitAt(moved)
+    }
+
+    /** Finds [peer] on the network again and keeps where it is now; null when it doesn't answer. */
+    private fun locate(peer: Peer): Peer? {
+        val found = discover().firstOrNull { it.id == (peer.host ?: peer.id) } ?: return null
+        val moved = peer.copy(address = found.address.hostAddress, port = found.port)
+        peers.save(moved)
+        return moved
+    }
+
+    private fun waitAt(peer: Peer): Boolean {
         val address = peer.address ?: throw SyncException("Not found yet")
         val port = peer.port ?: throw SyncException("Not found yet")
         val reply = request(address, port, SyncProtocol.sealed(peer.key, log.device, buildJsonObject {
@@ -472,10 +498,7 @@ class SyncClient(
         val problem = attempt.exceptionOrNull()
         if (problem is UnpairedException) throw problem
         // Moved (a new address from the router), or Forage restarted on another port.
-        val found = discover().firstOrNull { it.id == (peer.host ?: peer.id) }
-            ?: throw SyncException("${peer.name} isn't on this network right now, or Forage isn't open there", problem)
-        val moved = peer.copy(address = found.address.hostAddress, port = found.port)
-        peers.save(moved)
+        val moved = locate(peer) ?: throw SyncException("${peer.name} isn't on this network right now, or Forage isn't open there", problem)
         return exchange(moved, moved.address, moved.port)
     }
 

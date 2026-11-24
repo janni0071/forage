@@ -82,6 +82,9 @@ interface Platform {
     /** This device's name, for telling backups apart ("laptop", "Pixel 9"). */
     val deviceName: String?
 
+    /** Sync starts or stops listening on the network (Android lets broadcasts through to an app only while it asks). */
+    fun listening(on: Boolean) {}
+
     /** What this device is, as other devices are told when syncing: "phone", "tablet" or "computer". */
     val deviceKind: String get() = if (isMobile) "phone" else "computer"
 }

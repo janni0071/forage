@@ -391,7 +391,7 @@ private fun SyncItem(model: AppModel, sync: forage.app.SyncController) {
         Column(Modifier.weight(1f)) {
             Text("Sync", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium, color = c.onSurface)
             Text(
-                if (off) (if (model.isPrivate) "Set up for this vault" else "Set up with a phone or tablet") else syncLine(sync),
+                if (off) (if (model.isPrivate) "Set up for this vault" else "Set up with your other devices") else syncLine(sync),
                 style = MaterialTheme.typography.bodySmall, color = if (sync.problem != null) c.error else c.onSurfaceVariant,
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )

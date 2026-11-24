@@ -228,11 +228,7 @@ private fun GetStarted(model: AppModel, onImport: () -> Unit) {
         model.sync?.let { sync ->
             add(
                 Step(
-                    when {
-                        model.isPrivate -> "Sync this vault with your other devices (optional)"
-                        sync.isPhone -> "Pair with your computer (optional)"
-                        else -> "Pair your phone or tablet (optional)"
-                    },
+                    if (model.isPrivate) "Sync this vault with your other devices (optional)" else "Pair your other devices (optional)",
                     sync.devices.isNotEmpty(), "Pair", { model.openSettings(forage.app.SettingsPage.SYNC) },
                     if (model.isPrivate) "Its likes, history and who you follow stay the same in the vault on each, while it's unlocked on both."
                     else "Likes, history, playlists and where you left off stay the same on all of them, over your Wi-Fi, with no account.",

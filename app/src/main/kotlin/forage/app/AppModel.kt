@@ -494,7 +494,7 @@ class AppModel(
 
     /** Sync with the other device: this library's (a private vault syncs on its own, while unlocked). */
     val sync: SyncController? by lazy {
-        SyncController(storage, platform, ownScope, io, host = parentSync.takeIf { isPrivate && !platform.isMobile }) { reload() }
+        SyncController(storage, platform, ownScope, io, host = parentSync.takeIf { isPrivate }) { reload() }
     }
 
     /** The private vault's encrypted copy is written a few seconds after each change. */

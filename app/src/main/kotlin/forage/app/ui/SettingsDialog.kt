@@ -386,8 +386,7 @@ private fun SyncPage(model: AppModel) {
             Intro(
                 when {
                     sync.vault -> "Keep this vault and the ones on your other devices in step."
-                    sync.isPhone -> "Keep this ${sync.kind} and your computer in step."
-                    else -> "Keep this computer and your phones and tablets in step."
+                    else -> "Keep this ${sync.kind} and your other devices in step."
                 },
             )
             SyncCard(sync)

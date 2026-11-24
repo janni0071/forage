@@ -176,4 +176,31 @@ class SyncNetworkTest {
         tabletClient.sync(tablet.peers.all().single())
         assertEquals(emptyList(), tablet.library.watchLater())
     }
+
+    @Test
+    fun `either side reaches the other once paired, as two computers or a phone and a tablet do`() {
+        // The phone listens too, as a phone or tablet does while Forage is open on it.
+        val phoneServer = SyncServer({ "phone" }, { phone.log.device }, { "phone" }, port = 0, discoveryPort = 0).apply {
+            add(SyncServer.Library(phone.log, phone.peers, listener))
+            start()
+        }
+        try {
+            assertTrue(pair())
+            // The laptop knows how to find the phone, though the phone started the pairing.
+            assertEquals(phone.log.device, laptop.peers.all().single().host)
+            assertEquals(null, laptop.peers.all().single().address)
+
+            // The laptop reaches out this time: it looks for the phone, finds it, and syncs.
+            val laptopClient = SyncClient(laptop.log, laptop.peers, { "laptop" }, { "computer" }, { laptop.log.device }, discoveryPort = phoneServer.discoveryListeningPort)
+            phone.library.saveForLater(PlatformId.youtube("ppppppppppp"))
+            laptop.library.saveForLater(PlatformId.youtube("lllllllllll"))
+            val result = laptopClient.sync(laptop.peers.all().single())
+            assertEquals(1, result.applied)
+            assertEquals(setOf("ppppppppppp", "lllllllllll"), laptop.library.watchLater().map { it.id }.toSet())
+            assertEquals(setOf("ppppppppppp", "lllllllllll"), phone.library.watchLater().map { it.id }.toSet())
+            assertTrue(laptop.peers.all().single().address != null)
+        } finally {
+            phoneServer.stop()
+        }
+    }
 }

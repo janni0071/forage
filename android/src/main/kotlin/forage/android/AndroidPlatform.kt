@@ -154,6 +154,16 @@ class AndroidPlatform(private val context: Context) : Platform {
         runCatching { android.provider.Settings.Global.getString(context.contentResolver, android.provider.Settings.Global.DEVICE_NAME) }.getOrNull()
             ?.takeIf { it.isNotBlank() } ?: android.os.Build.MODEL
 
+    /** Lets broadcasts (other devices looking for Forage) through to the app while sync listens. */
+    private val multicast by lazy {
+        (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager)
+            .createMulticastLock("forage-sync").apply { setReferenceCounted(false) }
+    }
+
+    override fun listening(on: Boolean) {
+        runCatching { if (on) multicast.acquire() else if (multicast.isHeld) multicast.release() }
+    }
+
     /** A tablet by Android's own measure: at least 600 dp on its shortest side. */
     override val deviceKind: String
         get() = if (context.resources.configuration.smallestScreenWidthDp >= 600) "tablet" else "phone"
