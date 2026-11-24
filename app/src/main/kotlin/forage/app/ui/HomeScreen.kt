@@ -224,6 +224,18 @@ private fun GetStarted(model: AppModel, onImport: () -> Unit) {
                 )
             )
         }
+        // Like an account, without one: the other device stays in step.
+        model.sync?.let { sync ->
+            val other = if (sync.isPhone) "computer" else "phone"
+            add(
+                Step(
+                    if (model.isPrivate) "Sync this vault with your $other (optional)" else "Pair your $other (optional)",
+                    sync.devices.isNotEmpty(), "Pair", { model.openSettings(forage.app.SettingsPage.SYNC) },
+                    if (model.isPrivate) "Its likes, history and who you follow stay the same in the vault on both, while it's unlocked on both."
+                    else "Likes, history, playlists and where you left off stay the same on both, over your Wi-Fi, with no account.",
+                ),
+            )
+        }
     }
     if (model.guideHidden || steps.all { it.done }) return
     if (confirmDownload) {

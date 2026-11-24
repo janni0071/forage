@@ -251,6 +251,15 @@ class AppModel(
 
     var settingsOpen by mutableStateOf(false)
 
+    /** The part of Settings showing; null for the overview (on a phone; a window always shows one). */
+    var settingsPage by mutableStateOf<SettingsPage?>(null)
+
+    /** Opens Settings at [page] (the sync status opens it at Sync). */
+    fun openSettings(page: SettingsPage? = null) {
+        settingsPage = page
+        settingsOpen = true
+    }
+
     /** Takes effect at the next start: the window is created with or without the system frame. */
     var systemTitleBar by mutableStateOf(settings.systemTitleBar)
         private set
@@ -2490,4 +2499,14 @@ class AppModel(
         private const val OUT_OF_MEMORY = "Not enough memory on this device to import the dump. Import it on a computer instead, " +
             "then copy catalogues/pornhub.db from its Forage folder here and choose it in Settings."
     }
+}
+
+/** The parts of Settings, in the order they're listed. */
+enum class SettingsPage(val title: String) {
+    PLAYBACK("Playback"),
+    APPEARANCE("Appearance"),
+    PRIVACY("Privacy"),
+    CATALOGUE("Catalogue"),
+    SYNC("Sync"),
+    DATA("Backup & data"),
 }

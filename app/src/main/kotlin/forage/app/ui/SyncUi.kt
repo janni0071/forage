@@ -23,6 +23,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.SyncDisabled
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +52,83 @@ internal fun formatSynced(at: Instant?, now: Instant = Instant.now()): String {
         minutes < 1 -> "just now"
         minutes < 60 -> "$minutes minute${if (minutes == 1L) "" else "s"} ago"
         minutes < 24 * 60 -> "${minutes / 60} hour${if (minutes / 60 == 1L) "" else "s"} ago"
+        else -> formatAge(at, now) ?: "a while ago"
+    }
+}
+
+/** The time now, moving on every [everyMs], so "5 minutes ago" stays true while it's on screen. */
+@Composable
+internal fun rememberNow(everyMs: Long = 30_000): Instant {
+    var now by remember { mutableStateOf(Instant.now()) }
+    LaunchedEffect(everyMs) {
+        while (true) {
+            kotlinx.coroutines.delay(everyMs)
+            now = Instant.now()
+        }
+    }
+    return now
+}
+
+/** How sync stands, in a line: "Synced with Pixel 9 · just now", or that it isn't set up. */
+@Composable
+internal fun syncLine(sync: SyncController): String {
+    val now = rememberNow()
+    val device = sync.devices.maxByOrNull { it.syncedAt ?: Instant.EPOCH } ?: return if (sync.isPhone) "Not paired with a computer yet" else "Not paired with a phone yet"
+    return when {
+        sync.problem != null -> "${device.name}: can't sync right now"
+        sync.syncing && sync.isPhone -> "Syncing with ${device.name}…"
+        device.syncedAt == null -> "${device.name} · not synced yet"
+        else -> "${device.name} · " + shortAgo(device.syncedAt!!, now)
+    }
+}
+
+/** How sync stands, for its icon: not set up, fine, or in trouble. */
+internal enum class SyncState { OFF, SYNCED, SYNCING, TROUBLE }
+
+internal fun syncState(sync: SyncController): SyncState = when {
+    sync.devices.isEmpty() -> SyncState.OFF
+    sync.problem != null -> SyncState.TROUBLE
+    sync.syncing && sync.isPhone -> SyncState.SYNCING
+    else -> SyncState.SYNCED
+}
+
+/**
+ * The sync icon: crossed out until a device is paired, with a dot once one is (the accent when all
+ * is well, the error colour when it can't sync), turning while the phone syncs.
+ */
+@Composable
+fun SyncIcon(sync: SyncController, size: androidx.compose.ui.unit.Dp = 22.dp) {
+    val c = MaterialTheme.colorScheme
+    val state = syncState(sync)
+    val turning = androidx.compose.animation.core.rememberInfiniteTransition()
+    val angle by turning.animateFloat(
+        0f, -360f,
+        androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(1200, easing = androidx.compose.animation.core.LinearEasing)),
+    )
+    androidx.compose.foundation.layout.Box {
+        Icon(
+            if (state == SyncState.OFF) Icons.Outlined.SyncDisabled else Icons.Outlined.Sync,
+            contentDescription = null,
+            tint = if (state == SyncState.OFF) c.onSurfaceVariant else c.onSurface,
+            modifier = Modifier.size(size).then(if (state == SyncState.SYNCING) Modifier.rotate(angle) else Modifier),
+        )
+        if (state != SyncState.OFF) {
+            androidx.compose.foundation.layout.Box(
+                Modifier.align(Alignment.BottomEnd).size(size * 0.38f).clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(c.surfaceContainerLow).padding(1.5.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(if (state == SyncState.TROUBLE) c.error else Accent.pastelPink),
+            )
+        }
+    }
+}
+
+/** "just now", "5 min ago", "3 h ago", "2 days ago": short, for one line beside a name. */
+internal fun shortAgo(at: Instant, now: Instant = Instant.now()): String {
+    val minutes = Duration.between(at, now).toMinutes()
+    return when {
+        minutes < 1 -> "just now"
+        minutes < 60 -> "$minutes min ago"
+        minutes < 24 * 60 -> "${minutes / 60} h ago"
         else -> formatAge(at, now) ?: "a while ago"
     }
 }

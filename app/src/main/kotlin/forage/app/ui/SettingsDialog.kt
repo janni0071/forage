@@ -3,6 +3,17 @@
 package forage.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -57,208 +68,381 @@ import androidx.compose.ui.unit.dp
 import forage.app.AppModel
 import forage.app.Player
 import forage.app.Theme
+import forage.app.SettingsPage
 
 @Composable
 fun SettingsDialog(model: AppModel) {
     val c = MaterialTheme.colorScheme
     val compact = LocalCompact.current
-    BasicAlertDialog(onDismissRequest = { model.settingsOpen = false }, properties = DialogProperties(usePlatformDefaultWidth = !compact)) {
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = c.surfaceContainerLow,
-            modifier = if (compact) Modifier.fillMaxWidth().padding(horizontal = 12.dp) else Modifier.width(600.dp),
-        ) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(if (compact) 20.dp else 28.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { model.settingsOpen = false }) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
-                }
-
-                if (model.platform.players.isNotEmpty()) {
-                    Section(
-                        "Playback",
-                        if (Player.IN_APP in model.platform.players) "Play videos here, on their page, or hand them to another app (LibreTube, NewPipe, a browser)."
-                        else "Where videos open. Forage only finds and organizes them.",
-                    )
-                    // Checking for players starts small processes, so do it once per opening.
-                    val problems = remember { model.platform.players.associateWith { model.platform.playerProblem(it) } }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        for (p in model.platform.players) {
-                            PlayerCard(
-                                player = p,
-                                problem = problems[p],
-                                selected = model.player == p,
-                                modifier = Modifier.weight(1f),
-                            ) { model.choosePlayer(p) }
+    val pages = settingsPages(model)
+    val close = { model.settingsOpen = false; model.settingsPage = null }
+    // On a phone, Back goes from a part of Settings to the overview first.
+    val dismiss = { if (compact && model.settingsPage != null) model.settingsPage = null else close() }
+    // A plain dialog: Material's alert dialog keeps to 560 dp, too narrow for the list beside a part.
+    androidx.compose.ui.window.Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        if (compact) {
+            Surface(shape = RoundedCornerShape(28.dp), color = c.surfaceContainerLow, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp)) {
+                    val page = model.settingsPage
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (page != null) {
+                            IconButton(onClick = { model.settingsPage = null }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "All settings") }
                         }
+                        Text(page?.title ?: "Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        IconButton(onClick = close) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
                     }
-                    // The vault's videos come from Pornhub too, which FreeTube doesn't play.
-                    if (model.isPrivate && model.player == Player.FREETUBE) {
-                        Hint("FreeTube plays YouTube only: Pornhub videos open in the browser. mpv plays both, without the website.")
-                    }
-                    if (model.player == Player.MPV && problems[Player.MPV] == "needs yt-dlp") {
-                        Hint("mpv needs a current yt-dlp to play YouTube videos. Install it with 'pipx install yt-dlp', or use mpv from Flathub, which includes it.")
-                    }
-                }
-
-                val look = model.vaultLook
-                if (look != null) {
-                    // The private vault wears a look of its own, always dark, kept inside the vault.
-                    Section("Look", "The private vault's own colours, apart from the rest of Forage.")
-                    Segmented(
-                        options = listOf(
-                            Triple(forage.app.VaultLook.NEON, "Neon", null),
-                            Triple(forage.app.VaultLook.VELVET, "Velvet", null),
-                            Triple(forage.app.VaultLook.NOIR, "Noir", null),
-                        ),
-                        selected = look,
-                        onSelect = model::changeVaultLook,
-                    )
-                } else {
-                    Section("Appearance", null)
-                    Segmented(
-                        options = listOf(
-                            Triple(Theme.SYSTEM, "System", Icons.Outlined.BrightnessAuto),
-                            Triple(Theme.LIGHT, "Light", Icons.Outlined.LightMode),
-                            Triple(Theme.DARK, "Dark", Icons.Outlined.DarkMode),
-                        ),
-                        selected = model.theme,
-                        onSelect = model::changeTheme,
-                    )
-                }
-
-                if (!model.isPrivate && !model.platform.isMobile) {
-                    SwitchRow(
-                        title = "Forage's own title bar",
-                        text = "Window buttons in the top corner instead of the system's title bar. Turn off if moving or resizing " +
-                            "the window misbehaves on your desktop. Takes effect when Forage starts next.",
-                        checked = !model.systemTitleBar,
-                        onChange = { model.useSystemTitleBar(!it) },
-                    )
-                }
-
-                // Phones size the interface through the system's display settings.
-                if (!model.platform.isMobile) {
-                    Section("Interface size", "Also Ctrl + Plus, Ctrl + Minus, and Ctrl + 0 for automatic.")
-                    Segmented(
-                        options = listOf<Triple<Float?, String, androidx.compose.ui.graphics.vector.ImageVector?>>(
-                            Triple(null, "Auto", null),
-                        ) + forage.app.Zoom.choices.map { Triple(it, forage.app.Zoom.label(it), null) },
-                        selected = model.uiScale,
-                        onSelect = model::changeUiScale,
-                    )
-                }
-
-                Section("Thumbnails", null)
-                SwitchRow(
-                    title = "Show thumbnails",
-                    text = if (model.isPrivate) "Loaded from each site's image server, one request per video, and kept in memory only. " +
-                        "Turn off to send no requests for them."
-                    else "Loaded from YouTube's image server (i.ytimg.com), one request per video, then kept on disk. " +
-                        "Turn off to send no requests for them.",
-                    checked = model.showThumbnails,
-                    onChange = model::setThumbnails,
-                )
-                val thumbnailProblems = remember { model.thumbnails.problems() }
-                if (thumbnailProblems.isNotEmpty()) {
-                    Hint(
-                        "Some didn't load since Forage started: " +
-                            thumbnailProblems.joinToString("; ") { (reason, n) -> "$n × $reason" } + ".",
-                    )
-                }
-
-                Section("History", null)
-                SwitchRow(
-                    title = "Record history",
-                    text = "Videos you open from Forage go into the history in your library, and aren't recommended again. " +
-                        "Remove single videos or clear it all there." +
-                        (if (model.isPrivate) " This vault's history stays in the vault, encrypted." else ""),
-                    checked = model.recordHistory,
-                    onChange = model::changeRecordHistory,
-                )
-
-                if (model.offersCatalogue) {
-                    Section(
-                        "Catalogue",
-                        "The site's public list of all its videos (its \"embed dump\"), imported once: Discover then matches " +
-                            "your taste against millions of videos instead of a few searches, and related videos and previews come " +
-                            "from it. Kept unencrypted in Forage's data folder; it holds only the site's catalogue, nothing about you.",
-                    )
-                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(16.dp)) {
-                        Text(model.catalogueInfo ?: "Not imported yet", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            if (model.catalogueInfo == null) "Forage downloads the dump from the site (1.6 GB), imports it in a few minutes and deletes " +
-                                "the download; the catalogue then takes about 1.3 GB. If the download breaks off, starting it again continues it." +
-                                (if (model.platform.isMobile) " A catalogue made on a computer (its catalogues/pornhub.db) works too." else "")
-                            else "The site updates the dump now and then; download it again to catch up." +
-                            (if (model.platform.isMobile) " If a phone runs out of memory importing it, import it on a computer and choose its catalogues/pornhub.db here instead." else ""),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = c.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
-                        )
-                        // Wrapped on a phone, where the three don't fit side by side.
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AccentButton(if (model.catalogueInfo == null) "Download and import" else "Download again", null, enabled = model.job == null) {
-                                model.downloadCatalogue()
-                            }
-                            OutlinedButton(onClick = { model.chooseCatalogueFile() }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
-                                Text(if (compact) "Choose a file…" else "Choose a downloaded file…", maxLines = 1)
-                            }
-                            if (model.catalogueInfo != null) TextButton(onClick = model::removeCatalogue) { Text("Remove") }
+                    if (page == null) {
+                        Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (p in pages) OverviewRow(model, p) { model.settingsPage = p }
                         }
+                    } else {
+                        PageContent(model, page)
                     }
                 }
-
-                model.sync?.let { sync ->
-                    Section(
-                        "Sync",
-                        when {
-                            sync.vault -> "Keep this vault and the one on your " + (if (sync.isPhone) "computer" else "phone") + " in step."
-                            sync.isPhone -> "Keep this phone and your computer in step."
-                            else -> "Keep this computer and your phone in step."
-                        },
-                    )
-                    SyncCard(sync)
-                }
-
-                Section("Backup", if (model.isPrivate) "Everything in this vault, in one encrypted file, to restore if anything goes wrong." else "Everything in your library, in one file, to restore if anything goes wrong, here or on another device.")
-                BackupCard(model)
-                Section("Export", null)
-                ExportCard(model)
-
-                if (model.isPrivate) {
-                    Section(
-                        "This private vault",
-                        "Stored encrypted; nothing from it is written to disk in the clear, not even thumbnails or settings. " +
-                            "Changes to these settings last until you lock the vault.",
-                    )
-                    return@Column
-                }
-                // A phone keeps the data inside the app, where no file manager reaches.
-                if (model.platform.isMobile) return@Column
-                Section("Your data", "Everything Forage knows lives in one folder on this computer. Nothing is sent anywhere else.")
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val home = System.getProperty("user.home")
-                    Text(
-                        model.dataDir.absolutePath.let { if (it.startsWith(home)) "~" + it.removePrefix(home) else it },
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        maxLines = 3,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    OutlinedButton(onClick = model::openDataFolder, shape = RoundedCornerShape(12.dp)) {
-                        Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Open folder")
+            }
+        } else {
+            val page = model.settingsPage?.takeIf { it in pages } ?: pages.first()
+            // One size whichever part shows, so it doesn't jump about between them.
+            Surface(
+                shape = RoundedCornerShape(28.dp), color = c.surfaceContainerLow,
+                modifier = Modifier.padding(24.dp).widthIn(max = 920.dp).fillMaxWidth().fillMaxHeight(0.88f).heightIn(max = 700.dp),
+            ) {
+                Row(Modifier.fillMaxHeight()) {
+                    Column(Modifier.width(280.dp).fillMaxHeight().background(c.surfaceContainer).padding(vertical = 24.dp, horizontal = 14.dp)) {
+                        Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 10.dp, bottom = 18.dp))
+                        for (p in pages) PageTab(model, p, selected = p == page) { model.settingsPage = p }
+                    }
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 28.dp, end = 20.dp, top = 20.dp, bottom = 28.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(page.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            IconButton(onClick = close) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
+                        }
+                        PageContent(model, page)
                     }
                 }
             }
         }
     }
+}
+
+/** The parts of Settings this library has: the catalogue only where there is one, playback only where there's a choice. */
+private fun settingsPages(model: AppModel): List<SettingsPage> = SettingsPage.entries.filter {
+    when (it) {
+        SettingsPage.PLAYBACK -> model.platform.players.isNotEmpty()
+        SettingsPage.CATALOGUE -> model.offersCatalogue
+        SettingsPage.SYNC -> model.sync != null
+        else -> true
+    }
+}
+
+private fun pageIcon(page: SettingsPage): ImageVector = when (page) {
+    SettingsPage.PLAYBACK -> Icons.Outlined.PlayCircle
+    SettingsPage.APPEARANCE -> Icons.Outlined.Palette
+    SettingsPage.PRIVACY -> Icons.Outlined.Shield
+    SettingsPage.CATALOGUE -> Icons.Outlined.Inventory2
+    SettingsPage.SYNC -> Icons.Outlined.Sync
+    SettingsPage.DATA -> Icons.Outlined.Backup
+}
+
+/** How a part of Settings stands, in a line, for the overview. */
+@Composable
+private fun pageSummary(model: AppModel, page: SettingsPage): String = when (page) {
+    SettingsPage.PLAYBACK -> model.player.label
+    SettingsPage.APPEARANCE -> listOfNotNull(
+        model.vaultLook?.let { "${it.name.lowercase().replaceFirstChar(Char::uppercase)} look" } ?: when (model.theme) {
+            Theme.SYSTEM -> "System theme"
+            Theme.LIGHT -> "Light"
+            Theme.DARK -> "Dark"
+        },
+        if (!model.platform.isMobile) "size " + (model.uiScale?.let { forage.app.Zoom.label(it) } ?: "Auto") else null,
+    ).joinToString(" · ")
+    SettingsPage.PRIVACY -> (if (model.recordHistory) "History on" else "History paused") + " · " + (if (model.showThumbnails) "thumbnails on" else "no thumbnails")
+    SettingsPage.CATALOGUE -> model.catalogueInfo ?: "Not imported yet"
+    SettingsPage.SYNC -> model.sync?.let { syncLine(it) } ?: ""
+    SettingsPage.DATA -> model.automaticBackups.firstOrNull()?.let {
+        "Last backup " + (formatAge(java.time.Instant.ofEpochMilli(it.lastModified())) ?: "recently")
+    } ?: if (model.isPrivate) "Encrypted backups, exports" else "Backups, exports"
+}
+
+/** A part of Settings in the window's list: its icon, name and how it stands. */
+@Composable
+private fun PageTab(model: AppModel, page: SettingsPage, selected: Boolean, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(14.dp))
+            .background(if (selected) c.primaryContainer else Color.Transparent)
+            .clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(pageIcon(page), contentDescription = null, tint = if (selected) c.onPrimaryContainer else c.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        Column(Modifier.padding(start = 14.dp)) {
+            Text(page.title, style = MaterialTheme.typography.labelLarge, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = if (selected) c.onPrimaryContainer else c.onSurface)
+            Text(pageSummary(model, page), style = MaterialTheme.typography.bodySmall, color = if (selected) c.onPrimaryContainer.copy(alpha = 0.8f) else c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** A part of Settings in the phone's overview: a card to open. */
+@Composable
+private fun OverviewRow(model: AppModel, page: SettingsPage, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).clickable(onClick = onClick).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(c.primaryContainer), contentAlignment = Alignment.Center) {
+            Icon(pageIcon(page), contentDescription = null, tint = c.onPrimaryContainer, modifier = Modifier.size(22.dp))
+        }
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(page.title, style = MaterialTheme.typography.titleSmall)
+            Text(pageSummary(model, page), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = c.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun PageContent(model: AppModel, page: SettingsPage) = when (page) {
+    SettingsPage.PLAYBACK -> PlaybackPage(model)
+    SettingsPage.APPEARANCE -> AppearancePage(model)
+    SettingsPage.PRIVACY -> PrivacyPage(model)
+    SettingsPage.CATALOGUE -> CataloguePage(model)
+    SettingsPage.SYNC -> SyncPage(model)
+    SettingsPage.DATA -> DataPage(model)
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PlaybackPage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        if (model.platform.players.isNotEmpty()) {
+            Intro(
+                if (Player.IN_APP in model.platform.players) "Play videos here, on their page, or hand them to another app (LibreTube, NewPipe, a browser)."
+                else "Where videos open. Forage only finds and organizes them.",
+            )
+            // Checking for players starts small processes, so do it once per opening.
+            val problems = remember { model.platform.players.associateWith { model.platform.playerProblem(it) } }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (p in model.platform.players) {
+                    PlayerCard(
+                        player = p,
+                        problem = problems[p],
+                        selected = model.player == p,
+                        modifier = Modifier.weight(1f),
+                    ) { model.choosePlayer(p) }
+                }
+            }
+            // The vault's videos come from Pornhub too, which FreeTube doesn't play.
+            if (model.isPrivate && model.player == Player.FREETUBE) {
+                Hint("FreeTube plays YouTube only: Pornhub videos open in the browser. mpv plays both, without the website.")
+            }
+            if (model.player == Player.MPV && problems[Player.MPV] == "needs yt-dlp") {
+                Hint("mpv needs a current yt-dlp to play YouTube videos. Install it with 'pipx install yt-dlp', or use mpv from Flathub, which includes it.")
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun AppearancePage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        val look = model.vaultLook
+        if (look != null) {
+            // The private vault wears a look of its own, always dark, kept inside the vault.
+            Section("Look", "The private vault's own colours, apart from the rest of Forage.")
+            Segmented(
+                options = listOf(
+                    Triple(forage.app.VaultLook.NEON, "Neon", null),
+                    Triple(forage.app.VaultLook.VELVET, "Velvet", null),
+                    Triple(forage.app.VaultLook.NOIR, "Noir", null),
+                ),
+                selected = look,
+                onSelect = model::changeVaultLook,
+            )
+        } else {
+            Section("Theme", null)
+            Segmented(
+                options = listOf(
+                    Triple(Theme.SYSTEM, "System", Icons.Outlined.BrightnessAuto),
+                    Triple(Theme.LIGHT, "Light", Icons.Outlined.LightMode),
+                    Triple(Theme.DARK, "Dark", Icons.Outlined.DarkMode),
+                ),
+                selected = model.theme,
+                onSelect = model::changeTheme,
+            )
+        }
+
+        if (!model.isPrivate && !model.platform.isMobile) {
+            SwitchRow(
+                title = "Forage's own title bar",
+                text = "Window buttons in the top corner instead of the system's title bar. Turn off if moving or resizing " +
+                    "the window misbehaves on your desktop. Takes effect when Forage starts next.",
+                checked = !model.systemTitleBar,
+                onChange = { model.useSystemTitleBar(!it) },
+            )
+        }
+
+        // Phones size the interface through the system's display settings.
+        if (!model.platform.isMobile) {
+            Section("Interface size", "Also Ctrl + Plus, Ctrl + Minus, and Ctrl + 0 for automatic.")
+            Segmented(
+                options = listOf<Triple<Float?, String, androidx.compose.ui.graphics.vector.ImageVector?>>(
+                    Triple(null, "Auto", null),
+                ) + forage.app.Zoom.choices.map { Triple(it, forage.app.Zoom.label(it), null) },
+                selected = model.uiScale,
+                onSelect = model::changeUiScale,
+            )
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PrivacyPage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        Section("Thumbnails", null)
+        SwitchRow(
+            title = "Show thumbnails",
+            text = if (model.isPrivate) "Loaded from each site's image server, one request per video, and kept in memory only. " +
+                "Turn off to send no requests for them."
+            else "Loaded from YouTube's image server (i.ytimg.com), one request per video, then kept on disk. " +
+                "Turn off to send no requests for them.",
+            checked = model.showThumbnails,
+            onChange = model::setThumbnails,
+        )
+        val thumbnailProblems = remember { model.thumbnails.problems() }
+        if (thumbnailProblems.isNotEmpty()) {
+            Hint(
+                "Some didn't load since Forage started: " +
+                    thumbnailProblems.joinToString("; ") { (reason, n) -> "$n × $reason" } + ".",
+            )
+        }
+
+        Section("History", null)
+        SwitchRow(
+            title = "Record history",
+            text = "Videos you open from Forage go into the history in your library, and aren't recommended again. " +
+                "Remove single videos or clear it all there." +
+                (if (model.isPrivate) " This vault's history stays in the vault, encrypted." else ""),
+            checked = model.recordHistory,
+            onChange = model::changeRecordHistory,
+        )
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun CataloguePage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        if (model.offersCatalogue) {
+            Intro(
+                "The site's public list of all its videos (its \"embed dump\"), imported once: Discover then matches " +
+                    "your taste against millions of videos instead of a few searches, and related videos and previews come " +
+                    "from it. Kept unencrypted in Forage's data folder; it holds only the site's catalogue, nothing about you.",
+            )
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(16.dp)) {
+                Text(model.catalogueInfo ?: "Not imported yet", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (model.catalogueInfo == null) "Forage downloads the dump from the site (1.6 GB), imports it in a few minutes and deletes " +
+                        "the download; the catalogue then takes about 1.3 GB. If the download breaks off, starting it again continues it." +
+                        (if (model.platform.isMobile) " A catalogue made on a computer (its catalogues/pornhub.db) works too." else "")
+                    else "The site updates the dump now and then; download it again to catch up." +
+                    (if (model.platform.isMobile) " If a phone runs out of memory importing it, import it on a computer and choose its catalogues/pornhub.db here instead." else ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+                )
+                // Wrapped on a phone, where the three don't fit side by side.
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AccentButton(if (model.catalogueInfo == null) "Download and import" else "Download again", null, enabled = model.job == null) {
+                        model.downloadCatalogue()
+                    }
+                    OutlinedButton(onClick = { model.chooseCatalogueFile() }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
+                        Text(if (compact) "Choose a file…" else "Choose a downloaded file…", maxLines = 1)
+                    }
+                    if (model.catalogueInfo != null) TextButton(onClick = model::removeCatalogue) { Text("Remove") }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun SyncPage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        model.sync?.let { sync ->
+            Intro(
+                when {
+                    sync.vault -> "Keep this vault and the one on your " + (if (sync.isPhone) "computer" else "phone") + " in step."
+                    sync.isPhone -> "Keep this phone and your computer in step."
+                    else -> "Keep this computer and your phone in step."
+                },
+            )
+            SyncCard(sync)
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun DataPage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        Section("Backup", if (model.isPrivate) "Everything in this vault, in one encrypted file, to restore if anything goes wrong." else "Everything in your library, in one file, to restore if anything goes wrong, here or on another device.")
+        BackupCard(model)
+        Section("Export", null)
+        ExportCard(model)
+
+        if (model.isPrivate) {
+            Section(
+                "This private vault",
+                "Stored encrypted; nothing from it is written to disk in the clear, not even thumbnails or settings. " +
+                    "Changes to these settings last until you lock the vault.",
+            )
+            return@Column
+        }
+        // A phone keeps the data inside the app, where no file manager reaches.
+        if (model.platform.isMobile) return@Column
+        Section("Your data", "Everything Forage knows lives in one folder on this computer. Nothing is sent anywhere else.")
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val home = System.getProperty("user.home")
+            Text(
+                model.dataDir.absolutePath.let { if (it.startsWith(home)) "~" + it.removePrefix(home) else it },
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                maxLines = 3,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(12.dp))
+            OutlinedButton(onClick = model::openDataFolder, shape = RoundedCornerShape(12.dp)) {
+                Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Open folder")
+            }
+        }
+    }
+}
+
+/** What a part of Settings is about, at its top. */
+@Composable
+private fun Intro(text: String) {
+    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
 }
 
 @Composable

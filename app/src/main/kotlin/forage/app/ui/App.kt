@@ -73,6 +73,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -138,7 +140,13 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
                     IconButton(onClick = { model.onLock?.invoke() }) { Icon(Icons.Outlined.Lock, contentDescription = "Lock private vault") }
                 }
                 IconButton(onClick = onImport) { Icon(Icons.Outlined.FileDownload, contentDescription = "Import a library") }
-                IconButton(onClick = { model.settingsOpen = true }) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") }
+                // How sync stands, always in sight (and a reminder that it's there to set up).
+                model.sync?.let { sync ->
+                    IconButton(onClick = { model.openSettings(forage.app.SettingsPage.SYNC) }) {
+                        androidx.compose.foundation.layout.Box(Modifier.semantics { contentDescription = "Sync: " + syncState(sync).name.lowercase() }) { SyncIcon(sync) }
+                    }
+                }
+                IconButton(onClick = { model.openSettings() }) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") }
             }
             // The search bar slides away while the content scrolls down, and back when it scrolls up.
             var barShown by remember { mutableStateOf(true) }
@@ -354,9 +362,40 @@ private fun Sidebar(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
         } else {
             NavItem(Icons.Outlined.FileDownload, "Import Takeout", selected = false, enabled = model.job == null, onClick = onImport)
         }
+        model.sync?.let { SyncItem(model, it) }
         SettingsItem(model)
         HorizontalDivider(Modifier.padding(top = 14.dp, bottom = 8.dp), color = c.outlineVariant)
         ProfileSwitcher(model)
+    }
+}
+
+/** The sidebar's sync status: who this computer syncs with and when it last did, or a reminder that it can. */
+@Composable
+private fun SyncItem(model: AppModel, sync: forage.app.SyncController) {
+    val c = MaterialTheme.colorScheme
+    val off = sync.devices.isEmpty()
+    val selected = model.settingsOpen && model.settingsPage == forage.app.SettingsPage.SYNC
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) c.primaryContainer else Color.Transparent)
+            .clickable { model.openSettings(forage.app.SettingsPage.SYNC) }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SyncIcon(sync, 20.dp)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Sync", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium, color = c.onSurface)
+            Text(
+                if (off) (if (model.isPrivate) "Set up for this vault" else "Set up with your phone") else syncLine(sync),
+                style = MaterialTheme.typography.bodySmall, color = if (sync.problem != null) c.error else c.onSurfaceVariant,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -399,7 +438,7 @@ private fun NavItem(
 
 @Composable
 private fun SettingsItem(model: AppModel) {
-    NavItem(Icons.Outlined.Settings, "Settings", selected = model.settingsOpen) { model.settingsOpen = true }
+    NavItem(Icons.Outlined.Settings, "Settings", selected = model.settingsOpen && model.settingsPage != forage.app.SettingsPage.SYNC) { model.openSettings() }
     if (model.settingsOpen) SettingsDialog(model)
 }
 
