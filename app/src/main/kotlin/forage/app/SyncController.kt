@@ -13,6 +13,7 @@ import forage.core.sync.UnpairedException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -191,6 +192,10 @@ class SyncController(
     private companion object {
         /** How often the phone looks for changes made on it, to send them right away. */
         const val LOCAL_CHECK_MS = 2_000L
+
+        /** After the computer couldn't be reached: asking again after this, doubling up to the most. */
+        const val RETRY_MS = 2_000L
+        const val MAX_RETRY_MS = 20_000L
     }
 
     fun closePhonePairing() {
@@ -207,16 +212,18 @@ class SyncController(
      */
     fun whileOpen(): kotlinx.coroutines.Job = scope.launch {
         if (!isPhone) return@launch
-        syncNow()
+        syncOnce()
         // Changes made here.
         launch {
             while (true) {
                 kotlinx.coroutines.delay(LOCAL_CHECK_MS)
-                if (devices.isNotEmpty() && withContext(io) { log.counter } > sentUpTo) syncNow()
+                if (devices.isNotEmpty() && withContext(io) { log.counter } > sentUpTo) syncOnce()
             }
         }
-        // Changes made on the computer.
+        // Changes made on the computer: a request waits there for them; once it's answered, the
+        // phone syncs, and only then waits again (with what it now has).
         launch {
+            var pause = RETRY_MS
             while (true) {
                 val peer = devices.firstOrNull()?.let { withContext(io) { peers.get(it.id) } }
                 if (peer == null) {
@@ -225,46 +232,68 @@ class SyncController(
                 }
                 val changed = withContext(io) { runCatching { client.waitForChanges(peer) } }
                 when {
-                    changed.getOrNull() == true -> syncNow()
-                    // Not reachable (asleep, away): the regular sync finds it again; try again later.
-                    changed.isFailure -> kotlinx.coroutines.delay(20_000)
+                    changed.getOrNull() == true -> {
+                        syncOnce()
+                        pause = RETRY_MS
+                    }
+                    changed.getOrNull() == false -> pause = RETRY_MS
+                    // Refused, yet syncing works: the computer's Forage is older than this one's.
+                    changed.exceptionOrNull() is UnpairedException && syncOnce() -> {
+                        problem = "${peer.name} runs an older Forage, so its changes take up to a minute to arrive here. " +
+                            "Update Forage there, and if it's updated already, close it and open it again."
+                        kotlinx.coroutines.delay(60_000)
+                    }
+                    // Not reachable (asleep, away): again soon, then less often.
+                    else -> {
+                        kotlinx.coroutines.delay(pause)
+                        pause = minOf(pause * 2, MAX_RETRY_MS)
+                    }
                 }
             }
         }
         while (true) {
             kotlinx.coroutines.delay(60_000)
-            syncNow()
+            syncOnce()
         }
     }
 
-    /** Syncs with every paired computer (the phone; quietly, unless [manual]). */
+    /** One sync at a time; others wait their turn. */
+    private val syncLock = kotlinx.coroutines.sync.Mutex()
+
+    /** Syncs with every paired computer (the phone; quietly, unless [manual]), in the background. */
     fun syncNow(manual: Boolean = false) {
-        if (!isPhone || syncing) return
-        val paired = devices.ifEmpty { return }
+        if (!isPhone || devices.isEmpty()) return
+        if (!manual && syncLock.isLocked) return
+        scope.launch { syncOnce(manual) }
+    }
+
+    /** Syncs with every paired computer, after any sync already running; true if it all worked. */
+    private suspend fun syncOnce(manual: Boolean = false): Boolean = syncLock.withLock {
+        val paired = devices.ifEmpty { return@withLock true }
         syncing = true
-        scope.launch {
-            sentUpTo = withContext(io) { log.counter }
-            var arrived = 0
-            var trouble: String? = null
-            withContext(io) {
-                for (peer in paired) {
-                    try {
-                        arrived += client.sync(peers.get(peer.id) ?: continue).applied
-                    } catch (e: UnpairedException) {
-                        peers.remove(peer.id)
-                        trouble = e.message
-                    } catch (e: Exception) {
-                        trouble = e.message ?: "Couldn't sync"
-                    }
+        sentUpTo = withContext(io) { log.counter }
+        var arrived = 0
+        var trouble: String? = null
+        withContext(io) {
+            for (peer in paired) {
+                try {
+                    arrived += client.sync(peers.get(peer.id) ?: continue).applied
+                } catch (e: UnpairedException) {
+                    peers.remove(peer.id)
+                    trouble = e.message
+                } catch (e: Exception) {
+                    trouble = e.message ?: "Couldn't sync"
                 }
-                devices = peers.all()
-                if (devices.isEmpty()) log.stop()
             }
-            syncing = false
-            problem = trouble
-            // What arrived counts as sent: it came from there.
-            if (trouble == null) sentUpTo = maxOf(sentUpTo, withContext(io) { log.counter })
-            if (arrived > 0) refresh()
+            devices = peers.all()
+            if (devices.isEmpty()) log.stop()
         }
+        syncing = false
+        // A note that the computer's Forage is older stays until a sync goes wrong or one is asked for.
+        if (trouble != null || manual || problem?.contains("older Forage") != true) problem = trouble
+        // What arrived counts as sent: it came from there.
+        if (trouble == null) sentUpTo = maxOf(sentUpTo, withContext(io) { log.counter })
+        if (arrived > 0) refresh()
+        trouble == null
     }
 }
