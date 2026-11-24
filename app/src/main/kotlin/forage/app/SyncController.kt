@@ -188,8 +188,53 @@ class SyncController(
         }
     }
 
+    private companion object {
+        /** How often the phone looks for changes made on it, to send them right away. */
+        const val LOCAL_CHECK_MS = 2_000L
+    }
+
     fun closePhonePairing() {
         pairing = null
+    }
+
+    /** This device's change number when it last synced: changes after it haven't been sent yet. */
+    @Volatile private var sentUpTo = -1L
+
+    /**
+     * While Forage is in front on the phone: syncs now, again within moments of any change made
+     * here, and as soon as the computer says it has changes (a request waits there for them).
+     * Every minute regardless, in case either was missed. Cancel it when Forage goes to the back.
+     */
+    fun whileOpen(): kotlinx.coroutines.Job = scope.launch {
+        if (!isPhone) return@launch
+        syncNow()
+        // Changes made here.
+        launch {
+            while (true) {
+                kotlinx.coroutines.delay(LOCAL_CHECK_MS)
+                if (devices.isNotEmpty() && withContext(io) { log.counter } > sentUpTo) syncNow()
+            }
+        }
+        // Changes made on the computer.
+        launch {
+            while (true) {
+                val peer = devices.firstOrNull()?.let { withContext(io) { peers.get(it.id) } }
+                if (peer == null) {
+                    kotlinx.coroutines.delay(5_000)
+                    continue
+                }
+                val changed = withContext(io) { runCatching { client.waitForChanges(peer) } }
+                when {
+                    changed.getOrNull() == true -> syncNow()
+                    // Not reachable (asleep, away): the regular sync finds it again; try again later.
+                    changed.isFailure -> kotlinx.coroutines.delay(20_000)
+                }
+            }
+        }
+        while (true) {
+            kotlinx.coroutines.delay(60_000)
+            syncNow()
+        }
     }
 
     /** Syncs with every paired computer (the phone; quietly, unless [manual]). */
@@ -198,6 +243,7 @@ class SyncController(
         val paired = devices.ifEmpty { return }
         syncing = true
         scope.launch {
+            sentUpTo = withContext(io) { log.counter }
             var arrived = 0
             var trouble: String? = null
             withContext(io) {
@@ -216,6 +262,8 @@ class SyncController(
             }
             syncing = false
             problem = trouble
+            // What arrived counts as sent: it came from there.
+            if (trouble == null) sentUpTo = maxOf(sentUpTo, withContext(io) { log.counter })
             if (arrived > 0) refresh()
         }
     }

@@ -104,12 +104,18 @@ class SyncServer(
     private val listener: Listener,
     private val port: Int = SyncProtocol.PORT,
     private val discoveryPort: Int = SyncProtocol.DISCOVERY_PORT,
+    private val waitMs: Long = WAIT_MS,
 ) {
     interface Listener {
         /** A phone asks to pair: show [request]'s code and ask the user. */
         fun pairingRequested(request: PairingRequest)
         /** A paired device synced; [applied] of its changes changed something here. */
         fun synced(peer: Peer, applied: Int)
+    }
+
+    companion object {
+        /** How long a phone's wait for changes is held before it's answered with "nothing yet". */
+        const val WAIT_MS = 25_000L
     }
 
     /** A phone asking to pair, with the code both show. */
@@ -239,10 +245,25 @@ class SyncServer(
                 })
             }
             "sync" -> if (peer == null) return null else sync(peer, inner)
+            "wait" -> if (peer == null) return null else buildJsonObject { put("changed", waitForChanges(peer, inner["since"]!!.jsonPrimitive.long)) }
             else -> return null
         }
         if (peer != null && request?.answer == true) requests.remove(from)
         return SyncProtocol.sealed(key, log.device, answer)
+    }
+
+    /**
+     * Holds a phone's request until something changes here that it doesn't have (true), or for
+     * [WAIT_MS] (false); the phone then syncs, or asks again. So changes made here reach an open
+     * phone within moments, though only the phone can open a connection.
+     */
+    private fun waitForChanges(peer: Peer, since: Long): Boolean {
+        val until = System.currentTimeMillis() + waitMs
+        while (running && System.currentTimeMillis() < until) {
+            if (log.hasChangesSince(since, peer.id)) return true
+            Thread.sleep(400)
+        }
+        return false
     }
 
     /** Their changes in, ours out; one sync at a time. */
@@ -349,6 +370,21 @@ class SyncClient(
             Thread.sleep(1000)
         }
         return false
+    }
+
+    /**
+     * Waits (up to half a minute) for [peer] to have changes this device hasn't got: true when it
+     * has, false when nothing came. Throws when it can't be reached.
+     */
+    fun waitForChanges(peer: Peer): Boolean {
+        val address = peer.address ?: throw SyncException("Not found yet")
+        val port = peer.port ?: throw SyncException("Not found yet")
+        val reply = request(address, port, SyncProtocol.sealed(peer.key, log.device, buildJsonObject {
+            put("op", "wait")
+            put("since", peer.received)
+        }))
+        if (reply["type"]?.jsonPrimitive?.content != "sealed") throw UnpairedException(peer.name)
+        return SyncProtocol.open(peer.key, reply)["changed"]?.jsonPrimitive?.content == "true"
     }
 
     /** What a sync did: how many of the other side's changes changed something here, and how many went there. */

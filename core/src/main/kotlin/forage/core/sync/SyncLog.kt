@@ -68,6 +68,12 @@ class SyncLog(private val driver: SqlDriver, private val transacter: Transacter)
         for (table in TABLES) for (kind in listOf("insert", "update", "delete", "rename")) driver.execute(null, "DROP TRIGGER IF EXISTS sync_${table.name}_$kind", 0)
     }
 
+    /** Whether anything was noted after [since] that didn't come from [peer]: a cheap look, for waiting on changes. */
+    fun hasChangesSince(since: Long, peer: String?): Boolean = driver.executeQuery(
+        null, "SELECT EXISTS (SELECT 1 FROM sync_row WHERE seq > ? AND (origin IS NULL OR origin IS NOT ?))",
+        { c -> c.next(); QueryResult.Value(c.getLong(0) == 1L) }, 2,
+    ) { bindLong(0, since); bindString(1, peer) }.value
+
     /** Changes noted after [since], except those that came from [peer] (it has them), oldest first. */
     fun changesSince(since: Long, peer: String?): List<Change> {
         val me = device

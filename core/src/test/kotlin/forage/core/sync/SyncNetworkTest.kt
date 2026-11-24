@@ -32,7 +32,7 @@ class SyncNetworkTest {
     private val server = SyncServer(laptop.log, laptop.peers, { "laptop" }, object : SyncServer.Listener {
         override fun pairingRequested(request: SyncServer.PairingRequest) { requests += request }
         override fun synced(peer: Peer, applied: Int) { syncs += applied }
-    }, port = 0, discoveryPort = 0).apply { start() }
+    }, port = 0, discoveryPort = 0, waitMs = 1500).apply { start() }
     private val client = SyncClient(phone.log, phone.peers, { "phone" }, discoveryPort = server.discoveryListeningPort)
     private val here = listOf(InetAddress.getLoopbackAddress())
 
@@ -92,5 +92,26 @@ class SyncNetworkTest {
         assertTrue(pair())
         laptop.peers.remove(phone.log.device)
         assertFailsWith<UnpairedException> { client.sync(phone.peers.all().single()) }
+    }
+
+    @Test
+    fun `a change on the computer ends the phone's wait at once, and nothing new lets it time out`() {
+        assertTrue(pair())
+        client.sync(phone.peers.all().single())
+        // Nothing new: the computer answers "nothing yet" once the wait is over.
+        val started = System.currentTimeMillis()
+        assertFalse(client.waitForChanges(phone.peers.all().single()))
+        assertTrue(System.currentTimeMillis() - started >= 1400)
+
+        var changed: Boolean? = null
+        val waiting = thread { changed = client.waitForChanges(phone.peers.all().single()) }
+        Thread.sleep(300)
+        val at = System.currentTimeMillis()
+        laptop.library.saveForLater(PlatformId.youtube("nnnnnnnnnnn"))
+        waiting.join()
+        assertEquals(true, changed)
+        assertTrue(System.currentTimeMillis() - at < 1200)
+        client.sync(phone.peers.all().single())
+        assertEquals(listOf("nnnnnnnnnnn"), phone.library.watchLater().map { it.id })
     }
 }
