@@ -1,0 +1,33 @@
+-- Version 17 adds sync: which rows changed (and when, and where), the devices this one is
+-- paired with, and a switch that keeps changes arriving from them out of the log.
+CREATE TABLE sync_row (
+    tbl TEXT NOT NULL,
+    row_key TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    origin TEXT,
+    seq INTEGER NOT NULL,
+    PRIMARY KEY (tbl, row_key)
+);
+CREATE INDEX sync_row_seq ON sync_row(seq);
+CREATE INDEX sync_row_ts ON sync_row(ts);
+
+CREATE TABLE sync_peer (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    key BLOB NOT NULL,
+    address TEXT,
+    port INTEGER,
+    received INTEGER NOT NULL DEFAULT 0,
+    acked INTEGER NOT NULL DEFAULT 0,
+    paired_at INTEGER NOT NULL,
+    synced_at INTEGER
+);
+
+CREATE TABLE sync_state (
+    one INTEGER NOT NULL PRIMARY KEY CHECK (one = 1),
+    applying INTEGER NOT NULL DEFAULT 0,
+    counter INTEGER NOT NULL DEFAULT 0,     -- the last seq given out
+    clock INTEGER NOT NULL DEFAULT 0,       -- the latest change time seen, in ms: the next is later
+    device TEXT                             -- this device's id, made when sync starts
+);
+INSERT INTO sync_state (one, applying, counter, clock) VALUES (1, 0, 0, 0);

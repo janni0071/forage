@@ -179,10 +179,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Syncing with the computer while Forage is in front: on opening, then every minute. */
+    private var syncing: kotlinx.coroutines.Job? = null
+
     /** Back from the player: Forage asks about the video just watched. */
     override fun onResume() {
         super.onResume()
         app.model?.let { (it.privateModel ?: it).cameBack() }
+        syncing?.cancel()
+        syncing = app.scope.launch {
+            while (true) {
+                app.model?.sync?.syncNow()
+                kotlinx.coroutines.delay(60_000)
+            }
+        }
+    }
+
+    override fun onPause() {
+        syncing?.cancel()
+        syncing = null
+        super.onPause()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

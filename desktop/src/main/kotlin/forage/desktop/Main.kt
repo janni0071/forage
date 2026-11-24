@@ -65,6 +65,7 @@ fun main(args: Array<String>) {
         val model = remember { DesktopModel(dir, scope) }
         LaunchedEffect(model) {
             model.reload()
+            model.sync?.start()
             model.backUpAutomatically()
             model.warmUp()
         }

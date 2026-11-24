@@ -118,6 +118,7 @@ fun App(model: AppModel, onImport: () -> Unit, chrome: WindowChrome? = null) {
             else if (compact) PhoneApp(model, onImport) else WideApp(model, onImport, chrome)
             model.playerFailure?.let { PlayerFailureDialog(model, it) }
             BackupDialogs(model)
+            model.sync?.let { SyncDialogs(it) }
         }
     }
 }

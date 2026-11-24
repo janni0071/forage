@@ -209,6 +209,11 @@ fun SettingsDialog(model: AppModel) {
                     }
                 }
 
+                model.sync?.let { sync ->
+                    Section("Sync", if (sync.isPhone) "Keep this phone and your computer in step." else "Keep this computer and your phone in step.")
+                    SyncCard(sync)
+                }
+
                 Section("Backup", if (model.isPrivate) "Everything in this vault, in one encrypted file, to restore if anything goes wrong." else "Everything in your library, in one file, to restore if anything goes wrong, here or on another device.")
                 BackupCard(model)
                 Section("Export", null)

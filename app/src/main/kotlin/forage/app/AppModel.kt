@@ -480,6 +480,9 @@ class AppModel(
     /** Everything this model starts runs here, so locking a private vault can stop all of it. */
     private val ownScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[CoroutineJob]))
 
+    /** Sync with the other device: the main library only, for now. */
+    val sync: SyncController? = if (isPrivate) null else SyncController(storage, platform, ownScope, io) { reload() }
+
     /** The private vault's encrypted copy is written a few seconds after each change. */
     private val saver: CoroutineJob? = storage.encrypted?.let { encrypted ->
         ownScope.launch {
@@ -2363,6 +2366,7 @@ class AppModel(
 
     /** Closes the models and the database, folding pending changes into the database file. */
     fun close() {
+        sync?.stop()
         models.close()
         runCatching { storage.close() }
     }

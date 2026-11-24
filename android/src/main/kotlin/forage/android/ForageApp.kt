@@ -47,11 +47,14 @@ class ForageApp : Application() {
         )
     }
 
-    private fun open() {
+    private fun open(fromAnotherDevice: Boolean = false) {
         val opened = AppModel(filesDir, scope, Dispatchers.IO, storage(), Models(filesDir, platform), platform)
+        // A forage.db from the computer brings the computer's sync identity along: this phone's starts afresh.
+        if (fromAnotherDevice) opened.sync?.forgetIdentity()
         model = opened
         scope.launch {
             opened.reload()
+            opened.sync?.start()
             opened.backUpAutomatically()
             opened.warmUp()
         }
@@ -75,7 +78,7 @@ class ForageApp : Application() {
         for (suffix in listOf("", "-wal", "-shm", "-journal")) File(target.path + suffix).delete()
         check(incoming.renameTo(target) || incoming.copyTo(target, overwrite = true).exists()) { "Couldn't move the database into place" }
         incoming.delete()
-        open()
+        open(fromAnotherDevice = true)
         return null
     }
 
