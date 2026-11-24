@@ -81,6 +81,9 @@ interface Platform {
 
     /** This device's name, for telling backups apart ("laptop", "Pixel 9"). */
     val deviceName: String?
+
+    /** What this device is, as other devices are told when syncing: "phone", "tablet" or "computer". */
+    val deviceKind: String get() = if (isMobile) "phone" else "computer"
 }
 
 /** Where the user chose to save a file: its name, and how to write it. */

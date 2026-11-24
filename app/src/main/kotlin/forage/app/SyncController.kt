@@ -47,8 +47,11 @@ class SyncController(
     private val peers = SyncPeers(storage.driver)
     private val name get() = platform.deviceName ?: if (platform.isMobile) "Phone" else "Computer"
 
-    /** The phone reaches out; the computer waits to be reached. */
+    /** Phones and tablets reach out; the computer waits to be reached (and passes changes on between them). */
     val isPhone get() = platform.isMobile
+
+    /** What this device is: "phone", "tablet" or "computer". */
+    val kind get() = platform.deviceKind
 
     /** The devices this one syncs with. */
     var devices by mutableStateOf<List<Peer>>(emptyList())
@@ -114,7 +117,7 @@ class SyncController(
     var pairing by mutableStateOf<Pairing?>(null)
         private set
 
-    private val client by lazy { SyncClient(log, peers, { name }) }
+    private val client by lazy { SyncClient(log, peers, { name }, { platform.deviceKind }) }
 
     /** As Forage starts: keeps noting changes where there's a paired device, and the computer listens. */
     fun start() = scope.launch {
@@ -160,7 +163,7 @@ class SyncController(
     private fun serve(): SyncServer = (host ?: this).join(library)
 
     private fun join(library: SyncServer.Library): SyncServer {
-        val listening = server ?: SyncServer({ name }, { log.device }).also {
+        val listening = server ?: SyncServer({ name }, { log.device }, { platform.deviceKind }).also {
             runCatching { it.start() }.onFailure { e -> problem = "Couldn't listen on the network: ${e.message}" }
             serverNotFindable = it.discoveryListeningPort < 0
             server = it
@@ -272,40 +275,47 @@ class SyncController(
                 if (devices.isNotEmpty() && withContext(io) { log.counter } > sentUpTo) syncOnce()
             }
         }
-        // Changes made on the computer: a request waits there for them; once it's answered, the
-        // phone syncs, and only then waits again (with what it now has).
+        // Changes made on a computer: a request waits on each paired one; once one is answered,
+        // this device syncs, and only then waits again (with what it now has).
         launch {
-            var pause = RETRY_MS
+            val waiting = HashMap<String, kotlinx.coroutines.Job>()
             while (true) {
-                val peer = devices.firstOrNull()?.let { withContext(io) { peers.get(it.id) } }
-                if (peer == null) {
-                    kotlinx.coroutines.delay(5_000)
-                    continue
-                }
-                val changed = withContext(net) { runCatching { client.waitForChanges(peer) } }
-                when {
-                    changed.getOrNull() == true -> {
-                        syncOnce()
-                        pause = RETRY_MS
-                    }
-                    changed.getOrNull() == false -> pause = RETRY_MS
-                    // Refused, yet syncing works: the computer's Forage is older than this one's.
-                    !vault && changed.exceptionOrNull() is UnpairedException && syncOnce() -> {
-                        problem = "${peer.name} runs an older Forage, so its changes take up to a minute to arrive here. " +
-                            "Update Forage there, and if it's updated already, close it and open it again."
-                        kotlinx.coroutines.delay(60_000)
-                    }
-                    // Not reachable (asleep, away): again soon, then less often.
-                    else -> {
-                        kotlinx.coroutines.delay(pause)
-                        pause = minOf(pause * 2, MAX_RETRY_MS)
-                    }
-                }
+                val ids = devices.map { it.id }.toSet()
+                waiting.keys.filter { it !in ids }.forEach { waiting.remove(it)?.cancel() }
+                for (id in ids) if (id !in waiting) waiting[id] = launch { waitOn(id) }
+                kotlinx.coroutines.delay(5_000)
             }
         }
         while (true) {
             kotlinx.coroutines.delay(60_000)
             syncOnce()
+        }
+    }
+
+    /** Waits on the computer [id] for changes, again and again, syncing whenever it has some. */
+    private suspend fun waitOn(id: String) {
+        var pause = RETRY_MS
+        while (true) {
+            val peer = withContext(io) { peers.get(id) } ?: return
+            val changed = withContext(net) { runCatching { client.waitForChanges(peer) } }
+            when {
+                changed.getOrNull() == true -> {
+                    syncOnce()
+                    pause = RETRY_MS
+                }
+                changed.getOrNull() == false -> pause = RETRY_MS
+                // Refused, yet syncing works: the computer's Forage is older than this one's.
+                !vault && changed.exceptionOrNull() is UnpairedException && syncOnce() -> {
+                    problem = "${peer.name} runs an older Forage, so its changes take up to a minute to arrive here. " +
+                        "Update Forage there, and if it's updated already, close it and open it again."
+                    kotlinx.coroutines.delay(60_000)
+                }
+                // Not reachable (asleep, away): again soon, then less often.
+                else -> {
+                    kotlinx.coroutines.delay(pause)
+                    pause = minOf(pause * 2, MAX_RETRY_MS)
+                }
+            }
         }
     }
 

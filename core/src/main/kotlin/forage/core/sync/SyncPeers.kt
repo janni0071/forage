@@ -22,6 +22,8 @@ data class Peer(
     val syncedAt: Instant? = null,
     /** The computer it's on, as it's found on the network (for a private vault, which has an id of its own). */
     val host: String? = null,
+    /** What it is: "phone", "tablet" or "computer" (null from a Forage too old to say). */
+    val kind: String? = null,
 )
 
 /** The paired devices, kept in the library's database (but never in its backups). */
@@ -33,12 +35,12 @@ class SyncPeers(private val driver: SqlDriver) {
     fun save(peer: Peer) {
         driver.execute(
             null,
-            "INSERT OR REPLACE INTO sync_peer (id, name, key, address, port, received, acked, paired_at, synced_at, host) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            10,
+            "INSERT OR REPLACE INTO sync_peer (id, name, key, address, port, received, acked, paired_at, synced_at, host, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            11,
         ) {
             bindString(0, peer.id); bindString(1, peer.name); bindBytes(2, peer.key); bindString(3, peer.address)
             bindLong(4, peer.port?.toLong()); bindLong(5, peer.received); bindLong(6, peer.acked)
-            bindLong(7, peer.pairedAt.epochSecond); bindLong(8, peer.syncedAt?.epochSecond); bindString(9, peer.host)
+            bindLong(7, peer.pairedAt.epochSecond); bindLong(8, peer.syncedAt?.epochSecond); bindString(9, peer.host); bindString(10, peer.kind)
         }
     }
 
@@ -56,10 +58,10 @@ class SyncPeers(private val driver: SqlDriver) {
         id = c.getString(0)!!, name = c.getString(1)!!, key = c.getBytes(2)!!, address = c.getString(3),
         port = c.getLong(4)?.toInt(), received = c.getLong(5) ?: 0, acked = c.getLong(6) ?: 0,
         pairedAt = Instant.ofEpochSecond(c.getLong(7) ?: 0), syncedAt = c.getLong(8)?.let(Instant::ofEpochSecond),
-        host = c.getString(9),
+        host = c.getString(9), kind = c.getString(10),
     )
 
     private companion object {
-        const val COLUMNS = "id, name, key, address, port, received, acked, paired_at, synced_at, host"
+        const val COLUMNS = "id, name, key, address, port, received, acked, paired_at, synced_at, host, kind"
     }
 }

@@ -155,4 +155,25 @@ class SyncNetworkTest {
         server.remove(vault)
         assertFailsWith<UnpairedException> { vaultClient.sync(phoneVault.peers.all().single()) }
     }
+
+    @Test
+    fun `a phone and a tablet stay in step through the computer`() {
+        val tablet = Device("tablet")
+        val tabletClient = SyncClient(tablet.log, tablet.peers, { "tablet" }, { "tablet" }, discoveryPort = server.discoveryListeningPort)
+        assertTrue(pair())
+        assertTrue(pair(using = tabletClient))
+        assertEquals(setOf("phone", "tablet"), laptop.peers.all().map { it.kind }.toSet())
+        assertEquals("computer", tablet.peers.all().single().kind)
+
+        tablet.library.saveForLater(PlatformId.youtube("ttttttttttt"))
+        tabletClient.sync(tablet.peers.all().single())
+        client.sync(phone.peers.all().single())
+        assertEquals(listOf("ttttttttttt"), phone.library.watchLater().map { it.id })
+
+        // And back: removed on the phone, gone on the tablet.
+        phone.library.removeFromWatchLater(PlatformId.youtube("ttttttttttt"))
+        client.sync(phone.peers.all().single())
+        tabletClient.sync(tablet.peers.all().single())
+        assertEquals(emptyList(), tablet.library.watchLater())
+    }
 }

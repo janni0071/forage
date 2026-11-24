@@ -104,8 +104,10 @@ class UnpairedException(name: String) : Exception("$name no longer knows this de
  */
 class SyncServer(
     private val name: () -> String,
-    /** The id phones find this computer by (the main library's). */
+    /** The id phones and tablets find this computer by (the main library's). */
     private val hostId: () -> String,
+    /** What this device is, as phones and tablets are told. */
+    private val kind: () -> String = { "computer" },
     private val port: Int = SyncProtocol.PORT,
     private val discoveryPort: Int = SyncProtocol.DISCOVERY_PORT,
     private val waitMs: Long = WAIT_MS,
@@ -142,8 +144,8 @@ class SyncServer(
         const val WAIT_MS = 25_000L
     }
 
-    /** A phone asking to pair, with the code both show. */
-    class PairingRequest(val id: String, val name: String, val code: String, internal val key: ByteArray, internal val library: Library) {
+    /** A phone or tablet asking to pair ([kind] says which), with the code both show. */
+    class PairingRequest(val id: String, val name: String, val code: String, internal val key: ByteArray, internal val library: Library, val kind: String? = null) {
         @Volatile internal var answer: Boolean? = null
         internal val at: Instant = Instant.now()
     }
@@ -218,7 +220,7 @@ class SyncServer(
     fun accept(request: PairingRequest) {
         val library = request.library
         library.run {
-            library.peers.save(Peer(request.id, request.name, request.key))
+            library.peers.save(Peer(request.id, request.name, request.key, kind = request.kind))
             library.log.start()
         }
         request.answer = true
@@ -270,13 +272,16 @@ class SyncServer(
         val paired = SyncCrypto.pair(mine, theirs)
         // Old requests go; one per phone at a time.
         library.requests.values.removeIf { it.at.isBefore(Instant.now().minusSeconds(300)) }
-        val request = PairingRequest(id, message["name"]?.jsonPrimitive?.content ?: "A device", paired.code, paired.key, library)
+        val request = PairingRequest(
+            id, message["name"]?.jsonPrimitive?.content ?: "A device", paired.code, paired.key, library, message["kind"]?.jsonPrimitive?.content,
+        )
         library.requests[id] = request
         library.listener.pairingRequested(request)
         return buildJsonObject {
             put("type", "pairing")
             put("id", library.run { library.log.device })
             put("name", name())
+            put("kind", kind())
             put("key", SyncProtocol.b64(mine.public))
         }
     }
@@ -332,7 +337,10 @@ class SyncServer(
             // Changes of theirs this device never got (it was restored, say): they send them again.
             val received = if (acked > peer.received) peer.received else upTo
             val outgoing = library.log.changesSince(since, peer.id)
-            val updated = peer.copy(name = request["name"]?.jsonPrimitive?.content ?: peer.name, received = received, syncedAt = Instant.now())
+            val updated = peer.copy(
+                name = request["name"]?.jsonPrimitive?.content ?: peer.name, kind = request["kind"]?.jsonPrimitive?.content ?: peer.kind,
+                received = received, syncedAt = Instant.now(),
+            )
             library.peers.save(updated)
             Quad(applied, outgoing, library.log.counter, updated)
         }
@@ -359,6 +367,8 @@ class SyncClient(
     private val log: SyncLog,
     private val peers: SyncPeers,
     private val name: () -> String,
+    /** What this device is ("phone" or "tablet"), as the computer is told. */
+    private val kind: () -> String = { "phone" },
     private val discoveryPort: Int = SyncProtocol.DISCOVERY_PORT,
 ) {
     /** Asks the home network for Forage, for [timeoutMs]; every computer that answers. */
@@ -394,7 +404,7 @@ class SyncClient(
      * A pairing begun: the code to show, until the computer's user accepts or declines. [peerId]
      * is the library's id on the computer (its private vault has one of its own).
      */
-    class Pairing(val with: Found, val code: String, internal val key: ByteArray, internal val peerId: String)
+    class Pairing(val with: Found, val code: String, internal val key: ByteArray, internal val peerId: String, internal val kind: String? = null)
 
     /** Starts pairing with [computer]: both now show the same code. */
     fun startPairing(computer: Found): Pairing {
@@ -403,11 +413,12 @@ class SyncClient(
             put("type", "pair")
             put("id", log.device)
             put("name", name())
+            put("kind", kind())
             put("key", SyncProtocol.b64(mine.public))
         })
-        if (reply["type"]?.jsonPrimitive?.content != "pairing") throw SyncException("${computer.name} isn't pairing: choose Pair a phone there first")
+        if (reply["type"]?.jsonPrimitive?.content != "pairing") throw SyncException("${computer.name} isn't pairing: choose Pair a phone or tablet there first")
         val paired = SyncCrypto.pair(mine, SyncProtocol.unb64(reply["key"]!!.jsonPrimitive.content))
-        return Pairing(computer, paired.code, paired.key, reply["id"]!!.jsonPrimitive.content)
+        return Pairing(computer, paired.code, paired.key, reply["id"]!!.jsonPrimitive.content, reply["kind"]?.jsonPrimitive?.content ?: "computer")
     }
 
     /**
@@ -422,7 +433,7 @@ class SyncClient(
             if (reply["type"]?.jsonPrimitive?.content != "sealed") throw SyncException("${computer.name} stopped pairing")
             when (SyncProtocol.open(pairing.key, reply)["status"]?.jsonPrimitive?.content) {
                 "paired" -> {
-                    peers.save(Peer(pairing.peerId, computer.name, pairing.key, computer.address.hostAddress, computer.port, host = computer.id))
+                    peers.save(Peer(pairing.peerId, computer.name, pairing.key, computer.address.hostAddress, computer.port, host = computer.id, kind = pairing.kind))
                     log.start()
                     return true
                 }
@@ -475,6 +486,7 @@ class SyncClient(
         val reply = request(address, port, SyncProtocol.sealed(peer.key, log.device, buildJsonObject {
             put("op", "sync")
             put("name", name())
+            put("kind", kind())
             put("since", peer.received)
             put("acked", peer.acked)
             put("upTo", upTo)

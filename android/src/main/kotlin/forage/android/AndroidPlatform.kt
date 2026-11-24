@@ -149,7 +149,14 @@ class AndroidPlatform(private val context: Context) : Platform {
         }
     }
 
-    override val deviceName: String? = android.os.Build.MODEL
+    /** The name given to the device in its settings ("Galaxy Tab S9"), else its model ("SM-X710"). */
+    override val deviceName: String? =
+        runCatching { android.provider.Settings.Global.getString(context.contentResolver, android.provider.Settings.Global.DEVICE_NAME) }.getOrNull()
+            ?.takeIf { it.isNotBlank() } ?: android.os.Build.MODEL
+
+    /** A tablet by Android's own measure: at least 600 dp on its shortest side. */
+    override val deviceKind: String
+        get() = if (context.resources.configuration.smallestScreenWidthDp >= 600) "tablet" else "phone"
 
     private companion object {
         // Many file managers label SQLite files as plain binary data.
