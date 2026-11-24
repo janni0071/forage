@@ -29,10 +29,15 @@ class SyncNetworkTest {
     private val phone = Device("phone")
     private val requests = LinkedBlockingQueue<SyncServer.PairingRequest>()
     private val syncs = LinkedBlockingQueue<Int>()
-    private val server = SyncServer(laptop.log, laptop.peers, { "laptop" }, object : SyncServer.Listener {
+    private val listener = object : SyncServer.Listener {
         override fun pairingRequested(request: SyncServer.PairingRequest) { requests += request }
         override fun synced(peer: Peer, applied: Int) { syncs += applied }
-    }, port = 0, discoveryPort = 0, waitMs = 1500).apply { start() }
+    }
+    private val main = SyncServer.Library(laptop.log, laptop.peers, listener)
+    private val server = SyncServer({ "laptop" }, { laptop.log.device }, port = 0, discoveryPort = 0, waitMs = 1500).apply {
+        add(main)
+        start()
+    }
     private val client = SyncClient(phone.log, phone.peers, { "phone" }, discoveryPort = server.discoveryListeningPort)
     private val here = listOf(InetAddress.getLoopbackAddress())
 
@@ -40,18 +45,19 @@ class SyncNetworkTest {
     fun stop() = server.stop()
 
     /** Pairs the phone with the laptop, the laptop's user saying yes (or no) to the code. */
-    private fun pair(accept: Boolean = true): Boolean {
-        val computer = client.discover(targets = here).single()
+    private fun pair(accept: Boolean = true, into: SyncServer.Library = main, using: SyncClient = client): Boolean {
+        server.openPairing(into)
+        val computer = using.discover(targets = here).single()
         assertEquals("laptop", computer.name)
-        val pairing = client.startPairing(computer)
+        val pairing = using.startPairing(computer)
         var answer = false
-        val waiting = thread { answer = client.awaitPairing(pairing, timeoutMs = 10_000) }
+        val waiting = thread { answer = using.awaitPairing(pairing, timeoutMs = 10_000) }
         val request = requests.poll(5, TimeUnit.SECONDS)!!
         // The same code on both screens.
         assertEquals(pairing.code, request.code)
-        assertEquals("phone", request.name)
         if (accept) server.accept(request) else server.decline(request)
         waiting.join()
+        server.closePairing(into)
         return answer
     }
 
@@ -113,5 +119,40 @@ class SyncNetworkTest {
         assertTrue(System.currentTimeMillis() - at < 1200)
         client.sync(phone.peers.all().single())
         assertEquals(listOf("nnnnnnnnnnn"), phone.library.watchLater().map { it.id })
+    }
+
+    @Test
+    fun `no pairing without Pair a phone open`() {
+        val computer = client.discover(targets = here).single()
+        assertFailsWith<SyncException> { client.startPairing(computer) }
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test
+    fun `a private vault pairs and syncs apart from the main library, and while locked answers like none`() {
+        val laptopVault = Device("laptop vault")
+        val phoneVault = Device("phone vault")
+        val vault = SyncServer.Library(laptopVault.log, laptopVault.peers, listener)
+        val vaultClient = SyncClient(phoneVault.log, phoneVault.peers, { "phone" }, discoveryPort = server.discoveryListeningPort)
+        assertTrue(pair())
+        // The vault is unlocked on the laptop: its pairing goes to the vault.
+        server.add(vault)
+        assertTrue(pair(into = vault, using = vaultClient))
+        assertEquals(1, laptopVault.peers.all().size)
+        assertEquals(1, laptop.peers.all().size)
+        val vaultPeer = phoneVault.peers.all().single()
+        assertEquals(laptop.log.device, vaultPeer.host)
+        assertTrue(vaultPeer.id != laptop.log.device)
+
+        phoneVault.library.saveForLater(PlatformId.youtube("vvvvvvvvvvv"))
+        phone.library.saveForLater(PlatformId.youtube("mmmmmmmmmmm"))
+        vaultClient.sync(vaultPeer)
+        client.sync(phone.peers.all().single())
+        assertEquals(listOf("vvvvvvvvvvv"), laptopVault.library.watchLater().map { it.id })
+        assertEquals(listOf("mmmmmmmmmmm"), laptop.library.watchLater().map { it.id })
+
+        // Locked: the vault isn't served, and its phone gets the answer an unknown device gets.
+        server.remove(vault)
+        assertFailsWith<UnpairedException> { vaultClient.sync(phoneVault.peers.all().single()) }
     }
 }

@@ -15,6 +15,7 @@ import forage.core.sync.SyncServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import kotlin.test.Test
@@ -41,10 +42,13 @@ class SyncLatencyTest {
         val laptopDb = ForageDatabase(laptopDriver)
         val laptopLog = SyncLog(laptopDriver, laptopDb)
         val laptopPeers = SyncPeers(laptopDriver)
-        val server = SyncServer(laptopLog, laptopPeers, { "laptop" }, object : SyncServer.Listener {
-            override fun pairingRequested(request: SyncServer.PairingRequest) {}
-            override fun synced(peer: Peer, applied: Int) {}
-        }, port = 0, discoveryPort = 0).apply { start() }
+        val server = SyncServer({ "laptop" }, { laptopLog.device }, port = 0, discoveryPort = 0).apply {
+            add(SyncServer.Library(laptopLog, laptopPeers, object : SyncServer.Listener {
+                override fun pairingRequested(request: SyncServer.PairingRequest) {}
+                override fun synced(peer: Peer, applied: Int) {}
+            }))
+            start()
+        }
 
         // The phone: the app's model, with its sync controller.
         val dir = Files.createTempDirectory("phone").toFile()
@@ -61,7 +65,7 @@ class SyncLatencyTest {
             SyncPeers(phoneDriver).save(Peer(laptopLog.device, "laptop", key, "127.0.0.1", server.listeningPort))
             phoneLog.start()
             runBlocking { phone.sync!!.start().join() }
-            val open = phone.sync!!.whileOpen()
+            val open = CoroutineScope(Dispatchers.Default).launch { phone.sync!!.runWhileOpen() }
             Thread.sleep(1500)
 
             // On the computer: does it reach the phone at once?

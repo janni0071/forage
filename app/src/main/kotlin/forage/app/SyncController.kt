@@ -17,20 +17,33 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * Sync between the phone and the computer, for the main library (the private vault comes later).
+ * Sync between the phone and the computer, for one library: the main one, or a private vault.
  * The computer listens on the home network while it has a paired phone (or is pairing one); the
  * phone finds it, pairs once (both show a code; the user accepts on the computer), and syncs when
  * Forage opens and now and then while it's open. Changes that arrive refresh what's on screen.
+ *
+ * A private vault pairs and syncs on its own, with its own id and key, and only while it's
+ * unlocked: on the computer it joins the main library's listener while unlocked ([host]).
  */
 class SyncController(
     private val storage: Storage,
     private val platform: Platform,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
+    /** For a private vault on the computer: the main library's sync, whose listener it joins. */
+    private val host: SyncController? = null,
     /** Shows what arrived: the library is read again. */
     private val refresh: suspend () -> Unit,
 ) {
+    /** This syncs a private vault. */
+    val vault get() = storage.isPrivate
     private val log = SyncLog(storage.driver, storage.db)
+
+    /**
+     * Where waiting on the network happens: not on [io], which for a private vault is its one
+     * database thread (a request held half a minute by the computer would hold up the vault).
+     */
+    private val net = kotlinx.coroutines.Dispatchers.IO
     private val peers = SyncPeers(storage.driver)
     private val name get() = platform.deviceName ?: if (platform.isMobile) "Phone" else "Computer"
 
@@ -50,7 +63,31 @@ class SyncController(
 
     // The computer's side.
 
+    /** The listener, on the main library's sync (a vault's joins it). */
     private var server: SyncServer? = null
+
+    /** The libraries the listener serves now (the main one, a vault while unlocked). */
+    private val served = mutableSetOf<SyncServer.Library>()
+
+    /** This library, as the listener serves it: a vault's database work runs on the vault's own thread. */
+    private val library by lazy {
+        val runner = object : SyncServer.Runner {
+            override fun <T> run(block: () -> T): T = kotlinx.coroutines.runBlocking(io) { block() }
+        }
+        SyncServer.Library(log, peers, object : SyncServer.Listener {
+            override fun pairingRequested(request: SyncServer.PairingRequest) {
+                this@SyncController.request = request
+            }
+
+            override fun synced(peer: Peer, applied: Int) {
+                scope.launch {
+                    devices = withContext(io) { peers.all() }
+                    problem = null
+                    if (applied > 0) refresh()
+                }
+            }
+        }, if (vault) runner else SyncServer.Runner.Direct)
+    }
 
     /** "Pair a phone" is open on the computer. */
     var pairingOpen by mutableStateOf(false)
@@ -61,8 +98,8 @@ class SyncController(
         private set
 
     /** Phones can't find this computer: another program has the port they ask on. */
-    var notFindable by mutableStateOf(false)
-        private set
+    private var serverNotFindable by mutableStateOf(false)
+    val notFindable: Boolean get() = (host ?: this).serverNotFindable
 
     // The phone's side.
 
@@ -85,12 +122,18 @@ class SyncController(
             devices = peers.all()
             if (devices.isNotEmpty()) log.start()
         }
-        if (!isPhone && devices.isNotEmpty()) listen()
+        if (!isPhone && devices.isNotEmpty()) serve()
     }
 
+    /** Stops: the main library's sync as Forage closes, a vault's as it locks. */
     fun stop() {
+        if (host != null) {
+            host.leave(library)
+            return
+        }
         server?.stop()
         server = null
+        served.clear()
     }
 
     /** A library put in place from another device's file: this device's sync starts afresh. */
@@ -108,51 +151,60 @@ class SyncController(
             devices = peers.all()
             if (devices.isEmpty()) log.stop()
         }
-        if (!isPhone && devices.isEmpty() && !pairingOpen) stop()
+        if (!isPhone && devices.isEmpty() && !pairingOpen) (host ?: this@SyncController).leave(library)
     }
 
     // The computer.
 
-    private fun listen() {
-        if (server != null) return
-        server = SyncServer(log, peers, { name }, object : SyncServer.Listener {
-            override fun pairingRequested(request: SyncServer.PairingRequest) {
-                this@SyncController.request = request
-            }
+    /** The listener (started on the main library's sync), serving [library] too. */
+    private fun serve(): SyncServer = (host ?: this).join(library)
 
-            override fun synced(peer: Peer, applied: Int) {
-                scope.launch {
-                    devices = withContext(io) { peers.all() }
-                    problem = null
-                    if (applied > 0) refresh()
-                }
-            }
-        }).also {
+    private fun join(library: SyncServer.Library): SyncServer {
+        val listening = server ?: SyncServer({ name }, { log.device }).also {
             runCatching { it.start() }.onFailure { e -> problem = "Couldn't listen on the network: ${e.message}" }
-            notFindable = it.discoveryListeningPort < 0
+            serverNotFindable = it.discoveryListeningPort < 0
+            server = it
         }
+        listening.add(library)
+        served += library
+        return listening
+    }
+
+    /**
+     * [library] is no longer served (a vault locked, the last phone removed). The listener itself
+     * goes on until Forage closes: if it stopped as a vault locked, the network would show when a
+     * vault is open.
+     */
+    private fun leave(library: SyncServer.Library) {
+        server?.remove(library)
+        served -= library
     }
 
     fun openPairing() {
         pairingOpen = true
-        listen()
+        serve().openPairing(library)
     }
 
     fun closePairing() {
         pairingOpen = false
-        request?.let { server?.decline(it) }
+        (host ?: this).server?.closePairing(library)
         request = null
-        if (devices.isEmpty()) stop()
+        if (devices.isEmpty()) (host ?: this).leave(library)
     }
 
     /** The user compared the codes: [accept] if they match. */
     fun answer(accept: Boolean) {
         val asked = request ?: return
         request = null
+        val listening = (host ?: this).server ?: return
         scope.launch {
-            withContext(io) { if (accept) server?.accept(asked) else server?.decline(asked) }
+            // Not on the library's own thread: the listener takes a vault's work there itself.
+            withContext(kotlinx.coroutines.Dispatchers.IO) { if (accept) listening.accept(asked) else listening.decline(asked) }
             devices = withContext(io) { peers.all() }
-            if (accept) pairingOpen = false
+            if (accept) {
+                pairingOpen = false
+                listening.closePairing(library)
+            }
         }
     }
 
@@ -161,7 +213,7 @@ class SyncController(
     fun findComputers() {
         pairing = Pairing.Searching
         scope.launch {
-            val found = withContext(io) { runCatching { client.discover(timeoutMs = 2500) } }
+            val found = withContext(net) { runCatching { client.discover(timeoutMs = 2500) } }
             pairing = found.fold(
                 { if (it.isEmpty()) Pairing.Failed("No computer with Forage found on this Wi-Fi") else Pairing.Found(it) },
                 { Pairing.Failed("Couldn't search the network: ${it.message}") },
@@ -171,13 +223,13 @@ class SyncController(
 
     fun pairWith(computer: Found) {
         scope.launch {
-            val started = withContext(io) { runCatching { client.startPairing(computer) } }
+            val started = withContext(net) { runCatching { client.startPairing(computer) } }
             val begun = started.getOrElse {
                 pairing = Pairing.Failed(it.message ?: "Couldn't reach ${computer.name}")
                 return@launch
             }
             pairing = Pairing.Confirming(computer, begun.code)
-            val accepted = withContext(io) { runCatching { client.awaitPairing(begun) { pairing !is Pairing.Confirming } } }
+            val accepted = withContext(net) { runCatching { client.awaitPairing(begun) { pairing !is Pairing.Confirming } } }
             if (pairing !is Pairing.Confirming) return@launch
             pairing = when {
                 accepted.getOrNull() == true -> Pairing.Paired(computer.name)
@@ -210,8 +262,8 @@ class SyncController(
      * here, and as soon as the computer says it has changes (a request waits there for them).
      * Every minute regardless, in case either was missed. Cancel it when Forage goes to the back.
      */
-    fun whileOpen(): kotlinx.coroutines.Job = scope.launch {
-        if (!isPhone) return@launch
+    suspend fun runWhileOpen(): Unit = kotlinx.coroutines.coroutineScope {
+        if (!isPhone) return@coroutineScope
         syncOnce()
         // Changes made here.
         launch {
@@ -230,7 +282,7 @@ class SyncController(
                     kotlinx.coroutines.delay(5_000)
                     continue
                 }
-                val changed = withContext(io) { runCatching { client.waitForChanges(peer) } }
+                val changed = withContext(net) { runCatching { client.waitForChanges(peer) } }
                 when {
                     changed.getOrNull() == true -> {
                         syncOnce()
@@ -238,7 +290,7 @@ class SyncController(
                     }
                     changed.getOrNull() == false -> pause = RETRY_MS
                     // Refused, yet syncing works: the computer's Forage is older than this one's.
-                    changed.exceptionOrNull() is UnpairedException && syncOnce() -> {
+                    !vault && changed.exceptionOrNull() is UnpairedException && syncOnce() -> {
                         problem = "${peer.name} runs an older Forage, so its changes take up to a minute to arrive here. " +
                             "Update Forage there, and if it's updated already, close it and open it again."
                         kotlinx.coroutines.delay(60_000)
@@ -279,8 +331,13 @@ class SyncController(
                 try {
                     arrived += client.sync(peers.get(peer.id) ?: continue).applied
                 } catch (e: UnpairedException) {
-                    peers.remove(peer.id)
-                    trouble = e.message
+                    // A vault can't tell "locked there" from "forgotten there": it keeps the pairing.
+                    if (vault) {
+                        trouble = "Unlock the private vault on ${peer.name} to sync it"
+                    } else {
+                        peers.remove(peer.id)
+                        trouble = e.message
+                    }
                 } catch (e: Exception) {
                     trouble = e.message ?: "Couldn't sync"
                 }

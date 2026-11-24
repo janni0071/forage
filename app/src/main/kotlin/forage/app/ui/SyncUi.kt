@@ -80,10 +80,16 @@ fun SyncCard(sync: SyncController) {
             Text(it, style = MaterialTheme.typography.bodySmall, color = c.error, modifier = Modifier.padding(top = 10.dp))
         }
         Text(
-            "Likes, the history, the queue, playlists, subscriptions and where you left off stay the same on both, over your " +
-                "home Wi-Fi, encrypted, with no account or server in between. " +
-                (if (sync.isPhone) "The phone syncs while Forage is open on both." else "The phone syncs while Forage is open on both; this computer just has to be on.") +
-                " The private vault doesn't sync yet.",
+            if (sync.vault) {
+                "This vault syncs with the private vault on your " + (if (sync.isPhone) "computer" else "phone") + " while it's unlocked on both, " +
+                    "paired apart from the main library with a key of its own. While it's locked, nothing about it shows on the network, " +
+                    "not even that there is one; changes wait until both are unlocked again."
+            } else {
+                "Likes, the history, the queue, playlists, subscriptions and where you left off stay the same on both, over your " +
+                    "home Wi-Fi, encrypted, with no account or server in between. " +
+                    (if (sync.isPhone) "The phone syncs while Forage is open on both." else "The phone syncs while Forage is open on both; this computer just has to be on.") +
+                    " The private vault syncs on its own: pair it from inside the vault."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = c.onSurfaceVariant,
             modifier = Modifier.padding(top = 12.dp),
@@ -107,7 +113,10 @@ private fun ComputerPairing(sync: SyncController) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (request == null) {
-                    Text("On your phone, open Forage, then Settings, Sync, and tap Pair with a computer. The phone needs to be on the same Wi-Fi as this computer.")
+                    Text(
+                        if (sync.vault) "On your phone, unlock the private vault, then open Settings, Sync, and tap Pair with a computer. The phone needs to be on the same Wi-Fi as this computer."
+                        else "On your phone, open Forage, then Settings, Sync, and tap Pair with a computer. The phone needs to be on the same Wi-Fi as this computer.",
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         Text("  Waiting for the phone…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -159,7 +168,10 @@ private fun PhonePairing(sync: SyncController, state: SyncController.Pairing) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when (state) {
                     SyncController.Pairing.Searching -> {
-                        Text("On the computer, open Forage, then Settings, Sync, and choose Pair a phone. Both need to be on the same Wi-Fi.")
+                        Text(
+                            if (sync.vault) "On the computer, unlock the private vault, then open Settings, Sync, and choose Pair a phone. Both need to be on the same Wi-Fi."
+                            else "On the computer, open Forage, then Settings, Sync, and choose Pair a phone. Both need to be on the same Wi-Fi.",
+                        )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                             Text("  Looking for it…", style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
@@ -190,7 +202,8 @@ private fun PhonePairing(sync: SyncController, state: SyncController.Pairing) {
                     is SyncController.Pairing.Failed -> {
                         Text(state.message)
                         Text(
-                            "Is Forage open on the computer, with Pair a phone showing, and are both on the same Wi-Fi?",
+                            if (sync.vault) "Is the private vault unlocked on the computer, with Pair a phone showing in its Settings, and are both on the same Wi-Fi?"
+                            else "Is Forage open on the computer, with Pair a phone showing, and are both on the same Wi-Fi?",
                             style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant,
                         )
                     }

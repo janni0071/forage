@@ -158,4 +158,47 @@ class PrivateVaultTest {
         assertEquals(false, model.guideHidden)
         lock()
     }
+
+    @Test
+    fun `the vault pairs and syncs on its own while unlocked, and is refused once locked`() {
+        unlock("quiet harbour lantern", create = true)
+        val vault = assertNotNull(model.privateModel)
+        val vaultSync = assertNotNull(vault.sync)
+        assertTrue(vaultSync.vault)
+        vaultSync.openPairing()
+
+        // The phone's vault, as its sync sees it.
+        val phoneDriver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver(app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver.IN_MEMORY)
+            .also { forage.core.db.ForageDatabase.Schema.create(it) }
+        val phoneDb = forage.core.db.ForageDatabase(phoneDriver)
+        val phoneLog = forage.core.sync.SyncLog(phoneDriver, phoneDb)
+        val phonePeers = forage.core.sync.SyncPeers(phoneDriver)
+        val client = forage.core.sync.SyncClient(phoneLog, phonePeers, { "phone" })
+        try {
+            val computer = client.discover(targets = listOf(java.net.InetAddress.getLoopbackAddress())).single()
+            val pairing = client.startPairing(computer)
+            var accepted = false
+            val waiting = kotlin.concurrent.thread { accepted = client.awaitPairing(pairing, timeoutMs = 15_000) }
+            val until = System.currentTimeMillis() + 10_000
+            while (vaultSync.request == null && System.currentTimeMillis() < until) Thread.sleep(50)
+            assertEquals(pairing.code, assertNotNull(vaultSync.request).code)
+            vaultSync.answer(true)
+            waiting.join()
+            assertTrue(accepted)
+            // Paired into the vault, not the main library.
+            assertEquals(1, vaultSync.devices.size)
+            assertEquals(0, assertNotNull(model.sync).devices.size)
+
+            forage.core.library.LibraryStore(phoneDb).saveForLater(PlatformId.youtube("vvvvvvvvvvv"))
+            client.sync(phonePeers.all().single())
+            assertEquals(listOf("vvvvvvvvvvv"), vault.library.watchLater().map { it.id })
+            assertEquals(emptyList(), model.library.watchLater().map { it.id }.filter { it == "vvvvvvvvvvv" })
+
+            // Locked: the computer answers the vault's phone as it would an unknown device.
+            lock()
+            kotlin.test.assertFailsWith<forage.core.sync.UnpairedException> { client.sync(phonePeers.all().single()) }
+        } finally {
+            model.sync?.stop()
+        }
+    }
 }

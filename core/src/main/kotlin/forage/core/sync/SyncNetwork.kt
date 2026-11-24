@@ -96,12 +96,16 @@ class UnpairedException(name: String) : Exception("$name no longer knows this de
 /**
  * The computer's side: it listens on the home network, answers phones looking for Forage, pairs
  * with those the user accepts, and syncs with the paired ones whenever they connect.
+ *
+ * It serves libraries: the main one, and the private vault while it's unlocked, each with its own
+ * log, paired devices and keys. A request goes to the library that knows its sender; one no
+ * library knows gets the same answer whether a vault exists, is locked, or never was. A pairing
+ * goes to the library whose "Pair a phone" is open, and is refused when none is.
  */
 class SyncServer(
-    private val log: SyncLog,
-    private val peers: SyncPeers,
     private val name: () -> String,
-    private val listener: Listener,
+    /** The id phones find this computer by (the main library's). */
+    private val hostId: () -> String,
     private val port: Int = SyncProtocol.PORT,
     private val discoveryPort: Int = SyncProtocol.DISCOVERY_PORT,
     private val waitMs: Long = WAIT_MS,
@@ -113,18 +117,39 @@ class SyncServer(
         fun synced(peer: Peer, applied: Int)
     }
 
+    /** Runs a library's database work where it has to run (the private vault's on its one thread). */
+    interface Runner {
+        fun <T> run(block: () -> T): T
+
+        object Direct : Runner {
+            override fun <T> run(block: () -> T): T = block()
+        }
+    }
+
+    /** One library served: its log, its paired devices, who to tell, and where its database work runs. */
+    class Library(
+        internal val log: SyncLog,
+        internal val peers: SyncPeers,
+        internal val listener: Listener,
+        internal val runner: Runner = Runner.Direct,
+    ) {
+        internal val requests = ConcurrentHashMap<String, PairingRequest>()
+        internal fun <T> run(block: () -> T): T = runner.run(block)
+    }
+
     companion object {
         /** How long a phone's wait for changes is held before it's answered with "nothing yet". */
         const val WAIT_MS = 25_000L
     }
 
     /** A phone asking to pair, with the code both show. */
-    class PairingRequest(val id: String, val name: String, val code: String, internal val key: ByteArray) {
+    class PairingRequest(val id: String, val name: String, val code: String, internal val key: ByteArray, internal val library: Library) {
         @Volatile internal var answer: Boolean? = null
         internal val at: Instant = Instant.now()
     }
 
-    private val requests = ConcurrentHashMap<String, PairingRequest>()
+    private val libraries = java.util.concurrent.CopyOnWriteArrayList<Library>()
+    @Volatile private var pairingInto: Library? = null
     private var tcp: ServerSocket? = null
     private var udp: DatagramSocket? = null
     @Volatile private var running = false
@@ -134,6 +159,28 @@ class SyncServer(
 
     /** The port it answers searches on; -1 when another program has it (phones then can't find this computer). */
     val discoveryListeningPort: Int get() = udp?.localPort ?: -1
+
+    val isRunning: Boolean get() = running
+
+    fun add(library: Library) {
+        if (library !in libraries) libraries += library
+    }
+
+    fun remove(library: Library) {
+        libraries -= library
+        if (pairingInto === library) pairingInto = null
+    }
+
+    /** "Pair a phone" is open in [library]: pairings go there. */
+    fun openPairing(library: Library) {
+        add(library)
+        pairingInto = library
+    }
+
+    fun closePairing(library: Library) {
+        if (pairingInto === library) pairingInto = null
+        library.requests.values.forEach { if (it.answer == null) it.answer = false }
+    }
 
     fun start() {
         if (running) return
@@ -169,8 +216,11 @@ class SyncServer(
 
     /** The user said the codes match: the phone is paired from now on. */
     fun accept(request: PairingRequest) {
-        peers.save(Peer(request.id, request.name, request.key))
-        log.start()
+        val library = request.library
+        library.run {
+            library.peers.save(Peer(request.id, request.name, request.key))
+            library.log.start()
+        }
         request.answer = true
     }
 
@@ -190,7 +240,7 @@ class SyncServer(
             if (String(packet.data, 0, packet.length) != SyncProtocol.ASK) continue
             val answer = buildJsonObject {
                 put("forage", 1)
-                put("id", log.device)
+                put("id", hostId())
                 put("name", name())
                 put("port", listeningPort)
             }.toString().toByteArray()
@@ -212,19 +262,20 @@ class SyncServer(
     }
 
     /** A phone's public key: ours back, and the user is asked whether the codes match. */
-    private fun pair(message: JsonObject): JsonObject {
+    private fun pair(message: JsonObject): JsonObject? {
+        val library = pairingInto ?: return null
         val id = message["id"]!!.jsonPrimitive.content
         val theirs = SyncProtocol.unb64(message["key"]!!.jsonPrimitive.content)
         val mine = SyncCrypto.newKeyPair()
         val paired = SyncCrypto.pair(mine, theirs)
         // Old requests go; one per phone at a time.
-        requests.values.removeIf { it.at.isBefore(Instant.now().minusSeconds(300)) }
-        val request = PairingRequest(id, message["name"]?.jsonPrimitive?.content ?: "A device", paired.code, paired.key)
-        requests[id] = request
-        listener.pairingRequested(request)
+        library.requests.values.removeIf { it.at.isBefore(Instant.now().minusSeconds(300)) }
+        val request = PairingRequest(id, message["name"]?.jsonPrimitive?.content ?: "A device", paired.code, paired.key, library)
+        library.requests[id] = request
+        library.listener.pairingRequested(request)
         return buildJsonObject {
             put("type", "pairing")
-            put("id", log.device)
+            put("id", library.run { library.log.device })
             put("name", name())
             put("key", SyncProtocol.b64(mine.public))
         }
@@ -232,35 +283,38 @@ class SyncServer(
 
     private fun sealed(message: JsonObject): JsonObject? {
         val from = message["from"]!!.jsonPrimitive.content
-        val peer = peers.get(from)
-        val request = requests[from]
-        val key = peer?.key ?: request?.key ?: return null
-        val inner = SyncProtocol.open(key, message)
-        val answer: JsonObject = when (inner["op"]?.jsonPrimitive?.content) {
-            "status" -> buildJsonObject {
-                put("status", when {
-                    peer != null && request?.answer != false -> "paired"
-                    request?.answer == false -> "declined"
-                    else -> "waiting"
-                })
+        for (library in libraries) {
+            val peer = library.run { library.peers.get(from) }
+            val request = library.requests[from]
+            val key = peer?.key ?: request?.key ?: continue
+            val inner = runCatching { SyncProtocol.open(key, message) }.getOrNull() ?: continue
+            val answer: JsonObject = when (inner["op"]?.jsonPrimitive?.content) {
+                "status" -> buildJsonObject {
+                    put("status", when {
+                        peer != null && request?.answer != false -> "paired"
+                        request?.answer == false -> "declined"
+                        else -> "waiting"
+                    })
+                }
+                "sync" -> if (peer == null) return null else sync(library, peer, inner)
+                "wait" -> if (peer == null) return null else buildJsonObject { put("changed", waitForChanges(library, peer, inner["since"]!!.jsonPrimitive.long)) }
+                else -> return null
             }
-            "sync" -> if (peer == null) return null else sync(peer, inner)
-            "wait" -> if (peer == null) return null else buildJsonObject { put("changed", waitForChanges(peer, inner["since"]!!.jsonPrimitive.long)) }
-            else -> return null
+            if (peer != null && request?.answer == true) library.requests.remove(from)
+            return SyncProtocol.sealed(key, library.run { library.log.device }, answer)
         }
-        if (peer != null && request?.answer == true) requests.remove(from)
-        return SyncProtocol.sealed(key, log.device, answer)
+        return null
     }
 
     /**
      * Holds a phone's request until something changes here that it doesn't have (true), or for
-     * [WAIT_MS] (false); the phone then syncs, or asks again. So changes made here reach an open
+     * a while (false); the phone then syncs, or asks again. So changes made here reach an open
      * phone within moments, though only the phone can open a connection.
      */
-    private fun waitForChanges(peer: Peer, since: Long): Boolean {
+    private fun waitForChanges(library: Library, peer: Peer, since: Long): Boolean {
         val until = System.currentTimeMillis() + waitMs
-        while (running && System.currentTimeMillis() < until) {
-            if (log.hasChangesSince(since, peer.id)) return true
+        while (running && library in libraries && System.currentTimeMillis() < until) {
+            if (library.run { library.log.hasChangesSince(since, peer.id) }) return true
             Thread.sleep(400)
         }
         return false
@@ -268,26 +322,30 @@ class SyncServer(
 
     /** Their changes in, ours out; one sync at a time. */
     @Synchronized
-    private fun sync(peer: Peer, request: JsonObject): JsonObject {
+    private fun sync(library: Library, peer: Peer, request: JsonObject): JsonObject {
         val acked = request["acked"]!!.jsonPrimitive.long
         val upTo = request["upTo"]!!.jsonPrimitive.long
         val since = request["since"]!!.jsonPrimitive.long
-        val applied = log.apply(SyncProtocol.decode(request["changes"]))
-        // Changes of theirs this device never got (it was restored, say): they send them again.
-        val gap = acked > peer.received
-        val received = if (gap) peer.received else upTo
-        val outgoing = log.changesSince(since, peer.id)
-        val counter = log.counter
-        val updated = peer.copy(name = request["name"]?.jsonPrimitive?.content ?: peer.name, received = received, syncedAt = Instant.now())
-        peers.save(updated)
-        listener.synced(updated, applied)
+        val incoming = SyncProtocol.decode(request["changes"])
+        val (applied, outgoing, counter, updated) = library.run {
+            val applied = library.log.apply(incoming)
+            // Changes of theirs this device never got (it was restored, say): they send them again.
+            val received = if (acked > peer.received) peer.received else upTo
+            val outgoing = library.log.changesSince(since, peer.id)
+            val updated = peer.copy(name = request["name"]?.jsonPrimitive?.content ?: peer.name, received = received, syncedAt = Instant.now())
+            library.peers.save(updated)
+            Quad(applied, outgoing, library.log.counter, updated)
+        }
+        library.listener.synced(updated, applied)
         return buildJsonObject {
             put("changes", SyncProtocol.encode(outgoing))
             put("upTo", counter)
-            put("received", received)
+            put("received", updated.received)
             put("name", name())
         }
     }
+
+    private data class Quad(val applied: Int, val outgoing: List<Change>, val counter: Long, val peer: Peer)
 }
 
 /** A computer running Forage, found on the home network. */
@@ -332,8 +390,11 @@ class SyncClient(
         return found.values.toList()
     }
 
-    /** A pairing begun: the code to show, until the computer's user accepts or declines. */
-    class Pairing(val with: Found, val code: String, internal val key: ByteArray)
+    /**
+     * A pairing begun: the code to show, until the computer's user accepts or declines. [peerId]
+     * is the library's id on the computer (its private vault has one of its own).
+     */
+    class Pairing(val with: Found, val code: String, internal val key: ByteArray, internal val peerId: String)
 
     /** Starts pairing with [computer]: both now show the same code. */
     fun startPairing(computer: Found): Pairing {
@@ -344,9 +405,9 @@ class SyncClient(
             put("name", name())
             put("key", SyncProtocol.b64(mine.public))
         })
-        if (reply["type"]?.jsonPrimitive?.content != "pairing") throw SyncException("${computer.name} didn't answer the pairing")
+        if (reply["type"]?.jsonPrimitive?.content != "pairing") throw SyncException("${computer.name} isn't pairing: choose Pair a phone there first")
         val paired = SyncCrypto.pair(mine, SyncProtocol.unb64(reply["key"]!!.jsonPrimitive.content))
-        return Pairing(computer, paired.code, paired.key)
+        return Pairing(computer, paired.code, paired.key, reply["id"]!!.jsonPrimitive.content)
     }
 
     /**
@@ -361,7 +422,7 @@ class SyncClient(
             if (reply["type"]?.jsonPrimitive?.content != "sealed") throw SyncException("${computer.name} stopped pairing")
             when (SyncProtocol.open(pairing.key, reply)["status"]?.jsonPrimitive?.content) {
                 "paired" -> {
-                    peers.save(Peer(computer.id, computer.name, pairing.key, computer.address.hostAddress, computer.port))
+                    peers.save(Peer(pairing.peerId, computer.name, pairing.key, computer.address.hostAddress, computer.port, host = computer.id))
                     log.start()
                     return true
                 }
@@ -400,7 +461,7 @@ class SyncClient(
         val problem = attempt.exceptionOrNull()
         if (problem is UnpairedException) throw problem
         // Moved (a new address from the router), or Forage restarted on another port.
-        val found = discover().firstOrNull { it.id == peer.id }
+        val found = discover().firstOrNull { it.id == (peer.host ?: peer.id) }
             ?: throw SyncException("${peer.name} isn't on this network right now, or Forage isn't open there", problem)
         val moved = peer.copy(address = found.address.hostAddress, port = found.port)
         peers.save(moved)

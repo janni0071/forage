@@ -78,7 +78,8 @@ CREATE TABLE sync_peer (
     received INTEGER NOT NULL DEFAULT 0,
     acked INTEGER NOT NULL DEFAULT 0,
     paired_at INTEGER NOT NULL,
-    synced_at INTEGER
+    synced_at INTEGER,
+    host TEXT               -- the computer it's on, as found on the network (a vault has an id of its own)
 );
 
 -- This device's side of sync. While changes from another device are being applied, the log

@@ -210,7 +210,14 @@ fun SettingsDialog(model: AppModel) {
                 }
 
                 model.sync?.let { sync ->
-                    Section("Sync", if (sync.isPhone) "Keep this phone and your computer in step." else "Keep this computer and your phone in step.")
+                    Section(
+                        "Sync",
+                        when {
+                            sync.vault -> "Keep this vault and the one on your " + (if (sync.isPhone) "computer" else "phone") + " in step."
+                            sync.isPhone -> "Keep this phone and your computer in step."
+                            else -> "Keep this computer and your phone in step."
+                        },
+                    )
                     SyncCard(sync)
                 }
 

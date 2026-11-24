@@ -480,8 +480,13 @@ class AppModel(
     /** Everything this model starts runs here, so locking a private vault can stop all of it. */
     private val ownScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[CoroutineJob]))
 
-    /** Sync with the other device: the main library only, for now. */
-    val sync: SyncController? = if (isPrivate) null else SyncController(storage, platform, ownScope, io) { reload() }
+    /** For a private vault's model on the computer: the main library's sync, whose listener the vault's joins. */
+    internal var parentSync: SyncController? = null
+
+    /** Sync with the other device: this library's (a private vault syncs on its own, while unlocked). */
+    val sync: SyncController? by lazy {
+        SyncController(storage, platform, ownScope, io, host = parentSync.takeIf { isPrivate && !platform.isMobile }) { reload() }
+    }
 
     /** The private vault's encrypted copy is written a few seconds after each change. */
     private val saver: CoroutineJob? = storage.encrypted?.let { encrypted ->
@@ -2418,7 +2423,7 @@ class AppModel(
                         AppModel(
                             dataDir, scope, Dispatchers.IO.limitedParallelism(1), it, models, platform,
                             privateSourceFactory = privateSourceFactory, sourceFactory = privateSourceFactory,
-                        )
+                        ).also { vault -> vault.parentSync = sync }
                     }
                 }
                 if (opened == null) {
@@ -2426,6 +2431,7 @@ class AppModel(
                 } else {
                     opened.onLock = { lockPrivate() }
                     opened.reload()
+                    opened.sync?.start()
                     privateModel = opened
                     profileDialog = null
                     profileMenuOpen = false
@@ -2446,6 +2452,8 @@ class AppModel(
     fun lockPrivate(): CoroutineJob? {
         val open = privateModel ?: return null
         privateModel = null
+        // Its sync stops first: nothing more arrives for a vault that's closing.
+        open.sync?.stop()
         return scope.launch { open.shutdown() }
     }
 

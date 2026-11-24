@@ -39,6 +39,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import forage.core.importer.TakeoutFolder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -187,7 +188,11 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         app.model?.let { (it.privateModel ?: it).cameBack() }
         syncing?.cancel()
-        syncing = app.model?.sync?.whileOpen()
+        // The main library's sync, and the private vault's while it's unlocked.
+        syncing = app.scope.launch {
+            launch { app.model?.sync?.runWhileOpen() }
+            androidx.compose.runtime.snapshotFlow { app.model?.privateModel?.sync }.collectLatest { it?.runWhileOpen() }
+        }
     }
 
     override fun onPause() {
