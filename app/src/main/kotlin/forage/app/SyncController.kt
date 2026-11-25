@@ -96,17 +96,33 @@ class SyncController(
     /** The listener, on the main library's sync (a vault's joins it). */
     private var server: SyncServer? = null
 
+    /** For tests: this library's id here, and a pairing put in place as pairing leaves it. */
+    internal val deviceIdForTests: String get() = runner.run { log.device }
+
+    internal fun pairForTests(peer: Peer) = runner.run {
+        peers.save(peer)
+        log.start()
+    }
+
+    /** For tests: as the race this guards against left it, the library no longer answered. */
+    internal fun stopAnsweringForTests() = (host ?: this).leave(library)
+
     /** Where this device listens, for tests: the port, once listening. */
     internal val listeningPort: Int? get() = (host ?: this).server?.listeningPort
 
     /** The libraries the listener serves now (the main one, a vault while unlocked). */
     private val served = mutableSetOf<SyncServer.Library>()
 
-    /** This library, as the listener serves it: a vault's database work runs on the vault's own thread. */
-    private val library by lazy {
-        val runner = object : SyncServer.Runner {
+    /** Where this library's database work runs: a vault's on the vault's own thread, the main library's anywhere. */
+    private val runner: SyncServer.Runner by lazy {
+        if (!vault) SyncServer.Runner.Direct
+        else object : SyncServer.Runner {
             override fun <T> run(block: () -> T): T = kotlinx.coroutines.runBlocking(io) { block() }
         }
+    }
+
+    /** This library, as the listener serves it. */
+    private val library by lazy {
         SyncServer.Library(log, peers, object : SyncServer.Listener {
             override fun pairingRequested(request: SyncServer.PairingRequest) {
                 this@SyncController.request = request
@@ -119,7 +135,7 @@ class SyncController(
                     if (applied > 0) refresh()
                 }
             }
-        }, if (vault) runner else SyncServer.Runner.Direct)
+        }, runner)
     }
 
     /** "Pair a device" is open: this device can be found, and looks for others. */
@@ -150,7 +166,8 @@ class SyncController(
     var found by mutableStateOf<List<Found>>(emptyList())
         private set
 
-    private val client by lazy { SyncClient(log, peers, { name }, { platform.deviceKind }, { hostId }) }
+    /** Reaching out: the database work through [runner], the waiting on the network on [net] (never a vault's one thread). */
+    private val client by lazy { SyncClient(log, peers, { name }, { platform.deviceKind }, { hostId }, runner = runner) }
 
     /** On a computer: reaching out to its devices for as long as Forage runs. */
     private var reaching: Job? = null
@@ -307,7 +324,13 @@ class SyncController(
         (host ?: this).server?.closePairing(library)
         request = null
         found = emptyList()
-        if (devices.isEmpty()) (host ?: this).leave(library)
+        // From what's stored, not from [devices]: a pairing just made may not be in it yet, and
+        // leaving then would stop answering the device just paired.
+        scope.launch {
+            val any = withContext(io) { peers.all() }
+            devices = any
+            if (any.isEmpty() && !pairingOpen) (host ?: this@SyncController).leave(library)
+        }
     }
 
     /** The user compared the codes of a device asking to pair: [accept] if they match. */
@@ -348,12 +371,13 @@ class SyncController(
             pairing = Pairing.Confirming(other, begun.code)
             val accepted = withContext(net) { runCatching { client.awaitPairing(begun) { pairing !is Pairing.Confirming } } }
             if (pairing !is Pairing.Confirming) return@launch
+            // The devices first, then "Paired": closing the dialog right away must find the new one.
+            devices = withContext(io) { peers.all() }
             pairing = when {
                 accepted.getOrNull() == true -> Pairing.Paired(other.name)
                 accepted.isFailure -> Pairing.Failed(accepted.exceptionOrNull()?.message ?: "Pairing broke off")
                 else -> Pairing.Failed("${other.name} didn't accept the pairing")
             }
-            devices = withContext(io) { peers.all() }
             if (accepted.getOrNull() == true) {
                 (host ?: this@SyncController).server?.closePairing(library)
                 if (reachesOut) syncNow()
@@ -405,6 +429,8 @@ class SyncController(
         launch {
             val waiting = HashMap<String, Job>()
             while (true) {
+                // Answering too, for as long as there are devices to answer: whatever stopped it.
+                if (devices.isNotEmpty() && library !in (host ?: this@SyncController).served) serve()
                 val ids = devices.filter(::reachesOutTo).map { it.id }.toSet()
                 waiting.keys.filter { it !in ids }.forEach { waiting.remove(it)?.cancel() }
                 for (id in ids) if (id !in waiting) waiting[id] = launch { waitOn(id) }
@@ -472,30 +498,34 @@ class SyncController(
         sentUpTo = withContext(io) { log.counter }
         var arrived = 0
         var trouble: String? = null
-        withContext(io) {
+        // The network waits on [net]; the client takes its database work to [runner] itself.
+        withContext(net) {
             for (peer in paired) {
                 try {
-                    arrived += client.sync(peers.get(peer.id) ?: continue).applied
+                    val current = withContext(io) { peers.get(peer.id) } ?: continue
+                    arrived += client.sync(current).applied
                 } catch (e: UnpairedException) {
-                    // A vault can't tell "locked there" from "forgotten there": it keeps the pairing.
+                    // A vault can't tell "locked there" from "forgotten there": it keeps the pairing. Nothing to
+                    // say if it synced lately all the same (from its side: it reaches out too).
                     if (vault) {
-                        trouble = "Unlock the private vault on ${peer.name} to sync it"
+                        val recently = withContext(io) { peers.get(peer.id) }?.syncedAt?.isAfter(java.time.Instant.now().minusSeconds(RECENT_SECONDS)) == true
+                        if (!recently) trouble = "Unlock the private vault on ${peer.name} to sync it"
                     } else {
-                        peers.remove(peer.id)
+                        withContext(io) { peers.remove(peer.id) }
                         trouble = e.message
                     }
                 } catch (e: forage.core.sync.UnreachableException) {
                     // Not a problem to show: a phone or tablet with Forage closed (that's expected), or a
                     // device that syncs anyway from its side (a firewall letting connections through one way).
-                    val recently = peers.get(peer.id)?.syncedAt?.isAfter(java.time.Instant.now().minusSeconds(RECENT_SECONDS)) == true
+                    val recently = withContext(io) { peers.get(peer.id) }?.syncedAt?.isAfter(java.time.Instant.now().minusSeconds(RECENT_SECONDS)) == true
                     if (!roams(peer) && !recently) trouble = e.message ?: "Couldn't sync"
                 } catch (e: Exception) {
                     // Anything else is worth knowing about, whichever device it's with.
                     trouble = "Syncing with ${peer.name}: ${e.message ?: e.javaClass.simpleName}"
                 }
             }
-            devices = peers.all()
-            if (devices.isEmpty()) log.stop()
+            devices = withContext(io) { peers.all() }
+            if (devices.isEmpty()) withContext(io) { log.stop() }
         }
         syncing = false
         // A note that the other device's Forage is older stays until a sync goes wrong or one is asked for.

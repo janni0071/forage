@@ -394,9 +394,16 @@ class SyncClient(
     /** What this device is ("phone", "tablet", "computer"), as the other is told. */
     private val kind: () -> String = { "phone" },
     /** The id this device is found by on the network (its main library's), so the other can find it too. */
-    private val hostId: () -> String = { log.device },
+    private val hostId: (() -> String)? = null,
     private val discoveryPort: Int = SyncProtocol.DISCOVERY_PORT,
+    /** Where the library's database work runs (a private vault's on its one thread); the network waits run wherever this is called. */
+    private val runner: SyncServer.Runner = SyncServer.Runner.Direct,
 ) {
+    private fun <T> db(block: () -> T): T = runner.run(block)
+
+    /** This library's id here. */
+    private val device: String by lazy { db { log.device } }
+
     /**
      * Devices that answered the last search under an id another device answered under too: one's
      * library was copied from the other's, so both go by one identity.
@@ -427,7 +434,7 @@ class SyncClient(
                 val json = runCatching { Json.parseToJsonElement(String(packet.data, 0, packet.length)).jsonObject }.getOrNull() ?: continue
                 if (json["forage"] == null) continue
                 val id = json["id"]!!.jsonPrimitive.content
-                if (id == log.device) continue
+                if (id == device) continue
                 val answer = Found(id, json["name"]!!.jsonPrimitive.content, packet.address, json["port"]!!.jsonPrimitive.int, json["kind"]?.jsonPrimitive?.content)
                 val earlier = found[id]
                 if (earlier != null && (earlier.address != answer.address || earlier.port != answer.port)) {
@@ -453,8 +460,8 @@ class SyncClient(
         val mine = SyncCrypto.newKeyPair()
         val reply = request(computer.address.hostAddress, computer.port, buildJsonObject {
             put("type", "pair")
-            put("id", log.device)
-            put("host", hostId())
+            put("id", device)
+            put("host", hostId?.invoke() ?: device)
             put("name", name())
             put("kind", kind())
             put("key", SyncProtocol.b64(mine.public))
@@ -462,7 +469,7 @@ class SyncClient(
         if (reply["type"]?.jsonPrimitive?.content != "pairing") throw SyncException("${computer.name} isn't pairing: open Pair a device there too")
         val paired = SyncCrypto.pair(mine, SyncProtocol.unb64(reply["key"]!!.jsonPrimitive.content))
         val theirs = reply["id"]!!.jsonPrimitive.content
-        if (theirs == log.device) {
+        if (theirs == device) {
             throw SyncException("${computer.name} goes by this device's own sync identity: one's library was copied from the other's. On one of them, choose Reset sync (in Settings, Sync), then pair again.")
         }
         return Pairing(computer, paired.code, paired.key, theirs, reply["kind"]?.jsonPrimitive?.content ?: computer.kind ?: "computer")
@@ -476,12 +483,14 @@ class SyncClient(
         val until = System.currentTimeMillis() + timeoutMs
         val computer = pairing.with
         while (System.currentTimeMillis() < until && !cancelled()) {
-            val reply = request(computer.address.hostAddress, computer.port, SyncProtocol.sealed(pairing.key, log.device, buildJsonObject { put("op", "status") }))
+            val reply = request(computer.address.hostAddress, computer.port, SyncProtocol.sealed(pairing.key, device, buildJsonObject { put("op", "status") }))
             if (reply["type"]?.jsonPrimitive?.content != "sealed") throw SyncException("${computer.name} stopped pairing")
             when (SyncProtocol.open(pairing.key, reply)["status"]?.jsonPrimitive?.content) {
                 "paired" -> {
-                    peers.save(Peer(pairing.peerId, computer.name, pairing.key, computer.address.hostAddress, computer.port, host = computer.id, kind = pairing.kind))
-                    log.start()
+                    db {
+                        peers.save(Peer(pairing.peerId, computer.name, pairing.key, computer.address.hostAddress, computer.port, host = computer.id, kind = pairing.kind))
+                        log.start()
+                    }
                     return true
                 }
                 "declined" -> return false
@@ -509,14 +518,14 @@ class SyncClient(
     private fun locate(peer: Peer): Peer? {
         val found = discover().firstOrNull { it.id == (peer.host ?: peer.id) } ?: return null
         val moved = peer.copy(address = found.address.hostAddress, port = found.port)
-        peers.save(moved)
+        db { peers.save(moved) }
         return moved
     }
 
     private fun waitAt(peer: Peer): Boolean {
         val address = peer.address ?: throw UnreachableException("Not found yet")
         val port = peer.port ?: throw UnreachableException("Not found yet")
-        val reply = request(address, port, SyncProtocol.sealed(peer.key, log.device, buildJsonObject {
+        val reply = request(address, port, SyncProtocol.sealed(peer.key, device, buildJsonObject {
             put("op", "wait")
             put("since", peer.received)
         }))
@@ -551,8 +560,8 @@ class SyncClient(
         var applied = 0
         var sent = 0
         repeat(MAX_ROUNDS) {
-            val outgoing = log.batchSince(current.acked, current.id)
-            val reply = request(address, port, SyncProtocol.sealed(current.key, log.device, buildJsonObject {
+            val outgoing = db { log.batchSince(current.acked, current.id) }
+            val reply = request(address, port, SyncProtocol.sealed(current.key, device, buildJsonObject {
                 put("op", "sync")
                 put("name", name())
                 put("kind", kind())
@@ -567,7 +576,8 @@ class SyncClient(
                 else -> throw UnpairedException(current.name)
             }
             val answer = SyncProtocol.open(current.key, reply)
-            applied += log.apply(SyncProtocol.decode(answer["changes"]))
+            val incoming = SyncProtocol.decode(answer["changes"])
+            applied += db { log.apply(incoming) }
             sent += outgoing.changes.size
             val acked = answer["received"]!!.jsonPrimitive.long
             current = current.copy(
@@ -576,7 +586,7 @@ class SyncClient(
                 acked = acked,
                 syncedAt = Instant.now(),
             )
-            peers.save(current)
+            db { peers.save(current) }
             val theyHaveMore = answer["more"]?.jsonPrimitive?.content == "true"
             // Ours went (they have them up to where this batch went), or they asked for some again.
             val oursLeft = outgoing.more || acked < outgoing.upTo
