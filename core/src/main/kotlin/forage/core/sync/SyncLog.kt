@@ -49,18 +49,50 @@ class SyncLog(private val driver: SqlDriver, private val transacter: Transacter)
             for (statement in triggers(table)) driver.execute(null, statement, 0)
         }
         if (long("SELECT counter FROM sync_state") == 0L) {
+            // Each row a number of its own, so a first sync can go in batches.
             for (table in TABLES) {
                 val stamp = table.stamp?.let { "COALESCE(t.\"$it\", 0) * 1000" } ?: "0"
                 driver.execute(
                     null,
-                    "INSERT OR IGNORE INTO sync_row (tbl, row_key, ts, origin, seq) SELECT '${table.name}', ${keyOf(table, "t.")}, $stamp, NULL, 1 " +
-                        "FROM \"${table.name}\" t" + (if (table.name == "profile_video") " WHERE ${profileName("t.")} IS NOT NULL" else "") +
+                    "INSERT OR IGNORE INTO sync_row (tbl, row_key, ts, origin, seq) SELECT '${table.name}', ${keyOf(table, "t.")}, $stamp, NULL, " +
+                        "(SELECT counter FROM sync_state) + ROW_NUMBER() OVER () FROM \"${table.name}\" t" +
+                        (if (table.name == "profile_video") " WHERE ${profileName("t.")} IS NOT NULL" else "") +
                         (if (table.name == "preference") " WHERE t.key NOT LIKE 'sync.%'" else ""),
                     0,
                 )
+                driver.execute(null, "UPDATE sync_state SET counter = MAX(1, (SELECT COALESCE(MAX(seq), 0) FROM sync_row))", 0)
             }
-            driver.execute(null, "UPDATE sync_state SET counter = 1, clock = MAX(clock, (SELECT COALESCE(MAX(ts), 0) FROM sync_row))", 0)
+            driver.execute(null, "UPDATE sync_state SET clock = MAX(clock, (SELECT COALESCE(MAX(ts), 0) FROM sync_row))", 0)
         }
+        spread()
+    }
+
+    /**
+     * Gives rows that share one number (the first snapshot and applied batches, as earlier versions
+     * noted them) numbers of their own, so they too go in batches: each number n becomes n * k plus
+     * the row's place among those sharing it, which keeps the order and never lowers a number (a
+     * device that had changes up to n is sent all of n * k and later, a few again at most). How far
+     * the paired devices have this device's changes moves along the same way.
+     */
+    private fun spread() {
+        val biggest = long("SELECT COALESCE(MAX(n), 0) FROM (SELECT COUNT(*) AS n FROM sync_row GROUP BY seq)")
+        if (biggest <= BATCH) return
+        val k = biggest
+        driver.execute(null, "DROP TABLE IF EXISTS temp.sync_spread", 0)
+        driver.execute(
+            null,
+            "CREATE TEMP TABLE sync_spread (r INTEGER PRIMARY KEY, s INTEGER NOT NULL)",
+            0,
+        )
+        driver.execute(
+            null,
+            "INSERT INTO temp.sync_spread (r, s) SELECT rowid, seq * $k + (ROW_NUMBER() OVER (PARTITION BY seq ORDER BY rowid) - 1) FROM sync_row",
+            0,
+        )
+        driver.execute(null, "UPDATE sync_row SET seq = (SELECT s FROM temp.sync_spread WHERE r = sync_row.rowid)", 0)
+        driver.execute(null, "DROP TABLE temp.sync_spread", 0)
+        driver.execute(null, "UPDATE sync_peer SET acked = acked * $k + ($k - 1) WHERE acked > 0", 0)
+        driver.execute(null, "UPDATE sync_state SET counter = counter * $k + ($k - 1)", 0)
     }
 
     /** Stops noting changes (no devices left to sync with); what's noted stays. */
@@ -75,24 +107,50 @@ class SyncLog(private val driver: SqlDriver, private val transacter: Transacter)
     ) { bindLong(0, since); bindString(1, peer) }.value
 
     /** Changes noted after [since], except those that came from [peer] (it has them), oldest first. */
-    fun changesSince(since: Long, peer: String?): List<Change> {
+    fun changesSince(since: Long, peer: String?): List<Change> = batchSince(since, peer, Int.MAX_VALUE).changes
+
+    /**
+     * A batch of changes for a sync: at most about [limit] of those noted after [since] (except
+     * those from [peer]), oldest first, all those sharing a number together; [Batch.upTo] is how
+     * far it goes, and [Batch.more] says whether there are later ones.
+     */
+    fun batchSince(since: Long, peer: String?, limit: Int = BATCH): Batch {
         val me = device
-        val rows = driver.executeQuery(
-            null, "SELECT tbl, row_key, ts, origin FROM sync_row WHERE seq > ? AND (origin IS NULL OR origin IS NOT ?) ORDER BY seq",
-            { c ->
-                val list = ArrayList<Triple<Pair<String, String>, Long, String?>>()
-                while (c.next().value) list += Triple(c.getString(0)!! to c.getString(1)!!, c.getLong(2)!!, c.getString(3))
-                QueryResult.Value(list)
-            },
-            2,
-        ) { bindLong(0, since); bindString(1, peer) }.value
-        val tables = TABLES.associateBy { it.name }
-        return rows.mapNotNull { (where, ts, origin) ->
-            val table = tables[where.first] ?: return@mapNotNull null
-            val key = Json.parseToJsonElement(where.second).jsonArray
-            Change(table.name, key, ts, origin ?: me, read(table, key))
+        val counter = counter
+        fun rows(sql: String, vararg bind: Any?) = driver.executeQuery(null, sql, { c ->
+            val list = ArrayList<Row>()
+            while (c.next().value) list += Row(c.getString(0)!!, c.getString(1)!!, c.getLong(2)!!, c.getString(3), c.getLong(4)!!)
+            QueryResult.Value(list)
+        }, bind.size) {
+            bind.forEachIndexed { i, v -> if (v is Long) bindLong(i, v) else bindString(i, v as String?) }
+        }.value
+        val first = rows(
+            "SELECT tbl, row_key, ts, origin, seq FROM sync_row WHERE seq > ? AND seq <= ? AND (origin IS NULL OR origin IS NOT ?) ORDER BY seq LIMIT ?",
+            since, counter, peer, limit.toLong() + 1,
+        )
+        val more = first.size > limit
+        var picked = if (more) first.take(limit) else first
+        val upTo = if (more) picked.last().seq else counter
+        // Never half of what shares a number: the rest of the last one too.
+        if (more) {
+            val have = picked.filter { it.seq == upTo }.map { it.table to it.key }.toSet()
+            picked = picked + rows(
+                "SELECT tbl, row_key, ts, origin, seq FROM sync_row WHERE seq = ? AND (origin IS NULL OR origin IS NOT ?)", upTo, peer,
+            ).filter { (it.table to it.key) !in have }
         }
+        val tables = TABLES.associateBy { it.name }
+        val changes = picked.mapNotNull { row ->
+            val table = tables[row.table] ?: return@mapNotNull null
+            val key = Json.parseToJsonElement(row.key).jsonArray
+            Change(table.name, key, row.ts, row.origin ?: me, read(table, key))
+        }
+        return Batch(changes, upTo, more)
     }
+
+    /** A batch of changes: what's in it, how far it goes, and whether there are more. */
+    data class Batch(val changes: List<Change>, val upTo: Long, val more: Boolean)
+
+    private data class Row(val table: String, val key: String, val ts: Long, val origin: String?, val seq: Long)
 
     /**
      * Applies [changes] from another device, each only if it's later than what this device has
@@ -104,8 +162,9 @@ class SyncLog(private val driver: SqlDriver, private val transacter: Transacter)
         val tables = TABLES.associateBy { it.name }
         var applied = 0
         transacter.transaction {
-            driver.execute(null, "UPDATE sync_state SET applying = 1, counter = counter + 1", 0)
-            val seq = long("SELECT counter FROM sync_state")
+            driver.execute(null, "UPDATE sync_state SET applying = 1", 0)
+            // Each applied row a number of its own (so passing them on can go in batches too).
+            var seq = long("SELECT counter FROM sync_state")
             for (change in changes) {
                 val table = tables[change.table] ?: continue
                 val keyText = change.key.toString()
@@ -114,13 +173,16 @@ class SyncLog(private val driver: SqlDriver, private val transacter: Transacter)
                 }, 2) { bindString(0, table.name); bindString(1, keyText) }.value
                 if (local != null && (local.first > change.ts || (local.first == change.ts && local.second >= change.origin))) continue
                 if (change.values == null) delete(table, change.key) else write(table, change.key, change.values)
+                seq++
                 driver.execute(null, "INSERT OR REPLACE INTO sync_row (tbl, row_key, ts, origin, seq) VALUES (?, ?, ?, ?, ?)", 5) {
                     bindString(0, table.name); bindString(1, keyText); bindLong(2, change.ts)
                     bindString(3, change.origin.takeIf { it != me }); bindLong(4, seq)
                 }
                 applied++
             }
-            driver.execute(null, "UPDATE sync_state SET applying = 0, clock = MAX(clock, ?)", 1) { bindLong(0, changes.maxOf { it.ts }) }
+            driver.execute(null, "UPDATE sync_state SET applying = 0, counter = ?, clock = MAX(clock, ?)", 2) {
+                bindLong(0, seq); bindLong(1, changes.maxOf { it.ts })
+            }
         }
         return applied
     }
@@ -221,6 +283,9 @@ class SyncLog(private val driver: SqlDriver, private val transacter: Transacter)
     }
 
     companion object {
+        /** How many changes go in one exchange, at most (about): a big library's first sync goes in many. */
+        const val BATCH = 1000
+
         /**
          * What syncs: the library, likes and profiles, and the vault's preferences. Not what each
          * device fetches or works out for itself (video details, pictures, feeds, picks, topics)

@@ -96,6 +96,9 @@ class SyncController(
     /** The listener, on the main library's sync (a vault's joins it). */
     private var server: SyncServer? = null
 
+    /** Where this device listens, for tests: the port, once listening. */
+    internal val listeningPort: Int? get() = (host ?: this).server?.listeningPort
+
     /** The libraries the listener serves now (the main one, a vault while unlocked). */
     private val served = mutableSetOf<SyncServer.Library>()
 
@@ -481,11 +484,14 @@ class SyncController(
                         peers.remove(peer.id)
                         trouble = e.message
                     }
-                } catch (e: Exception) {
+                } catch (e: forage.core.sync.UnreachableException) {
                     // Not a problem to show: a phone or tablet with Forage closed (that's expected), or a
                     // device that syncs anyway from its side (a firewall letting connections through one way).
                     val recently = peers.get(peer.id)?.syncedAt?.isAfter(java.time.Instant.now().minusSeconds(RECENT_SECONDS)) == true
                     if (!roams(peer) && !recently) trouble = e.message ?: "Couldn't sync"
+                } catch (e: Exception) {
+                    // Anything else is worth knowing about, whichever device it's with.
+                    trouble = "Syncing with ${peer.name}: ${e.message ?: e.javaClass.simpleName}"
                 }
             }
             devices = peers.all()

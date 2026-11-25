@@ -203,4 +203,54 @@ class SyncNetworkTest {
             phoneServer.stop()
         }
     }
+
+    /** A library the size of a Takeout history: thousands of videos watched, some twice. */
+    private fun bigLibrary(device: Device, videos: Int) {
+        device.db.transaction {
+            for (i in 0 until videos) {
+                val id = "youtube:v%09d".format(i)
+                device.driver.execute(null, "INSERT INTO library_video (id, title, is_short, added_at) VALUES (?, ?, 0, ?)", 3) {
+                    bindString(0, id); bindString(1, "Video $i"); bindLong(2, 1_700_000_000L + i)
+                }
+                device.driver.execute(null, "INSERT INTO watch_event (video_id, watched_at) VALUES (?, ?)", 2) { bindString(0, id); bindLong(1, 1_700_000_000L + i) }
+            }
+        }
+    }
+
+    @Test
+    fun `a big library's first sync goes in batches, and the other side's changes come back in it`() {
+        bigLibrary(phone, 2500)
+        assertTrue(pair())
+        laptop.library.saveForLater(PlatformId.youtube("lllllllllll"))
+        val result = client.sync(phone.peers.all().single())
+        assertEquals(5000, result.sent)
+        // Every watch in the history arrived.
+        assertEquals(2500L, laptop.library.counts().second)
+        assertEquals(listOf("lllllllllll"), phone.library.watchLater().map { it.id })
+        // All of it acknowledged: the next sync sends nothing.
+        assertEquals(0, client.sync(phone.peers.all().single()).sent)
+    }
+
+    @Test
+    fun `changes noted under one number, as earlier versions did, are spread out without losing anything`() {
+        bigLibrary(phone, 1500)
+        phone.log.start()
+        // As an earlier version left the log: every row of the first snapshot under number 1.
+        phone.driver.execute(null, "UPDATE sync_row SET seq = 1", 0)
+        phone.driver.execute(null, "UPDATE sync_state SET counter = 1", 0)
+        phone.peers.save(Peer("laptop-before", "old laptop", ByteArray(32), acked = 1))
+        phone.library.saveForLater(PlatformId.youtube("aaaaaaaaaaa"))
+        phone.log.start()
+        val numbers = phone.driver.executeQuery(null, "SELECT COUNT(*), COUNT(DISTINCT seq) FROM sync_row", { c ->
+            c.next(); app.cash.sqldelight.db.QueryResult.Value(c.getLong(0)!! to c.getLong(1)!!)
+        }, 0).value
+        assertEquals(numbers.first, numbers.second)
+        // The old laptop had the snapshot: only the change after it is new to it.
+        val acked = phone.peers.get("laptop-before")!!.acked
+        assertEquals(listOf("watch_later"), phone.log.changesSince(acked, "laptop-before").map { it.table })
+        // And the snapshot now goes in batches.
+        val first = phone.log.batchSince(0, null)
+        assertTrue(first.more)
+        assertEquals(SyncLog.BATCH, first.changes.size)
+    }
 }

@@ -39,6 +39,9 @@ object SyncProtocol {
     const val DISCOVERY_PORT = 47731
 
     internal const val ASK = "FORAGE?1"
+
+    /** How long one exchange may take: a batch is quick, but a slow phone is given plenty. */
+    internal const val TIMEOUT_MS = 300_000
     private const val MAX_MESSAGE = 512 * 1024 * 1024
 
     internal fun write(socket: Socket, message: JsonObject) {
@@ -88,7 +91,10 @@ object SyncProtocol {
 }
 
 /** Something sync can't get past, said for people. */
-class SyncException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class SyncException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/** The other device didn't answer (off, away, Forage closed there): nothing wrong with sync itself. */
+class UnreachableException(message: String, cause: Throwable? = null) : SyncException(message, cause)
 
 /** The computer forgot this phone (it was removed there): pairing again is the way back. */
 class UnpairedException(name: String) : Exception("$name no longer knows this device: pair them again")
@@ -255,15 +261,21 @@ class SyncServer(
     }
 
     private fun handle(socket: Socket) {
-        socket.soTimeout = 120_000
+        socket.soTimeout = SyncProtocol.TIMEOUT_MS
         val message = runCatching { SyncProtocol.read(socket) }.getOrNull() ?: return
-        val reply = runCatching {
+        val reply = try {
             when (message["type"]?.jsonPrimitive?.content) {
                 "pair" -> pair(message)
                 "sealed" -> sealed(message)
                 else -> null
+            } ?: buildJsonObject { put("type", "unknown") }
+        } catch (e: Exception) {
+            // Not "unknown": the other side would take that for being unpaired. Says what went wrong.
+            buildJsonObject {
+                put("type", "error")
+                put("message", e.message ?: e.javaClass.simpleName)
             }
-        }.getOrNull() ?: buildJsonObject { put("type", "unknown") }
+        }
         runCatching { SyncProtocol.write(socket, reply) }
     }
 
@@ -340,7 +352,7 @@ class SyncServer(
         val upTo = request["upTo"]!!.jsonPrimitive.long
         val asked = request["since"]!!.jsonPrimitive.long
         val incoming = SyncProtocol.decode(request["changes"])
-        val (applied, outgoing, counter, updated) = library.run {
+        val (applied, outgoing, updated) = library.run {
             // Asked for changes after more than this device ever made: the other side's count is of
             // another device going by this one's identity (a library copied from here), or of this
             // library before it was restored. Everything goes, then; the latest still wins.
@@ -348,24 +360,24 @@ class SyncServer(
             val applied = library.log.apply(incoming)
             // Changes of theirs this device never got (it was restored, say): they send them again.
             val received = if (acked > peer.received) peer.received else upTo
-            val outgoing = library.log.changesSince(since, peer.id)
+            // A batch at a time; the other side asks again for more.
+            val outgoing = library.log.batchSince(since, peer.id)
             val updated = peer.copy(
                 name = request["name"]?.jsonPrimitive?.content ?: peer.name, kind = request["kind"]?.jsonPrimitive?.content ?: peer.kind,
                 received = received, syncedAt = Instant.now(),
             )
             library.peers.save(updated)
-            Quad(applied, outgoing, library.log.counter, updated)
+            Triple(applied, outgoing, updated)
         }
         library.listener.synced(updated, applied)
         return buildJsonObject {
-            put("changes", SyncProtocol.encode(outgoing))
-            put("upTo", counter)
+            put("changes", SyncProtocol.encode(outgoing.changes))
+            put("upTo", outgoing.upTo)
+            put("more", outgoing.more)
             put("received", updated.received)
             put("name", name())
         }
     }
-
-    private data class Quad(val applied: Int, val outgoing: List<Change>, val counter: Long, val peer: Peer)
 }
 
 /** A device running Forage, found on the home network: its id, name, what it is, and where it listens. */
@@ -489,7 +501,7 @@ class SyncClient(
         val problem = attempt.exceptionOrNull()
         if (problem is UnpairedException) throw problem
         // Not where it was: look for it, as a sync would.
-        val moved = locate(peer) ?: throw SyncException("${peer.name} isn't on this network right now, or Forage isn't open there", problem)
+        val moved = locate(peer) ?: throw UnreachableException("${peer.name} isn't on this network right now, or Forage isn't open there", problem)
         return waitAt(moved)
     }
 
@@ -502,8 +514,8 @@ class SyncClient(
     }
 
     private fun waitAt(peer: Peer): Boolean {
-        val address = peer.address ?: throw SyncException("Not found yet")
-        val port = peer.port ?: throw SyncException("Not found yet")
+        val address = peer.address ?: throw UnreachableException("Not found yet")
+        val port = peer.port ?: throw UnreachableException("Not found yet")
         val reply = request(address, port, SyncProtocol.sealed(peer.key, log.device, buildJsonObject {
             put("op", "wait")
             put("since", peer.received)
@@ -525,49 +537,69 @@ class SyncClient(
         val problem = attempt.exceptionOrNull()
         if (problem is UnpairedException) throw problem
         // Moved (a new address from the router), or Forage restarted on another port.
-        val moved = locate(peer) ?: throw SyncException("${peer.name} isn't on this network right now, or Forage isn't open there", problem)
+        val moved = locate(peer) ?: throw UnreachableException("${peer.name} isn't on this network right now, or Forage isn't open there", problem)
         return exchange(moved, moved.address, moved.port)
     }
 
+    /**
+     * Exchanges changes with [peer] a batch at a time, each way, until both have everything: each
+     * finished exchange counts, so a big library's first sync gets there however many it takes.
+     */
     private fun exchange(peer: Peer, address: String?, port: Int?): Result {
-        if (address == null || port == null) throw SyncException("Not found yet")
-        val outgoing = log.changesSince(peer.acked, peer.id)
-        val upTo = log.counter
-        val reply = request(address, port, SyncProtocol.sealed(peer.key, log.device, buildJsonObject {
-            put("op", "sync")
-            put("name", name())
-            put("kind", kind())
-            put("since", peer.received)
-            put("acked", peer.acked)
-            put("upTo", upTo)
-            put("changes", SyncProtocol.encode(outgoing))
-        }))
-        if (reply["type"]?.jsonPrimitive?.content != "sealed") throw UnpairedException(peer.name)
-        val answer = SyncProtocol.open(peer.key, reply)
-        val applied = log.apply(SyncProtocol.decode(answer["changes"]))
-        peers.save(
-            peer.copy(
-                name = answer["name"]?.jsonPrimitive?.content ?: peer.name,
+        if (address == null || port == null) throw UnreachableException("Not found yet")
+        var current = peer
+        var applied = 0
+        var sent = 0
+        repeat(MAX_ROUNDS) {
+            val outgoing = log.batchSince(current.acked, current.id)
+            val reply = request(address, port, SyncProtocol.sealed(current.key, log.device, buildJsonObject {
+                put("op", "sync")
+                put("name", name())
+                put("kind", kind())
+                put("since", current.received)
+                put("acked", current.acked)
+                put("upTo", outgoing.upTo)
+                put("changes", SyncProtocol.encode(outgoing.changes))
+            }))
+            when (reply["type"]?.jsonPrimitive?.content) {
+                "sealed" -> {}
+                "error" -> throw SyncException("${current.name} couldn't take the changes: ${reply["message"]?.jsonPrimitive?.content}")
+                else -> throw UnpairedException(current.name)
+            }
+            val answer = SyncProtocol.open(current.key, reply)
+            applied += log.apply(SyncProtocol.decode(answer["changes"]))
+            sent += outgoing.changes.size
+            val acked = answer["received"]!!.jsonPrimitive.long
+            current = current.copy(
+                name = answer["name"]?.jsonPrimitive?.content ?: current.name,
                 received = answer["upTo"]!!.jsonPrimitive.long,
-                acked = answer["received"]!!.jsonPrimitive.long,
+                acked = acked,
                 syncedAt = Instant.now(),
-            ),
-        )
-        return Result(applied, outgoing.size)
+            )
+            peers.save(current)
+            val theyHaveMore = answer["more"]?.jsonPrimitive?.content == "true"
+            // Ours went (they have them up to where this batch went), or they asked for some again.
+            val oursLeft = outgoing.more || acked < outgoing.upTo
+            if (!theyHaveMore && !oursLeft) return Result(applied, sent)
+        }
+        return Result(applied, sent)
     }
 
     private fun request(address: String, port: Int, message: JsonObject): JsonObject = try {
         Socket().use { socket ->
             socket.connect(InetSocketAddress(address, port), 3000)
-            socket.soTimeout = 120_000
+            socket.soTimeout = SyncProtocol.TIMEOUT_MS
             SyncProtocol.write(socket, message)
             SyncProtocol.read(socket)
         }
     } catch (e: java.io.IOException) {
-        throw SyncException("Couldn't reach the other device", e)
+        throw UnreachableException("Couldn't reach the other device", e)
     }
 
     companion object {
+        /** Exchanges in one sync at most: 1,000 changes each, enough for any library's first sync. */
+        private const val MAX_ROUNDS = 500
+
         /** Where to ask: every network's broadcast address, and the general one. */
         fun broadcastAddresses(): List<InetAddress> {
             val own = runCatching {
