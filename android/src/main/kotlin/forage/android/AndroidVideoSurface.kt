@@ -301,6 +301,12 @@ class AndroidVideoSurface(private val activity: Activity) : VideoSurface {
             settings.setSupportMultipleWindows(false)
             settings.javaScriptCanOpenWindowsAutomatically = false
             webViewClient = object : WebViewClient() {
+                // Ads and trackers: an empty answer, so a pre-roll ad has nothing to show.
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? =
+                    if (forage.app.AdBlocking.check(request.url.toString())) {
+                        android.webkit.WebResourceResponse("text/plain", "utf-8", 204, "No Content", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                    } else null
+
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) =
                     request.isForMainFrame && !(request.url.host == embed.host && request.url.path == embed.path)
 

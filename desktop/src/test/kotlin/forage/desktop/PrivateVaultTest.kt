@@ -201,4 +201,31 @@ class PrivateVaultTest {
             model.sync?.stop()
         }
     }
+
+    @Test
+    fun `ad blocking is on until turned off, and stays as set inside the vault`() {
+        unlock("quiet harbour lantern", create = true)
+        var vault = assertNotNull(model.privateModel)
+        assertTrue(vault.blockAds)
+        assertTrue(AdBlocking.enabled)
+        vault.changeBlockAds(false)
+        assertEquals(false, AdBlocking.enabled)
+        lock()
+        unlock("quiet harbour lantern")
+        vault = assertNotNull(model.privateModel)
+        assertEquals(false, vault.blockAds)
+        assertEquals(false, AdBlocking.enabled)
+        vault.changeBlockAds(true)
+
+        // What the player asked, noted: kept out or let through.
+        AdBlocking.clear()
+        assertTrue(AdBlocking.check("https://ads.trafficjunky.net/ads?zone=1"))
+        assertEquals(false, AdBlocking.check("https://ev-h.phncdn.com/hls/master.m3u8"))
+        assertEquals(false, AdBlocking.check("https://ev-h.phncdn.com/hls/seg1.ts"))
+        val servers = AdBlocking.servers()
+        assertEquals(listOf("ads.trafficjunky.net", "ev-h.phncdn.com"), servers.map { it.host })
+        assertEquals(2, servers[1].asked)
+        assertEquals(1, AdBlocking.blockedCount)
+        AdBlocking.clear()
+    }
 }

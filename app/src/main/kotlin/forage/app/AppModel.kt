@@ -1323,7 +1323,11 @@ class AppModel(
         loadPicks()
         loadLater()
         positions = library.playbackPositions()
-        if (isPrivate) describeCatalogue()
+        if (isPrivate) {
+            describeCatalogue()
+            blockAds = library.preference(BLOCK_ADS) != "off"
+            AdBlocking.enabled = blockAds
+        }
     }
 
     private fun loadSources() {
@@ -2092,6 +2096,17 @@ class AppModel(
         }
     }
 
+    /** Ad blocking in the embedded player: the private vault's setting, kept inside the vault. */
+    var blockAds by mutableStateOf(true)
+        private set
+
+    fun changeBlockAds(on: Boolean) {
+        // Written at once, as the vault's look is: locking right after mustn't lose it.
+        library.setPreference(BLOCK_ADS, if (on) "on" else "off")
+        blockAds = on
+        AdBlocking.enabled = on
+    }
+
     /** Plays [track] instead of the audio playing now (the original rather than a dub, say), from where it is. */
     fun chooseAudio(track: forage.core.source.AudioTrack) {
         val page = videoPage ?: return
@@ -2472,6 +2487,7 @@ class AppModel(
         /** How many videos a row on Home shows. */
         private const val HOME_ROW = 12
         private const val VAULT_LOOK = "vault.look"
+        private const val BLOCK_ADS = "player.blockAds"
         private const val GUIDE_HIDDEN = "home.guideHidden"
         /** How many related videos a page shows where Forage finds them itself. */
         private const val RELATED_COUNT = 20

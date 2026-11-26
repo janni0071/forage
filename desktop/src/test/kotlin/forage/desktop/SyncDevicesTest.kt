@@ -117,6 +117,8 @@ class SyncDevicesTest {
             phone.peers.save(phone.peers.get(tablet.log.device)!!.copy(port = tablet.model.sync!!.listeningPort))
             tablet.peers.save(tablet.peers.get(phone.log.device)!!.copy(address = "127.0.0.1", port = phone.model.sync!!.listeningPort))
             waitFor("first sync", 30) { tablet.model.library.watchLater().size >= 10 }
+            // The phone's queue was filled straight into its database: what it shows, read again.
+            runBlocking { phone.model.reload(); tablet.model.reload() }
 
             // As the app does it: through the model's own actions. Each step waits until it's done where it
             // was made, then until the other device has the same, in its database and in what it shows.

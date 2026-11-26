@@ -55,6 +55,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.window.DialogProperties
@@ -242,6 +246,63 @@ private fun PlaybackPage(model: AppModel) {
                 Hint("mpv needs a current yt-dlp to play YouTube videos. Install it with 'pipx install yt-dlp', or use mpv from Flathub, which includes it.")
             }
         }
+        // The vault's videos play in the site's embedded player here: its ads can be kept out.
+        if (model.isPrivate && Player.IN_APP in model.platform.players) {
+            Section("Ads", null)
+            SwitchRow(
+                title = "Block ads in the player",
+                text = "The embedded player isn't let to load from ad and tracking servers, nor to ask for video ads, so pre-roll " +
+                    "ads have nothing to show and the video starts. The video itself comes from the site's own servers.",
+                checked = model.blockAds,
+                onChange = model::changeBlockAds,
+            )
+            AdServers()
+        }
+    }
+}
+
+/**
+ * The servers the embedded player asked since Forage started, those kept out first: to see what
+ * an ad that got through came from. In memory only.
+ */
+@Composable
+private fun AdServers() {
+    val c = MaterialTheme.colorScheme
+    // Read again every couple of seconds while showing, as the player goes on asking.
+    var servers by remember { mutableStateOf(forage.app.AdBlocking.servers()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(2_000)
+            servers = forage.app.AdBlocking.servers()
+        }
+    }
+    if (servers.isEmpty()) {
+        Text(
+            "Once a video has played, the servers its player contacted show here.",
+            style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp),
+        )
+        return
+    }
+    Column(Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(14.dp)) {
+        Text(
+            "Servers the player contacted since Forage started (${servers.sumOf { it.blocked }} requests kept out). If an ad still plays, " +
+                "a screenshot of this list shows where it came from.",
+            style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp),
+        )
+        for (s in servers.take(30)) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    s.host, style = MaterialTheme.typography.bodySmall, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    color = if (s.blocked > 0) c.error else c.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (s.blocked > 0) "kept out ${s.blocked}×" else "${s.asked}×",
+                    style = MaterialTheme.typography.labelSmall, color = if (s.blocked > 0) c.error else c.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
+        TextButton(onClick = { forage.app.AdBlocking.clear(); servers = emptyList() }) { Text("Clear the list") }
     }
 }
 
