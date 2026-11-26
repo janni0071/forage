@@ -137,6 +137,14 @@ private fun Header(model: AppModel) {
     ) {
         ToggleChip(if (model.isPrivate) "Search online" else "Search YouTube", search) { search = it; model.settings.searchYouTube = it }
         ToggleChip("Shorts", shorts) { shorts = it; model.settings.showShorts = it }
+        // In the vault with YouTube too: which platform's videos to suggest.
+        if (model.isPrivate && model.searchPlatforms.size > 1) {
+            Spacer(Modifier.width(6.dp))
+            ToggleChip("Both", model.discoverPlatform == null) { model.changeDiscoverPlatform(null) }
+            for ((id, name) in model.searchPlatforms) {
+                ToggleChip(name, model.discoverPlatform == id) { model.changeDiscoverPlatform(if (it) id else null) }
+            }
+        }
         if (!LocalCompact.current) {
             Spacer(Modifier.width(6.dp))
             AccentButton(if (model.picks.isEmpty()) "Find recommendations" else "New batch", Icons.Filled.AutoAwesome, enabled = model.job == null, onClick = model::discover)

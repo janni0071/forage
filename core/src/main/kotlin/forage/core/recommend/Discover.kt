@@ -63,6 +63,8 @@ class Discover(
     private val tagPlatforms: Set<String> = emptySet(),
     /** Local catalogues by platform, matched by tags for candidates. */
     private val catalogues: Map<String, VideoCatalogue> = emptyMap(),
+    /** Only videos of these platforms are suggested (one chosen in the private vault); null for all. */
+    private val platforms: Set<String>? = null,
 ) {
     /** The profile as topics, with the user's pins and mutes applied. Needs metadata for the profile's videos. */
     fun topics(profile: ProfileRef): List<Cluster> = taste(profile).clusters
@@ -130,7 +132,7 @@ class Discover(
         // Never suggest what is watched, saved, or already decided on in this profile.
         val exclude = library.knownVideoIds() + entries.map { it.video }
         val generator = CandidateGenerator(cache, source, Random(seed), searchCache, catalogues = catalogues)
-        val stubs = generator.generate(clusters, exclude)
+        val stubs = generator.generate(clusters, exclude).filter { platforms == null || it.stub.id.platform in platforms }
         lap("candidates")
 
         val languages = detector?.let { d -> LanguageFilter(d, known.map { v -> "${v.title}\n${v.description.take(300)}" }) }

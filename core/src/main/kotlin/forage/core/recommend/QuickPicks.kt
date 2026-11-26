@@ -28,6 +28,8 @@ class QuickPicks(
     private val source: ExtractorSource? = null,
     private val showShorts: Boolean = false,
     private val now: () -> Instant = Instant::now,
+    /** Only videos of these platforms are picked; null for all. */
+    private val platforms: Set<String>? = null,
 ) {
     private class Scored(val stub: VideoStub, var score: Double, var reason: String, var reasonScore: Double)
 
@@ -40,6 +42,7 @@ class QuickPicks(
 
         fun add(stub: VideoStub, points: Double, reason: String) {
             if (stub.id in exclude || (stub.isShort && !showShorts)) return
+            if (platforms != null && stub.id.platform !in platforms) return
             val s = found.getOrPut(stub.id) { Scored(stub, 0.0, reason, 0.0) }
             s.score += points
             // The strongest of its reasons is the one shown.
@@ -78,7 +81,7 @@ class QuickPicks(
         val source = source
         if (source != null && found.size < limit * 2) {
             val followed = library.following().map { it.channel }.toSet()
-            val top = affinity.entries.filter { it.key !in followed }.sortedByDescending { it.value }.take(channelFeeds)
+            val top = affinity.entries.filter { it.key !in followed && (platforms == null || it.key.platform in platforms) }.sortedByDescending { it.value }.take(channelFeeds)
             for ((channel, _) in top) {
                 val feed = runCatching { source.channelFeed(channel, channelNames[channel]) }.getOrNull() ?: continue
                 val name = feed.name ?: channelNames[channel] ?: "a channel you watch"

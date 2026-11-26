@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import forage.core.PlatformId
+import forage.core.Platforms
 import forage.core.db.ForageDatabase
 import forage.core.embedding.Embedder
 import forage.core.embedding.EmbeddingStore
@@ -805,11 +806,11 @@ class AppModel(
     }
 
     /** Whether Back has somewhere to go inside the app: a video page, search results or a library list. */
-    val canGoBack: Boolean get() = (welcome != null && welcome != WelcomeStep.HELLO) || playerFullscreen || videoPage != null || searchShown || (screen == Screen.LIBRARY && libraryView != LibraryView.HUB)
+    val canGoBack: Boolean get() = (welcome != null && !welcome!!.first) || playerFullscreen || videoPage != null || searchShown || (screen == Screen.LIBRARY && libraryView != LibraryView.HUB)
 
     fun back() {
         when {
-            welcome != null && welcome != WelcomeStep.HELLO -> welcomeBack()
+            welcome != null && !welcome!!.first -> welcomeBack()
             playerFullscreen -> playerFullscreen = false
             videoPage != null -> closeVideo()
             searchShown -> searchShown = false
@@ -1306,7 +1307,7 @@ class AppModel(
     fun showWelcome() {
         settingsOpen = false
         welcomeAtFirstLaunch = true
-        welcome = WelcomeStep.HELLO
+        welcome = if (isPrivate) WelcomeStep.VAULT_HELLO else WelcomeStep.HELLO
     }
 
     fun welcomeTo(step: WelcomeStep) {
@@ -1330,7 +1331,8 @@ class AppModel(
     fun closeWelcome() {
         welcome = null
         if (welcomeAtFirstLaunch) {
-            settings.welcomeDone = true
+            // The vault's welcome comes once, as it's created; nothing to remember outside it.
+            if (!isPrivate) settings.welcomeDone = true
             welcomeAtFirstLaunch = false
         }
     }
@@ -1341,6 +1343,9 @@ class AppModel(
             WelcomeStep.BRING -> WelcomeStep.HELLO
             WelcomeStep.TAKEOUT, WelcomeStep.PAIR -> if (welcomeAtFirstLaunch) WelcomeStep.BRING else null
             WelcomeStep.PLAYER -> WelcomeStep.BRING
+            WelcomeStep.VAULT_LOOK -> WelcomeStep.VAULT_HELLO
+            WelcomeStep.VAULT_PLATFORMS -> WelcomeStep.VAULT_LOOK
+            WelcomeStep.VAULT_EXTRAS -> WelcomeStep.VAULT_PLATFORMS
             else -> welcome
         }
     }
@@ -1458,6 +1463,7 @@ class AppModel(
         loadLater()
         positions = library.playbackPositions()
         if (isPrivate) {
+            loadVaultYouTube()
             describeCatalogue()
             blockAds = library.preference(BLOCK_ADS) != "off"
             AdBlocking.enabled = blockAds
@@ -1939,14 +1945,84 @@ class AppModel(
 
     // Search (SPEC, Manual add): find videos to add without leaving Forage for their links.
 
-    /** The platforms this vault can search, as (platform, name). */
-    val searchPlatforms: List<Pair<String, String>> by lazy {
+    /** The vault's own platform (the sensitive one), by name, for what's said about it. */
+    val vaultPlatformName: String get() = allSearchPlatforms.firstOrNull { it.first != Platforms.YOUTUBE }?.second ?: "the site"
+
+    private val allSearchPlatforms: List<Pair<String, String>> by lazy {
         ((source as? Sources)?.members ?: listOf(source))
             .filter { Capability.SEARCH in it.capabilities }.map { it.platform to it.displayName }
     }
 
-    /** The platform searched; the first one until the user picks another. */
-    var searchPlatform by mutableStateOf<String?>(null)
+    /**
+     * The platforms this vault searches and recommends from, as (platform, name): in the private
+     * vault the sensitive platform first, and YouTube only if it's used there ([vaultYouTube]).
+     */
+    val searchPlatforms: List<Pair<String, String>>
+        get() = if (!isPrivate) allSearchPlatforms
+        else allSearchPlatforms.filter { vaultYouTube || it.first != Platforms.YOUTUBE }.sortedBy { it.first == Platforms.YOUTUBE }
+
+    /**
+     * In the private vault, whether YouTube is used too, for videos to keep out of the main
+     * library; off unless chosen (on for a vault that had YouTube videos before it was a choice).
+     * Always true in the main library.
+     */
+    var vaultYouTube by mutableStateOf(true)
+        private set
+
+    fun changeVaultYouTube(on: Boolean) {
+        if (!isPrivate) return
+        library.setPreference(VAULT_YOUTUBE, if (on) "on" else "off")
+        vaultYouTube = on
+        if (!on) changeDiscoverPlatform(null)
+    }
+
+    /** At the vault's first load: whether it uses YouTube, decided once from what's in it. */
+    private fun loadVaultYouTube() {
+        if (!isPrivate) return
+        vaultYouTube = when (library.preference(VAULT_YOUTUBE)) {
+            "on" -> true
+            "off" -> false
+            else -> {
+                val has = library.knownVideoIds().any { it.platform == Platforms.YOUTUBE } ||
+                    profiles.entries(profile).any { it.video.platform == Platforms.YOUTUBE } ||
+                    library.following().any { it.channel.platform == Platforms.YOUTUBE }
+                library.setPreference(VAULT_YOUTUBE, if (has) "on" else "off")
+                has
+            }
+        }
+    }
+
+    private var chosenSearchPlatform by mutableStateOf(library.preference(SEARCH_PLATFORM)?.takeIf { it.isNotBlank() })
+
+    /** The platform searched: the last one chosen (remembered per vault), else the first. */
+    var searchPlatform: String?
+        get() = chosenSearchPlatform?.takeIf { p -> searchPlatforms.any { it.first == p } }
+        set(value) {
+            chosenSearchPlatform = value
+            library.setPreference(SEARCH_PLATFORM, value.orEmpty())
+        }
+
+    /** Discover's choice of platform where there are several (the vault with YouTube); null for all. */
+    var discoverPlatform by mutableStateOf(library.preference(DISCOVER_PLATFORM)?.takeIf { it.isNotBlank() })
+        private set
+
+    fun changeDiscoverPlatform(platform: String?) {
+        discoverPlatform = platform
+        library.setPreference(DISCOVER_PLATFORM, platform.orEmpty())
+    }
+
+    /** The platforms Discover and quick picks suggest from; null for every one there is. */
+    private fun suggestedPlatforms(): Set<String>? {
+        if (!isPrivate) return null
+        val usable = searchPlatforms.map { it.first }
+        return discoverPlatform?.takeIf { it in usable }?.let { setOf(it) } ?: usable.toSet()
+    }
+
+    /** The source Discover searches: only the platforms suggested from. */
+    private fun suggestingSource(): ExtractorSource {
+        val platforms = suggestedPlatforms() ?: return source
+        return platforms.singleOrNull()?.let { source.forPlatform(it) } ?: source
+    }
     var searchResults by mutableStateOf<List<VideoStub>>(emptyList())
         private set
     var searching by mutableStateOf(false)
@@ -2023,9 +2099,10 @@ class AppModel(
 
     private fun discoverer(embedder: Embedder, withSearch: Boolean = false) = Discover(
         cache, library, profiles, EmbeddingStore(db, embedder), detector(),
-        source.takeIf { withSearch }, RankingConfig(showShorts = settings.showShorts), searchCache, topicStore,
+        suggestingSource().takeIf { withSearch }, RankingConfig(showShorts = settings.showShorts), searchCache, topicStore,
         tagPlatforms = tagPlatforms,
         catalogues = openCatalogue()?.let { mapOf(it.platform to it) }.orEmpty(),
+        platforms = suggestedPlatforms(),
     )
 
     /** Groups the profile into topics without running a whole Discover. */
@@ -2104,7 +2181,7 @@ class AppModel(
         private set
 
     private fun runQuickPicks() = runJob("Finding quick picks") {
-        val found = QuickPicks(cache, library, profiles, source, settings.showShorts).run(profile)
+        val found = QuickPicks(cache, library, profiles, suggestingSource(), settings.showShorts, platforms = suggestedPlatforms()).run(profile)
         loadPicks()
         discoverNote = if (found.isEmpty()) null else "${found.size} quick picks"
         topicsCurrent = false
@@ -2688,6 +2765,10 @@ class AppModel(
                 } else {
                     opened.onLock = { lockPrivate() }
                     opened.reload()
+                    // A vault just made: its own welcome (a PIN that opened an existing one finds it filled).
+                    if (create && opened.historySize == 0L && opened.profileSize == 0 && opened.following.isEmpty()) {
+                        opened.showWelcome()
+                    }
                     opened.sync?.start()
                     privateModel = opened
                     profileDialog = null
@@ -2722,6 +2803,9 @@ class AppModel(
         /** How many videos a row on Home shows. */
         private const val HOME_ROW = 12
         private const val VAULT_LOOK = "vault.look"
+        private const val VAULT_YOUTUBE = "vault.youtube"
+        private const val SEARCH_PLATFORM = "search.platform"
+        private const val DISCOVER_PLATFORM = "discover.platform"
         private const val BLOCK_ADS = "player.blockAds"
         private const val GUIDE_HIDDEN = "home.guideHidden"
         /** How many related videos a page shows where Forage finds them itself. */
@@ -2762,5 +2846,12 @@ enum class SettingsPage(val title: String) {
     DATA("Backup & data"),
 }
 
-/** The welcome's steps: hello, how to bring a library along, then the way chosen; on a computer, the player. */
-enum class WelcomeStep { HELLO, BRING, TAKEOUT, PAIR, PLAYER }
+/**
+ * The welcome's steps: hello, how to bring a library along, then the way chosen; on a computer,
+ * the player. The private vault has its own: what it is, its look, its platforms, what makes it
+ * work well.
+ */
+enum class WelcomeStep(val first: Boolean = false) {
+    HELLO(first = true), BRING, TAKEOUT, PAIR, PLAYER,
+    VAULT_HELLO(first = true), VAULT_LOOK, VAULT_PLATFORMS, VAULT_EXTRAS,
+}

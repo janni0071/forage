@@ -3,6 +3,7 @@
 package forage.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.widthIn
@@ -393,6 +394,17 @@ private fun CataloguePage(model: AppModel) {
     val c = MaterialTheme.colorScheme
     val compact = LocalCompact.current
     Column {
+        if (model.isPrivate) {
+            SwitchRow(
+                title = "Also use YouTube in this vault",
+                text = "For YouTube videos you'd rather keep out of your main library: search then lets you choose, and Discover " +
+                    "can show either or both. Off, the vault searches and recommends from ${model.vaultPlatformName} only; YouTube " +
+                    "videos already in it stay.",
+                checked = model.vaultYouTube,
+                onChange = model::changeVaultYouTube,
+            )
+            Spacer(Modifier.height(16.dp))
+        }
         if (model.offersCatalogue) {
             Intro(
                 "The site's public list of all its videos (its \"embed dump\"), imported once: Discover then matches " +
@@ -456,6 +468,8 @@ private fun DataPage(model: AppModel) {
         ExportCard(model)
 
         if (model.isPrivate) {
+            Section("Welcome", "What the vault is, its look, its platforms and what makes it work well, as when it was created.")
+            OutlinedButton(onClick = model::showWelcome, shape = RoundedCornerShape(12.dp)) { Text("Show the welcome again") }
             Section(
                 "This private vault",
                 "Stored encrypted; nothing from it is written to disk in the clear, not even thumbnails or settings. " +

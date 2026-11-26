@@ -26,6 +26,16 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Switch
+import androidx.compose.ui.graphics.Color
+import forage.app.VaultLook
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.FileDownload
@@ -75,7 +85,7 @@ fun WelcomeScreen(model: AppModel, step: WelcomeStep, onImport: () -> Unit, chro
                 chrome?.titleBar?.invoke()
                 // Back and Skip (or Close), above the step.
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (step != WelcomeStep.HELLO && (model.welcomeAtFirstLaunch || step == WelcomeStep.PLAYER)) {
+                    if (!step.first && (model.welcomeAtFirstLaunch || step == WelcomeStep.PLAYER)) {
                         IconButton(onClick = model::welcomeBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back") }
                     }
                     Spacer(Modifier.weight(1f))
@@ -94,6 +104,10 @@ fun WelcomeScreen(model: AppModel, step: WelcomeStep, onImport: () -> Unit, chro
                             WelcomeStep.TAKEOUT -> Takeout(model, onImport)
                             WelcomeStep.PAIR -> Pair(model)
                             WelcomeStep.PLAYER -> ChoosePlayer(model)
+                            WelcomeStep.VAULT_HELLO -> VaultHello(model)
+                            WelcomeStep.VAULT_LOOK -> VaultLookStep(model)
+                            WelcomeStep.VAULT_PLATFORMS -> VaultPlatforms(model)
+                            WelcomeStep.VAULT_EXTRAS -> VaultExtras(model)
                         }
                     }
                 }
@@ -313,6 +327,167 @@ private fun Numbered(n: Int, text: String, detail: String? = null, extra: @Compo
             Text(text, style = MaterialTheme.typography.bodyLarge)
             detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp)) }
             Column(Modifier.padding(top = 6.dp)) { extra() }
+        }
+    }
+}
+
+// The private vault's welcome, as it's created (and from its Settings).
+
+@Composable
+private fun ColumnScope.VaultHello(model: AppModel) {
+    Box(Modifier.size(64.dp).clip(CircleShape).background(Accent.pastelPink), contentAlignment = Alignment.Center) {
+        Icon(Icons.Outlined.Lock, contentDescription = null, tint = Accent.onAccent, modifier = Modifier.size(30.dp))
+    }
+    Title("Your private vault", top = 20.dp)
+    Lead("A space of its own in Forage, for what you'd rather keep to yourself.")
+    Feature(Icons.Outlined.VisibilityOff, "Hidden", "Until you unlock it, nothing about it shows anywhere in Forage, not even that it exists.")
+    Feature(
+        Icons.Outlined.Shield, "Encrypted and separate",
+        "Its likes, history and recommendations are stored encrypted, and never mix with your main library, either way.",
+    )
+    Feature(
+        Icons.Outlined.Key, "Only your PIN opens it",
+        "A forgotten PIN can't be reset, not even by you. Once there's something in the vault, Settings, Backup & data, makes " +
+            "an encrypted backup of it, in case this device is lost.",
+    )
+    Spacer(Modifier.height(28.dp))
+    AccentButton("Continue", null) { model.welcomeTo(WelcomeStep.VAULT_LOOK) }
+}
+
+@Composable
+private fun ColumnScope.VaultLookStep(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    Title("Choose its look")
+    Lead("The vault always wears a dark look of its own, so you see at a glance where you are. Settings can change it later.")
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        for (look in VaultLook.entries.sortedBy { it != VaultLook.NEON }) {
+            val selected = model.vaultLook == look
+            val swatch = vaultSwatch(look)
+            Column(
+                Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(swatch[0])
+                    .border(2.dp, if (selected) swatch[2] else c.outlineVariant, RoundedCornerShape(18.dp))
+                    .clickable { model.changeVaultLook(look) }.pointerHoverIcon(PointerIcon.Hand).padding(14.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (color in swatch.drop(1)) Box(Modifier.size(22.dp).clip(CircleShape).background(color))
+                }
+                Box(Modifier.padding(top = 14.dp).fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(swatch[1]))
+                Box(Modifier.padding(top = 6.dp).fillMaxWidth(0.6f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(swatch[1]))
+                Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(look.label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = Color.White, modifier = Modifier.weight(1f))
+                    if (selected) Icon(Icons.Filled.CheckCircle, contentDescription = "Chosen", tint = swatch[2], modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+    Spacer(Modifier.height(28.dp))
+    AccentButton("Continue", null) { model.welcomeTo(WelcomeStep.VAULT_PLATFORMS) }
+}
+
+@Composable
+private fun ColumnScope.VaultPlatforms(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val site = model.vaultPlatformName
+    Title("What it's for")
+    Lead("The vault searches and recommends from $site. Your main library stays YouTube's.")
+    Row(
+        Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surfaceContainer).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(site, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Search, Discover, the performers you follow and the catalogue.", style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
+        }
+        Icon(Icons.Filled.CheckCircle, contentDescription = "Always on", tint = c.primary)
+    }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surfaceContainer)
+            .clickable { model.changeVaultYouTube(!model.vaultYouTube) }.padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text("Also use YouTube", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "For YouTube videos you'd rather keep out of your main library. Search then lets you choose, and Discover can show either or both.",
+                style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant,
+            )
+        }
+        Switch(checked = model.vaultYouTube, onCheckedChange = model::changeVaultYouTube)
+    }
+    Hint("Settings, Catalogue, can change this later.")
+    Spacer(Modifier.height(28.dp))
+    AccentButton("Continue", null) { model.welcomeTo(WelcomeStep.VAULT_EXTRAS) }
+}
+
+@Composable
+private fun ColumnScope.VaultExtras(model: AppModel) {
+    Title("Make it work well")
+    Lead("A few things worth doing now; each can wait, too.")
+    if (model.offersCatalogue) {
+        val running = model.job?.label?.startsWith("Downloading the catalogue") == true
+        Extra(
+            Icons.Outlined.Storage, "The catalogue (optional)",
+            "The site's public list of all its videos: a 1.6 GB download, best on Wi-Fi. With it, Discover matches your taste " +
+                "against millions of videos instead of a few searches. Nothing about you is in it.",
+            done = model.catalogueInfo != null,
+        ) {
+            if (running) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(
+                        model.job?.let { it.detail.ifEmpty { it.label } }.orEmpty() + " · carries on when you're done here",
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 10.dp),
+                    )
+                }
+            } else if (model.catalogueInfo == null) {
+                OutlinedButton(onClick = model::downloadCatalogue, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) { Text("Download") }
+            }
+        }
+    }
+    if (Player.IN_APP in model.platform.players) {
+        Extra(
+            Icons.Outlined.Block, "Ads stay out",
+            "Videos play right here, and the player isn't let to load ads, so they start at once. Settings, Playback, can turn that off.",
+            done = true,
+        )
+    } else {
+        // Checking for players starts small processes: once as the step opens, and after installing.
+        LaunchedEffect(Unit) { model.checkPlayers() }
+        MpvSetupCard(model)
+    }
+    model.sync?.let { sync ->
+        val paired = sync.devices.firstOrNull()
+        Extra(
+            Icons.Outlined.Devices, "Sync with your other devices (optional)",
+            if (paired != null) "Paired with ${paired.name}: the vault stays the same on both while it's unlocked on both."
+            else "The vault stays the same on each device while it's unlocked on both. It's paired on its own, apart from the main library.",
+            done = paired != null,
+        ) {
+            if (paired == null) OutlinedButton(onClick = sync::openPairing, shape = RoundedCornerShape(12.dp)) { Text("Pair") }
+        }
+    }
+    Spacer(Modifier.height(28.dp))
+    AccentButton("Done", null, onClick = model::closeWelcome)
+}
+
+/** Something worth setting up: what it does, a check once it's done, and its button beneath. */
+@Composable
+private fun Extra(icon: ImageVector, title: String, text: String, done: Boolean, action: @Composable () -> Unit = {}) {
+    val c = MaterialTheme.colorScheme
+    Row(
+        Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surfaceContainer).padding(16.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(c.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = c.onSurface, modifier = Modifier.size(22.dp))
+        }
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                if (done) Icon(Icons.Filled.CheckCircle, contentDescription = "Done", tint = c.primary, modifier = Modifier.padding(start = 8.dp).size(22.dp))
+            }
+            Text(text, style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+            Box(Modifier.padding(top = 8.dp)) { action() }
         }
     }
 }

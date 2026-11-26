@@ -233,3 +233,13 @@ fun ForageTheme(dark: Boolean = false, vault: VaultLook? = null, content: @Compo
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }
+
+/** A vault look's colours for a preview: its background, surface, accent and second accent. */
+fun vaultSwatch(look: VaultLook): List<Color> {
+    val (scheme, accent) = when (look) {
+        VaultLook.VELVET -> Velvet to VelvetAccent
+        VaultLook.NEON -> Neon to NeonAccent
+        VaultLook.NOIR -> Noir to NoirAccent
+    }
+    return listOf(scheme.background, scheme.surfaceContainerHigh, accent.fill, accent.second)
+}
