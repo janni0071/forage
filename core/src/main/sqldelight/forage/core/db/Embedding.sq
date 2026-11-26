@@ -17,3 +17,6 @@ SELECT video_id, vector FROM embedding WHERE model = ?;
 
 upsertEmbedding:
 INSERT OR REPLACE INTO embedding VALUES (?, ?, ?, ?);
+
+deleteOtherModels:
+DELETE FROM embedding WHERE model != ?;

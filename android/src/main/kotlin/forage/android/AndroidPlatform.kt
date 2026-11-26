@@ -15,6 +15,7 @@ import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import forage.app.EncryptedStore
 import forage.app.PickedFile
 import forage.app.Platform
+import forage.app.RecommendationModel
 import forage.app.Player
 import forage.app.Settings
 import forage.app.Storage
@@ -26,9 +27,6 @@ import forage.core.vault.PrivateVaults
 import forage.core.vault.VaultDamagedException
 import forage.source.pornhub.SqlFile
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
-import forage.embedding.onnx.ModelFiles
-import forage.embedding.onnx.ModelSpec
-import forage.embedding.onnx.OnnxEmbedder
 import java.io.File
 
 /** Android's side of the app: its own image decoder and language detector, the 8-bit model, and links opened by the system. */
@@ -38,14 +36,16 @@ class AndroidPlatform(private val context: Context) : Platform {
     override fun decodeImage(bytes: ByteArray): ImageBitmap =
         (BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("Not an image Android can decode")).asImageBitmap()
 
-    private val spec = ModelSpec.MULTILINGUAL_MINILM_8BIT
-    private fun modelDir(dataDir: File) = File(dataDir, "models/minilm-8bit")
+    override fun embedderDownloaded(dataDir: File) = RecommendationModel.downloaded(dataDir)
 
-    override fun embedderDownloaded(dataDir: File) = File(modelDir(dataDir), spec.modelFile.substringAfterLast('/')).isFile
+    override fun loadEmbedder(dataDir: File, update: (String) -> Unit): Embedder = RecommendationModel.load(dataDir, update)
 
-    override fun loadEmbedder(dataDir: File, update: (String) -> Unit): Embedder {
-        val files = ModelFiles.ensure(spec, modelDir(dataDir).toPath()) { update("Downloading $it (about 120 MB, once)") }
-        return OnnxEmbedder(spec, files)
+    /** Wi-Fi or another network that isn't metered: the model's 118 MB waits for one, unless allowed. */
+    override fun onUnmeteredNetwork(): Boolean {
+        val connectivity = context.getSystemService(android.net.ConnectivityManager::class.java) ?: return false
+        val capabilities = connectivity.getNetworkCapabilities(connectivity.activeNetwork ?: return false) ?: return false
+        return capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) &&
+            capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     override fun loadLanguageDetector(): LanguageDetector = SystemLanguageDetector(context)

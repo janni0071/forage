@@ -6,6 +6,7 @@ import forage.app.AppModel
 import forage.app.Models
 import forage.app.PickedFile
 import forage.app.Platform
+import forage.app.RecommendationModel
 import forage.app.Player
 import forage.app.Settings
 import forage.app.Storage
@@ -15,9 +16,6 @@ import forage.core.language.LanguageDetector
 import forage.core.source.ExtractorSource
 import forage.core.source.Sources
 import forage.core.vault.PrivateVaults
-import forage.embedding.onnx.ModelFiles
-import forage.embedding.onnx.ModelSpec
-import forage.embedding.onnx.OnnxEmbedder
 import forage.language.lingua.LinguaDetector
 import forage.source.pornhub.JdbcSqlFile
 import forage.source.pornhub.PornhubSource
@@ -36,13 +34,13 @@ object DesktopPlatform : Platform {
 
     override fun decodeImage(bytes: ByteArray): ImageBitmap = Image.makeFromEncoded(bytes).toComposeImageBitmap()
 
-    override fun embedderDownloaded(dataDir: File) = File(dataDir, "models/minilm/model.onnx").isFile
+    override fun embedderDownloaded(dataDir: File) = RecommendationModel.downloaded(dataDir)
 
-    override fun loadEmbedder(dataDir: File, update: (String) -> Unit): Embedder {
-        val spec = ModelSpec.MULTILINGUAL_MINILM
-        val files = ModelFiles.ensure(spec, File(dataDir, "models/minilm").toPath()) { update("Downloading $it (about 470 MB)") }
-        return OnnxEmbedder(spec, files)
-    }
+    override fun loadEmbedder(dataDir: File, update: (String) -> Unit): Embedder =
+        RecommendationModel.load(dataDir, update).also {
+            // Earlier versions used the full model (470 MB); with the smaller one ready it isn't needed.
+            File(dataDir, "models/minilm").deleteRecursively()
+        }
 
     override fun loadLanguageDetector(): LanguageDetector = LinguaDetector()
 

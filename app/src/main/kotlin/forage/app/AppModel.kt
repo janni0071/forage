@@ -12,6 +12,7 @@ import forage.core.importer.TakeoutFolder
 import forage.core.language.LanguageDetector
 import forage.core.library.PlaybackPosition
 import forage.core.backup.Backups
+import forage.core.recommend.QuickPicks
 import forage.core.backup.Export
 import forage.core.backup.WrongPinException
 import forage.core.library.LibraryStore
@@ -482,7 +483,13 @@ class AppModel(
     }
     private val searchCache = SearchCache(db)
     private val topicStore = TopicStore(db)
-    private fun embedder(update: (String) -> Unit = {}): Embedder = models.embedder(update)
+    private var otherModelsForgotten = false
+    private fun embedder(update: (String) -> Unit = {}): Embedder = models.embedder(update).also {
+        if (!otherModelsForgotten) {
+            otherModelsForgotten = true
+            EmbeddingStore(db, it).forgetOtherModels()
+        }
+    }
 
     private fun detector(): LanguageDetector? = models.detector()
 
@@ -508,11 +515,15 @@ class AppModel(
     }
 
     /**
-     * Loads the models in the background so the first Discover doesn't wait for them. Only when
-     * the model is already downloaded: a first-time download stays tied to an explicit Discover.
+     * Loads the models in the background so the first Discover doesn't wait for them; the first
+     * time, downloads the recommendation model (on a phone, once on Wi-Fi), so that by the time
+     * someone has imported and liked a few videos it's there.
      */
     fun warmUp() {
-        if (!models.downloaded) return
+        if (!models.downloaded) {
+            prepareModels()
+            return
+        }
         launchQuiet {
             inBackground("Loading the recommendation models") {
                 embedder()
@@ -1939,15 +1950,111 @@ class AppModel(
 
     // Discover
 
+    /**
+     * Finds recommendations: Discover's, from what each video is about, once the model is here and
+     * there are likes with details to compare with; until then quick picks, at once (from the history,
+     * those followed and what's related to the likes), while the model is got ready in the background,
+     * after which Discover's take their place by themselves.
+     */
     fun discover() {
-        // Check before loading models: that takes seconds, and a download on first use.
-        val liked = profiles.entries(profile, VideoState.LIKED).map { it.video }
-        if (liked.none { cache.video(it) != null }) {
-            message = if (liked.isEmpty()) "Nothing liked yet. Like a few videos in the library or from a search first."
-            else "None of the ${liked.size} videos you like have details yet. Use \"Fetch details\" in the library."
+        if (models.downloaded && hasRankableLikes()) {
+            runDiscover()
             return
         }
-        runDiscover()
+        runQuickPicks()
+        if (!models.downloaded) prepareModels()
+    }
+
+    /** Likes Discover can compare with: liked, with details. */
+    private fun hasRankableLikes() = profiles.entries(profile, VideoState.LIKED).any { cache.video(it.video) != null }
+
+    /** The batch shown is quick picks (no model yet, or nothing to compare with yet). */
+    var picksQuick by mutableStateOf(false)
+        private set
+
+    /** The recommendation model being got ready: what's happening, while it is. */
+    var modelStatus by mutableStateOf<String?>(null)
+        private set
+
+    /** Why the model couldn't be got ready (offline, say); Find recommendations tries again. */
+    var modelProblem by mutableStateOf<String?>(null)
+        private set
+
+    private fun runQuickPicks() = runJob("Finding quick picks") {
+        val found = QuickPicks(cache, library, profiles, source, settings.showShorts).run(profile)
+        loadPicks()
+        discoverNote = if (found.isEmpty()) null else "${found.size} quick picks"
+        topicsCurrent = false
+        if (found.isEmpty()) "Nothing to pick from yet: import your history, follow a few channels or like a few videos"
+        else "Found ${found.size} quick picks"
+    }
+
+    /** Waiting for Wi-Fi to download the model (a phone on mobile data, or offline). */
+    var modelWaitsForWifi by mutableStateOf(false)
+        private set
+
+    /** Said yes to downloading the model over mobile data, for as long as the app is open. */
+    private var modelOverMobileData = false
+    private var modelAttempts = 0
+
+    /**
+     * Downloads (once) and loads the model in the background; then Discover's picks replace quick
+     * ones. On a phone without Wi-Fi it waits for Wi-Fi, unless [downloadModelOverMobileData]; a
+     * download that breaks off is tried again a few times, carrying on where it stopped.
+     */
+    fun prepareModels() {
+        if (modelStatus != null || modelWaitsForWifi) return
+        if (!modelOverMobileData && !platform.onUnmeteredNetwork()) {
+            waitForWifi()
+            return
+        }
+        modelStatus = "Getting the recommendation model ready"
+        modelProblem = null
+        launchQuiet {
+            try {
+                inBackground("Getting the recommendation model ready") {
+                    // Downloading takes minutes: on the shared threads, not a private vault's one.
+                    withContext(Dispatchers.IO) { models.embedder { modelStatus = it } }
+                    embedder()
+                }
+                modelAttempts = 0
+            } catch (e: CancellationException) {
+                modelStatus = null
+                throw e
+            } catch (e: Exception) {
+                val retry = ++modelAttempts < MODEL_ATTEMPTS
+                modelProblem = "Couldn't get the recommendation model ready (${e.message ?: e.javaClass.simpleName}). " +
+                    if (retry) "Trying again in a minute; quick picks meanwhile." else "Quick picks meanwhile; Find recommendations tries again."
+                modelStatus = null
+                if (retry) {
+                    delay(60_000)
+                    if (!models.downloaded) prepareModels()
+                } else {
+                    modelAttempts = 0
+                }
+                return@launchQuiet
+            }
+            modelStatus = null
+            if (picksQuick && hasRankableLikes() && job == null) runDiscover()
+        }
+    }
+
+    private fun waitForWifi() {
+        modelWaitsForWifi = true
+        launchQuiet {
+            while (modelWaitsForWifi && !platform.onUnmeteredNetwork()) delay(15_000)
+            if (modelWaitsForWifi) {
+                modelWaitsForWifi = false
+                prepareModels()
+            }
+        }
+    }
+
+    /** Downloads the model now, over mobile data if that's what there is. */
+    fun downloadModelOverMobileData() {
+        modelOverMobileData = true
+        modelWaitsForWifi = false
+        prepareModels()
     }
 
     private fun runDiscover() = runJob("Finding recommendations") { update ->
@@ -2322,7 +2429,9 @@ class AppModel(
     private fun loadPicks() {
         val states = profiles.entries(profile).associate { it.video to it.state }
         val saved = library.watchLater().toSet()
-        picks = profiles.picks(profile).map { p ->
+        val stored = profiles.picks(profile)
+        picksQuick = stored.isNotEmpty() && stored.all { it.foundVia == QuickPicks.FOUND_VIA }
+        picks = stored.map { p ->
             PickView(p, buildSet {
                 if (states[p.video] == VideoState.LIKED) add(Feedback.LIKE)
                 if (states[p.video] == VideoState.NOT_INTERESTED) add(Feedback.NOT_INTERESTED)
@@ -2482,6 +2591,8 @@ class AppModel(
     }
 
     companion object {
+        /** Tries at getting the model ready (a minute apart) before waiting for Find recommendations. */
+        private const val MODEL_ATTEMPTS = 5
         /** Likes beyond this many videos without details wait for "Fetch details". */
         private const val BACKGROUND_FETCH_LIMIT = 30
         /** How many videos a row on Home shows. */

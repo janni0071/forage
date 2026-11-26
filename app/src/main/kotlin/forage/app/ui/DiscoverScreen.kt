@@ -47,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -56,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -75,7 +77,8 @@ fun DiscoverScreen(model: AppModel) {
     val header: @Composable () -> Unit = {
         Column {
             Header(model)
-            if (model.topics.isNotEmpty()) TopicStrip(model)
+            if (model.picksQuick) QuickPicksNote(model)
+            else if (model.topics.isNotEmpty()) TopicStrip(model)
         }
     }
     Box(Modifier.fillMaxSize()) {
@@ -84,11 +87,12 @@ fun DiscoverScreen(model: AppModel) {
             if (!compact || model.picks.isEmpty()) header()
             if (model.picks.isEmpty()) {
                 Text(
-                    "No recommendations yet. Like a few videos in the library or from a search, " +
-                        "then press \"Find recommendations\". Nothing is ever recommended unless you ask.",
+                    "No recommendations yet. Press \"Find recommendations\": they come from your history, the channels you " +
+                        "follow and the videos you like. Nothing is ever recommended unless you ask.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 24.dp),
                 )
+                ModelReadiness(model)
             } else {
                 Box(Modifier.weight(1f).padding(top = if (compact) 0.dp else 16.dp)) {
                     val gridState = rememberLazyGridState()
@@ -136,6 +140,53 @@ private fun Header(model: AppModel) {
         if (!LocalCompact.current) {
             Spacer(Modifier.width(6.dp))
             AccentButton(if (model.picks.isEmpty()) "Find recommendations" else "New batch", Icons.Filled.AutoAwesome, enabled = model.job == null, onClick = model::discover)
+        }
+    }
+}
+
+/**
+ * Says what quick picks are: found without the recommendation model, from the history, those
+ * followed and what's related to the likes; Discover's own, from what each video is about, follow.
+ */
+@Composable
+private fun QuickPicksNote(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    Column(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.surfaceContainer).padding(14.dp)) {
+        Text("Quick picks", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        val likes = model.profileSize
+        Text(
+            "From the channels you follow and watch, and videos related to what you liked. " +
+                (if (likes < 3) "Like a few videos you enjoy, and the next batch picks by what they're about, matching your taste far better."
+                else "As soon as the recommendation model is ready, Forage picks by what each video is about, matching your taste far better."),
+            style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp),
+        )
+        ModelReadiness(model)
+    }
+}
+
+/**
+ * How the recommendation model is coming along, while it isn't ready: downloading (how much of
+ * it is there), waiting for Wi-Fi (with a way to go ahead anyway), or why it couldn't.
+ */
+@Composable
+private fun ModelReadiness(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    model.modelProblem?.let {
+        Text(it, style = MaterialTheme.typography.bodySmall, color = c.error, modifier = Modifier.padding(top = 8.dp))
+    }
+    model.modelStatus?.let { status ->
+        Row(Modifier.padding(top = 8.dp)) {
+            CircularProgressIndicator(Modifier.padding(top = 2.dp).size(14.dp), strokeWidth = 2.dp)
+            Text(status, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
+        }
+    }
+    if (model.modelWaitsForWifi) {
+        Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "The recommendation model (118 MB, once) downloads as soon as you're on Wi-Fi.",
+                style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = model::downloadModelOverMobileData) { Text("Download now") }
         }
     }
 }

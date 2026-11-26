@@ -41,6 +41,9 @@ class EmbeddingStore(db: ForageDatabase, private val embedder: Embedder) {
         queries.selectEmbeddingsForModel(embedder.modelId).executeAsList()
             .associate { PlatformId.parse(it.video_id) to decode(it.vector) }
 
+    /** Drops the vectors of other models (one used before), which nothing reads any more. */
+    fun forgetOtherModels() = queries.deleteOtherModels(embedder.modelId)
+
     private fun hash(text: String): String =
         MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
             .joinToString("") { "%02x".format(it) }.take(32)

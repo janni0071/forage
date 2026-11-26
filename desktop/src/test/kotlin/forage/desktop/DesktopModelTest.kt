@@ -355,15 +355,94 @@ class DesktopModelTest {
     }
 
     @Test
-    fun `discover on an empty profile explains what to do`() {
-        model.discover()
-        assertTrue("Nothing liked yet" in model.message!!, model.message)
-        model.selectSource(LibrarySource.History)
-        model.selectVisible()
-        model.markSelected(VideoState.LIKED)
-        model.discover()
-        assertTrue("have details yet" in model.message!!, model.message)
-        assertEquals(null, model.job)
+    fun `without the model, discover gives quick picks at once, and says why the model isn't there`() {
+        val noModel = object : Platform by DesktopPlatform {
+            override fun embedderDownloaded(dataDir: java.io.File) = false
+            override fun loadEmbedder(dataDir: java.io.File, update: (String) -> Unit): forage.core.embedding.Embedder =
+                throw java.io.IOException("offline")
+        }
+        val home = Files.createTempDirectory("quick").toFile()
+        val m = AppModel(home, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined, DesktopStorage.plain(home), Models(home, noModel), noModel) { offline }
+        try {
+            runBlocking { m.reload() }
+            // Nothing at all yet: it says where picks come from.
+            m.discover()
+            assertTrue("Nothing to pick from yet" in m.message!!, m.message)
+            // A history with details: picks related to what was watched, before any like or model.
+            m.library.importTakeout(TakeoutData(ImportResult(listOf(WatchEvent(id("a"), "Hand-cut dovetails", null, "Workshop Wren", Instant.parse("2026-11-01T10:00:00Z"))), emptyMap()), emptyMap(), emptyList()))
+            m.cache.put(VideoDetails(
+                forage.core.source.VideoMetadata(id("a"), "Hand-cut dovetails", "", emptyList(), 300, null, null, null, null, null, false),
+                listOf(VideoStub(id("r1"), "Mortise and tenon", null, "Workshop Wren", 600, false)),
+            ))
+            m.discover()
+            assertTrue(m.picksQuick)
+            assertEquals(listOf("r1"), m.picks.map { it.pick.video.id })
+            // Getting the model ready runs on its own threads.
+            waitFor { m.modelProblem != null }
+            assertTrue("offline" in m.modelProblem!!, m.modelProblem)
+            assertEquals(null, m.modelStatus)
+        } finally {
+            m.close()
+            home.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `at first launch the model downloads by itself, on a phone only on Wi-Fi unless told otherwise`() {
+        var wifi = false
+        val loads = java.util.concurrent.atomic.AtomicInteger()
+        val phone = object : Platform by DesktopPlatform {
+            override val isMobile = true
+            override fun embedderDownloaded(dataDir: java.io.File) = false
+            override fun onUnmeteredNetwork() = wifi
+            override fun loadEmbedder(dataDir: java.io.File, update: (String) -> Unit): forage.core.embedding.Embedder {
+                loads.incrementAndGet()
+                throw java.io.IOException("offline")
+            }
+        }
+        val home = Files.createTempDirectory("firstrun").toFile()
+        val m = AppModel(home, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined, DesktopStorage.plain(home), Models(home, phone), phone) { offline }
+        try {
+            runBlocking { m.reload() }
+            m.warmUp()
+            assertTrue(m.modelWaitsForWifi)
+            assertEquals(0, loads.get())
+            // Discover meanwhile gives quick picks, and doesn't start the download either.
+            m.discover()
+            assertEquals(0, loads.get())
+            // "Download now" goes ahead over mobile data.
+            m.downloadModelOverMobileData()
+            assertTrue(!m.modelWaitsForWifi)
+            waitFor { m.modelProblem != null }
+            assertEquals(1, loads.get())
+            assertTrue("Trying again in a minute" in m.modelProblem!!, m.modelProblem)
+        } finally {
+            m.close()
+            home.deleteRecursively()
+        }
+
+        // On a computer (always taken as on Wi-Fi), it starts at once.
+        loads.set(0)
+        wifi = true
+        val home2 = Files.createTempDirectory("firstrun").toFile()
+        val m2 = AppModel(home2, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined, DesktopStorage.plain(home2), Models(home2, phone), phone) { offline }
+        try {
+            runBlocking { m2.reload() }
+            m2.warmUp()
+            assertTrue(!m2.modelWaitsForWifi)
+            waitFor { loads.get() == 1 }
+        } finally {
+            m2.close()
+            home2.deleteRecursively()
+        }
+    }
+
+    private fun waitFor(condition: () -> Boolean) {
+        val until = System.currentTimeMillis() + 10_000
+        while (!condition()) {
+            check(System.currentTimeMillis() < until) { "Waited 10 s in vain" }
+            Thread.sleep(20)
+        }
     }
 
     private fun cached(v: String, title: String, channel: String? = null, related: List<VideoStub> = emptyList()) = model.cache.put(

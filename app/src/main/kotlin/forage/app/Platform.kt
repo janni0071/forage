@@ -24,6 +24,12 @@ interface Platform {
     /** Loads the embedding model, downloading it first if needed; [update] describes the progress. */
     fun loadEmbedder(dataDir: File, update: (String) -> Unit): Embedder
 
+    /**
+     * Whether a big download can go ahead without costing mobile data: on Wi-Fi or a wired network.
+     * Computers don't tell, and are taken as always on one.
+     */
+    fun onUnmeteredNetwork(): Boolean = true
+
     /** The language detector, or null to leave the language filter out. */
     fun loadLanguageDetector(): LanguageDetector?
 

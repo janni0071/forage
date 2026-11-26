@@ -150,9 +150,11 @@ private fun openDatabase(file: File): ForageDatabase {
 
 private fun embedder(args: Args): OnnxEmbedder {
     val spec = ModelSpec.MULTILINGUAL_MINILM
-    val files = ModelFiles.ensure(spec, Path.of(args.one("--models") ?: "data/models", "minilm")) {
-        System.err.println("Downloading $it from ${spec.repo} ...")
-    }
+    var started = ""
+    val files = ModelFiles.ensure(spec, Path.of(args.one("--models") ?: "data/models", "minilm"), onProgress = {
+        if (it.file != started) System.err.println("Downloading ${it.file} from ${spec.repo} ...")
+        started = it.file
+    })
     return OnnxEmbedder(spec, files)
 }
 
