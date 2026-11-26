@@ -40,6 +40,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -226,19 +227,17 @@ private fun ColumnScope.Pair(model: AppModel) {
 private fun ColumnScope.ChoosePlayer(model: AppModel) {
     Title("How videos play")
     Lead("Forage finds and organizes videos; a player plays them. You can change this later in Settings.")
-    // Checking for players starts small processes, so do it once.
-    val problems = remember { model.platform.players.associateWith { model.platform.playerProblem(it) } }
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        for (p in model.platform.players) {
-            PlayerCard(p, problems[p], model.player == p, Modifier.weight(1f)) { model.choosePlayer(p) }
+    // Checking for players starts small processes: once as the step opens, and after installing.
+    LaunchedEffect(Unit) { model.checkPlayers() }
+    val problems = model.playerProblems
+    if (problems.isNotEmpty()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            for (p in model.platform.players) {
+                PlayerCard(p, problems[p], model.player == p, Modifier.weight(1f)) { model.choosePlayer(p) }
+            }
         }
     }
-    when {
-        problems[Player.MPV] == "not installed" ->
-            Hint("mpv plays videos in a window of its own, without ads, and lets Forage remember where you stopped. Install it with \"sudo apt install mpv\", and yt-dlp with \"pipx install yt-dlp\"; or both at once from Flathub (io.mpv.Mpv). Then come back to Settings.")
-        problems[Player.MPV] == "needs yt-dlp" ->
-            Hint("mpv needs a current yt-dlp to play YouTube videos. Install it with \"pipx install yt-dlp\".")
-    }
+    MpvSetupCard(model)
     Spacer(Modifier.height(24.dp))
     AccentButton("Done", null, onClick = model::closeWelcome)
 }

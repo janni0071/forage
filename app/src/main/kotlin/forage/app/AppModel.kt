@@ -281,6 +281,59 @@ class AppModel(
         player = value
     }
 
+    /** Each player's problem (null when it's ready), as last checked by [checkPlayers]. */
+    var playerProblems by mutableStateOf<Map<Player, String?>>(emptyMap())
+        private set
+
+    /** What the best player needs installed, and whether it is (the desktop's mpv). */
+    var playerParts by mutableStateOf<List<PlayerPart>>(emptyList())
+        private set
+    var playerSetupStatus by mutableStateOf<String?>(null)
+        private set
+    var playerSetupProblem by mutableStateOf<String?>(null)
+        private set
+
+    /** Looks for the players and what they need (small processes, so off the UI thread). */
+    fun checkPlayers() {
+        ownScope.launch {
+            val (problems, parts) = withContext(Dispatchers.IO) {
+                platform.players.associateWith { platform.playerProblem(it) } to platform.playerParts()
+            }
+            playerProblems = problems
+            playerParts = parts
+        }
+    }
+
+    /**
+     * Installs what the best player still needs (mpv, yt-dlp, Deno on the desktop), then makes it
+     * the player unless another working one was chosen on purpose.
+     */
+    fun setUpPlayer() {
+        if (playerSetupStatus != null) return
+        playerSetupStatus = "Getting ready"
+        playerSetupProblem = null
+        ownScope.launch {
+            try {
+                withContext(Dispatchers.IO) { platform.installPlayerParts { playerSetupStatus = it } }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                playerSetupProblem = e.message ?: e.javaClass.simpleName
+            } finally {
+                playerSetupStatus = null
+            }
+            val (problems, parts) = withContext(Dispatchers.IO) {
+                platform.players.associateWith { platform.playerProblem(it) } to platform.playerParts()
+            }
+            playerProblems = problems
+            playerParts = parts
+            if (playerSetupProblem == null && parts.all { it.ready } && problems[Player.MPV] == null) {
+                if (player == Player.BROWSER || settings.player == null || problems[player] != null) choosePlayer(Player.MPV)
+                message = "mpv is ready: no ads, and Forage remembers where you stopped"
+            }
+        }
+    }
+
     /** Opens the folder the vault lives in, in the system's file manager. */
     fun openDataFolder() {
         if (!platform.openFolder(dataDir.absoluteFile)) message = "Couldn't open the folder: ${dataDir.absolutePath}"

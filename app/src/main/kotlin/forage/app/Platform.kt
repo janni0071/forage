@@ -40,6 +40,16 @@ interface Platform {
     fun playerProblem(player: Player): String?
 
     /**
+     * What the best player needs installed, with whether each part is there (the desktop's mpv:
+     * mpv, yt-dlp, Deno); empty where nothing needs installing. Starts small processes: not on
+     * the UI thread.
+     */
+    fun playerParts(): List<PlayerPart> = emptyList()
+
+    /** Installs every missing part of [playerParts], saying what it's doing. Blocks; throws with a readable message. */
+    fun installPlayerParts(update: (String) -> Unit) {}
+
+    /**
      * Opens [url], the link to [id]. Throws with a readable message when it can't be opened;
      * [report] gets problems noticed later, such as a player quitting with an error. Players that
      * report back (see [reportsBack]) start where [watching] says and tell it how far they got.
@@ -120,3 +130,18 @@ class Watching(
 
 /** A file the user picked: its name and size, and how to read it (a phone's picker gives streams, not paths). */
 class PickedFile(val name: String, val size: Long, val open: () -> InputStream)
+
+/** One thing a player needs installed, e.g. mpv's yt-dlp, and whether it's there. */
+data class PlayerPart(
+    val id: String,
+    val name: String,
+    /** What it's for, in a sentence. */
+    val purpose: String,
+    val ready: Boolean,
+    /** Where it is, or how it would be installed. */
+    val detail: String?,
+    /** Whether Forage can install it with a button. */
+    val installable: Boolean,
+    /** Installing it in a terminal instead. */
+    val command: String?,
+)

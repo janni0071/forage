@@ -55,6 +55,8 @@ fun dataDir(args: Array<String>): File {
 
 fun main(args: Array<String>) {
     val dir = dataDir(args)
+    MpvSetup.toolsDir = File(dir, "tools")
+    MpvSetup.updateInBackground()
     // The window opens at a size that fits the interface size, read before anything is shown.
     val startSettings = Settings(File(dir, "settings.properties"))
     val startScale = startSettings.uiScale ?: automaticZoom()

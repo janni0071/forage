@@ -48,6 +48,10 @@ object DesktopPlatform : Platform {
 
     override fun playerProblem(player: Player): String? = Players.problem(player)
 
+    override fun playerParts(): List<forage.app.PlayerPart> = MpvSetup.parts()
+
+    override fun installPlayerParts(update: (String) -> Unit) = MpvSetup.install(update)
+
     /** mpv says how far it got over its control socket (for every platform it plays); FreeTube and the browser can't. */
     override fun reportsBack(player: Player, id: PlatformId) =
         player == Player.MPV && Players.problem(Player.MPV) == null

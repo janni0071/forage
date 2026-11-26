@@ -27,7 +27,7 @@ object Players {
             val mpvArgs = MPV_ARGS + extraMpvArgs
             val mpv = onPath("mpv")
             // mpv hands YouTube links to yt-dlp; without it, it quits without playing anything.
-            val ytdlp = onPath("yt-dlp") ?: onPath("youtube-dl")
+            val ytdlp = MpvSetup.ytDlp()
             when {
                 mpv != null && ytdlp != null -> Launch.Command(listOf(mpv) + mpvArgs + url)
                 // The Flatpak build ships its own yt-dlp; its sandbox is opened to where the socket goes.
@@ -53,7 +53,7 @@ object Players {
         "--ytdl-format=bestvideo[vcodec!^=av01]+bestaudio/best[vcodec!^=av01]/bestvideo+bestaudio/best")
 
     private const val FREETUBE_FLATPAK = "io.freetubeapp.FreeTube"
-    private const val MPV_FLATPAK = "io.mpv.Mpv"
+    const val MPV_FLATPAK = "io.mpv.Mpv"
 
     /**
      * Opens [url], the link to [id], in [player]. FreeTube is for YouTube; mpv plays whatever its
@@ -73,14 +73,16 @@ object Players {
         return when (val launch = launch(player, url, mpvArgs)) {
             is Launch.Unavailable -> error(
                 when (launch.reason) {
-                    "needs yt-dlp" -> "mpv needs a current yt-dlp to play YouTube videos. Install it (e.g. 'pipx install yt-dlp'; " +
-                        "distribution packages are often too old), or install mpv from Flathub, which includes it."
+                    "needs yt-dlp" -> "mpv needs yt-dlp to play videos: Settings, Playback, sets it up with one click."
                     else -> "${player.label} isn't installed"
                 }
             )
             // Its output is read as it comes (see PlayerOutput): kept in memory, and in the log
             // where there is one.
-            is Launch.Command -> ProcessBuilder(launch.args).redirectErrorStream(true).start()
+            is Launch.Command -> ProcessBuilder(launch.args).redirectErrorStream(true).also {
+                // A native mpv finds Forage's own yt-dlp (and yt-dlp its Deno) first on its PATH.
+                if (player == MPV && launch.args.first() != "flatpak") MpvSetup.prepare(it)
+            }.start()
         }
     }
 
@@ -94,7 +96,10 @@ object Players {
 
     private val flatpaks = HashMap<String, Boolean>()
 
-    private fun flatpakHas(app: String): Boolean = synchronized(flatpaks) {
+    /** After installing a Flatpak, so it's looked for again. */
+    fun forgetFlatpaks() = synchronized(flatpaks) { flatpaks.clear() }
+
+    fun flatpakHas(app: String): Boolean = synchronized(flatpaks) {
         flatpaks.getOrPut(app) {
             onPath("flatpak") != null && runCatching {
                 ProcessBuilder("flatpak", "info", app).redirectErrorStream(true)

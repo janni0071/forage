@@ -226,9 +226,10 @@ private fun PlaybackPage(model: AppModel) {
                 if (Player.IN_APP in model.platform.players) "Play videos here, on their page, or hand them to another app (LibreTube, NewPipe, a browser)."
                 else "Where videos open. Forage only finds and organizes them.",
             )
-            // Checking for players starts small processes, so do it once per opening.
-            val problems = remember { model.platform.players.associateWith { model.platform.playerProblem(it) } }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Checking for players starts small processes: once per opening, and after installing.
+            LaunchedEffect(Unit) { model.checkPlayers() }
+            val problems = model.playerProblems
+            if (problems.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 for (p in model.platform.players) {
                     PlayerCard(
                         player = p,
@@ -242,9 +243,7 @@ private fun PlaybackPage(model: AppModel) {
             if (model.isPrivate && model.player == Player.FREETUBE) {
                 Hint("FreeTube plays YouTube only: Pornhub videos open in the browser. mpv plays both, without the website.")
             }
-            if (model.player == Player.MPV && problems[Player.MPV] == "needs yt-dlp") {
-                Hint("mpv needs a current yt-dlp to play YouTube videos. Install it with 'pipx install yt-dlp', or use mpv from Flathub, which includes it.")
-            }
+            MpvSetupCard(model)
         }
         // The vault's videos play in the site's embedded player here: its ads can be kept out.
         if (model.isPrivate && Player.IN_APP in model.platform.players) {
