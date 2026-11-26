@@ -9,7 +9,10 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -42,6 +45,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import forage.app.AppModel
+import forage.app.Player
 import forage.app.PlayerPart
 import kotlinx.coroutines.delay
 
@@ -110,10 +114,31 @@ fun MpvSetupCard(model: AppModel) {
         val commands = missing.mapNotNull { it.command }
         if (commands.isNotEmpty()) {
             Text(
-                "Or install them yourself in a terminal, then Check again:",
+                "Or in a terminal, then Check again:",
                 style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
             )
             for (command in commands) Command(command)
+        }
+    }
+}
+
+/**
+ * The players as cards to choose from, as last checked: the recommended one (mpv on a computer,
+ * Forage's own on a phone) labelled so and never greyed out; while it lacks parts Forage can
+ * install, a click on it sets it up (and chooses it once ready).
+ */
+@Composable
+fun PlayerChoice(model: AppModel) {
+    val problems = model.playerProblems
+    if (problems.isEmpty()) return
+    val parts = model.playerParts
+    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        for (p in model.platform.players) {
+            val recommended = p == Player.MPV || p == Player.IN_APP
+            val canSetUp = p == Player.MPV && problems[p] != null && parts.any { !it.ready && it.installable }
+            PlayerCard(p, problems[p], model.player == p, Modifier.weight(1f).fillMaxHeight(), recommended = recommended, canSetUp = canSetUp) {
+                if (canSetUp) model.setUpPlayer() else model.choosePlayer(p)
+            }
         }
     }
 }

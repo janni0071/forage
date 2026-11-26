@@ -82,7 +82,9 @@ object MpvSetup {
                 else -> "Forage downloads its own (about 40 MB) and keeps it up to date; no password needed"
             },
             installable = true,
-            command = "pipx install \"yt-dlp[default,curl-cffi]\"",
+            // Installing it by hand takes more than one command (pipx first, or a download and a PATH),
+            // and the button needs no password: no command here.
+            command = null,
         )
         val deno = deno()
         parts += PlayerPart(
@@ -94,7 +96,8 @@ object MpvSetup {
                 else -> "Forage downloads its own (about 40 MB); no password needed"
             },
             installable = true,
-            command = "curl -fsSL https://deno.land/install.sh | sh",
+            // Deno's install script needs curl and unzip, which not every system has.
+            command = null,
         )
         return parts
     }

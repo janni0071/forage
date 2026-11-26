@@ -229,17 +229,23 @@ private fun ColumnScope.ChoosePlayer(model: AppModel) {
     Lead("Forage finds and organizes videos; a player plays them. You can change this later in Settings.")
     // Checking for players starts small processes: once as the step opens, and after installing.
     LaunchedEffect(Unit) { model.checkPlayers() }
-    val problems = model.playerProblems
-    if (problems.isNotEmpty()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            for (p in model.platform.players) {
-                PlayerCard(p, problems[p], model.player == p, Modifier.weight(1f)) { model.choosePlayer(p) }
-            }
-        }
-    }
+    PlayerChoice(model)
     MpvSetupCard(model)
     Spacer(Modifier.height(24.dp))
-    AccentButton("Done", null, onClick = model::closeWelcome)
+    val parts = model.playerParts
+    if (parts.all { it.ready }) {
+        AccentButton("Done", null, onClick = model::closeWelcome)
+    } else {
+        // Setting up is the card's button; going on without it is the quieter choice.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = model::closeWelcome) { Text("Not now") }
+            Text(
+                if (model.player == Player.BROWSER || model.playerProblems[model.player] != null) "Until then, videos open in the browser."
+                else "Until then, videos open in ${model.player.label}.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable

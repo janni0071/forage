@@ -228,17 +228,7 @@ private fun PlaybackPage(model: AppModel) {
             )
             // Checking for players starts small processes: once per opening, and after installing.
             LaunchedEffect(Unit) { model.checkPlayers() }
-            val problems = model.playerProblems
-            if (problems.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                for (p in model.platform.players) {
-                    PlayerCard(
-                        player = p,
-                        problem = problems[p],
-                        selected = model.player == p,
-                        modifier = Modifier.weight(1f),
-                    ) { model.choosePlayer(p) }
-                }
-            }
+            PlayerChoice(model)
             // The vault's videos come from Pornhub too, which FreeTube doesn't play.
             if (model.isPrivate && model.player == Player.FREETUBE) {
                 Hint("FreeTube plays YouTube only: Pornhub videos open in the browser. mpv plays both, without the website.")
@@ -521,9 +511,16 @@ private fun Section(title: String, text: String?) {
 }
 
 @Composable
-internal fun PlayerCard(player: Player, problem: String?, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+internal fun PlayerCard(
+    player: Player, problem: String?, selected: Boolean, modifier: Modifier,
+    /** The one to pick: never greyed out, labelled so. */
+    recommended: Boolean = false,
+    /** Missing parts Forage can install: a click sets it up instead of choosing it. */
+    canSetUp: Boolean = false,
+    onClick: () -> Unit,
+) {
     val c = MaterialTheme.colorScheme
-    val usable = problem != "not installed"
+    val usable = problem != "not installed" || canSetUp
     val icon = when (player) {
         Player.FREETUBE -> Icons.Outlined.SmartDisplay
         Player.MPV -> Icons.Outlined.OndemandVideo
@@ -567,12 +564,20 @@ internal fun PlayerCard(player: Player, problem: String?, selected: Boolean, mod
             color = if (usable) c.onSurface else c.onSurfaceVariant.copy(alpha = 0.6f),
             modifier = Modifier.padding(top = 12.dp),
         )
-        val (status, color) = when (problem) {
-            null -> "Ready" to c.primary
-            "needs yt-dlp" -> "Needs yt-dlp" to c.error
+        val (status, color) = when {
+            problem == null -> "Ready" to c.primary
+            canSetUp -> "Click to set up" to c.primary
+            problem == "needs yt-dlp" -> "Needs yt-dlp" to c.error
             else -> "Not installed" to c.onSurfaceVariant.copy(alpha = 0.6f)
         }
         Text(status, style = MaterialTheme.typography.bodySmall, color = color)
+        if (recommended) {
+            Text(
+                "Recommended",
+                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = Accent.onAccent,
+                modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(8.dp)).background(Accent.pastelPink).padding(horizontal = 8.dp, vertical = 3.dp),
+            )
+        }
     }
 }
 
