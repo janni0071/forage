@@ -65,6 +65,31 @@ class SyncLog(private val driver: SqlDriver, private val transacter: Transacter)
             driver.execute(null, "UPDATE sync_state SET clock = MAX(clock, (SELECT COALESCE(MAX(ts), 0) FROM sync_row))", 0)
         }
         spread()
+        repairUnnoted()
+    }
+
+    /**
+     * Notes again what earlier versions failed to: a row added back here after another device's
+     * removal of it was noted (an INSERT OR IGNORE kept the removal's note, see [triggers]). Such
+     * a row is here, while its note is another device's and older than the row's own time (when it
+     * was saved, liked, added).
+     */
+    private fun repairUnnoted() {
+        for (table in TABLES) {
+            val stamp = table.stamp ?: continue
+            driver.execute(
+                null,
+                "UPDATE sync_row SET origin = NULL, ts = (SELECT clock FROM sync_state) + 1, seq = (SELECT counter FROM sync_state) + 1 " +
+                    "WHERE tbl = '${table.name}' AND origin IS NOT NULL AND EXISTS (SELECT 1 FROM \"${table.name}\" t " +
+                    "WHERE ${keyOf(table, "t.")} = sync_row.row_key AND t.\"$stamp\" * 1000 > sync_row.ts + 1000)",
+                0,
+            )
+        }
+        driver.execute(
+            null,
+            "UPDATE sync_state SET counter = MAX(counter, (SELECT COALESCE(MAX(seq), 0) FROM sync_row)), clock = MAX(clock, (SELECT COALESCE(MAX(ts), 0) FROM sync_row))",
+            0,
+        )
     }
 
     /**
@@ -253,8 +278,13 @@ class SyncLog(private val driver: SqlDriver, private val transacter: Transacter)
     private fun triggers(table: Table): List<String> {
         val t = table.name
         val now = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)"
-        fun note(key: String) =
-            "INSERT OR REPLACE INTO sync_row (tbl, row_key, ts, origin, seq) SELECT '$t', $key, clock, NULL, counter FROM sync_state;"
+        // The old note goes first, then the new one is written: not INSERT OR REPLACE, since SQLite
+        // runs a trigger's statements under the conflict rule of the statement that set it off, and
+        // under an INSERT OR IGNORE (adding to the queue) an existing note (a removal from another
+        // device) would stay, and the change go unnoted.
+        fun note(key: String, where: String = "") =
+            "DELETE FROM sync_row WHERE tbl = '$t' AND row_key = $key${if (where.isEmpty()) "" else " AND $where"}; " +
+                "INSERT INTO sync_row (tbl, row_key, ts, origin, seq) SELECT '$t', $key, clock, NULL, counter FROM sync_state${if (where.isEmpty()) "" else " WHERE $where"};"
         val tick = "UPDATE sync_state SET counter = counter + 1, clock = MAX(clock + 1, $now);"
         // This device's settings in the preference table stay its own.
         fun own(row: String) = if (t == "preference") " AND $row.key NOT LIKE 'sync.%'" else ""
@@ -267,17 +297,17 @@ class SyncLog(private val driver: SqlDriver, private val transacter: Transacter)
             "CREATE TRIGGER sync_${t}_update AFTER UPDATE ON \"$t\" WHEN $active${own("NEW")}${known("NEW")} AND ($changed) BEGIN $tick " +
                 note(keyOf(table, "NEW.")) +
                 // A changed key (a renamed playlist): the old one is gone.
-                " INSERT OR REPLACE INTO sync_row (tbl, row_key, ts, origin, seq) SELECT '$t', ${keyOf(table, "OLD.")}, clock, NULL, counter FROM sync_state " +
-                "WHERE ${keyOf(table, "OLD.")} IS NOT ${keyOf(table, "NEW.")}; END",
+                " " + note(keyOf(table, "OLD."), "${keyOf(table, "OLD.")} IS NOT ${keyOf(table, "NEW.")}") + " END",
             "CREATE TRIGGER sync_${t}_delete AFTER DELETE ON \"$t\" WHEN $active${own("OLD")}${known("OLD")} BEGIN $tick ${note(keyOf(table, "OLD."))} END",
         )
         if (t == "profile") {
             // A renamed profile: its likes are known by its name elsewhere, so they move too.
             list += "CREATE TRIGGER sync_profile_rename AFTER UPDATE OF name ON profile WHEN $active AND OLD.name IS NOT NEW.name BEGIN " +
-                "INSERT OR REPLACE INTO sync_row (tbl, row_key, ts, origin, seq) SELECT 'profile_video', json_array(NEW.name, v.video_id), s.clock, NULL, s.counter " +
-                "FROM profile_video v, sync_state s WHERE v.profile_id = NEW.id; " +
-                "INSERT OR REPLACE INTO sync_row (tbl, row_key, ts, origin, seq) SELECT 'profile_video', json_array(OLD.name, v.video_id), s.clock, NULL, s.counter " +
-                "FROM profile_video v, sync_state s WHERE v.profile_id = NEW.id; END"
+                listOf("NEW", "OLD").joinToString(" ") { which ->
+                    "DELETE FROM sync_row WHERE tbl = 'profile_video' AND row_key IN (SELECT json_array($which.name, v.video_id) FROM profile_video v WHERE v.profile_id = NEW.id); " +
+                        "INSERT INTO sync_row (tbl, row_key, ts, origin, seq) SELECT 'profile_video', json_array($which.name, v.video_id), s.clock, NULL, s.counter " +
+                        "FROM profile_video v, sync_state s WHERE v.profile_id = NEW.id;"
+                } + " END"
         }
         return list
     }

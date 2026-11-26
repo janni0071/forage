@@ -138,4 +138,51 @@ class SyncLogTest {
         phone.driver.execute(null, "UPDATE subscription SET checked_at = 123, avatar_url = 'x'", 0)
         assertEquals(before, phone.log.counter)
     }
+
+    @Test
+    fun `a video saved again after the other device took it off goes across`() {
+        val (phone, laptop) = pair()
+        phone.library.saveForLater(x)
+        sync(phone, laptop)
+        later()
+        laptop.library.removeFromWatchLater(x)
+        sync(phone, laptop)
+        assertEquals(emptyList(), phone.library.watchLater())
+        later()
+        // Saving is an INSERT OR IGNORE: the removal's note must give way all the same.
+        phone.library.saveForLater(x)
+        sync(phone, laptop)
+        assertEquals(listOf(x), laptop.library.watchLater())
+        // And a playlist entry and a follow, the same way.
+        phone.library.createPlaylist("Wood")
+        phone.library.addToPlaylist("Wood", listOf(y))
+        sync(phone, laptop)
+        later()
+        laptop.library.removeFromPlaylist("Wood", listOf(y))
+        sync(phone, laptop)
+        later()
+        phone.library.addToPlaylist("Wood", listOf(y))
+        sync(phone, laptop)
+        assertEquals(mapOf("Wood" to 1L), laptop.library.playlists())
+    }
+
+    @Test
+    fun `what an earlier version left unnoted is noted at start`() {
+        val (phone, laptop) = pair()
+        phone.library.saveForLater(x)
+        sync(phone, laptop)
+        later()
+        laptop.library.removeFromWatchLater(x)
+        sync(phone, laptop)
+        // As earlier versions left it: saved again here (a moment later), the removal's note kept.
+        Thread.sleep(2200)
+        phone.driver.execute(null, "UPDATE sync_state SET applying = 1", 0)
+        phone.library.saveForLater(x)
+        phone.driver.execute(null, "UPDATE sync_state SET applying = 0", 0)
+        sync(phone, laptop)
+        assertEquals(emptyList(), laptop.library.watchLater())
+        phone.log.start()
+        sync(phone, laptop)
+        assertEquals(listOf(x), laptop.library.watchLater())
+    }
 }
