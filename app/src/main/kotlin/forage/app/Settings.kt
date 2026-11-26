@@ -37,6 +37,11 @@ class Settings(private val file: File?, copyOf: Settings? = null) {
         get() = properties.getProperty("history.record", "true").toBoolean()
         set(value) = set("history.record", value.toString())
 
+    /** Whether the welcome at first launch was gone through (or skipped), or the library had something in it already. */
+    var welcomeDone: Boolean
+        get() = properties.getProperty("welcome.done", "false").toBoolean()
+        set(value) = set("welcome.done", value.toString())
+
     /** Whether a search was ever made here, for Home's "Get started". */
     var hasSearched: Boolean
         get() = properties.getProperty("search.used", "false").toBoolean()

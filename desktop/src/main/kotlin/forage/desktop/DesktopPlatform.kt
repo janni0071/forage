@@ -76,6 +76,10 @@ object DesktopPlatform : Platform {
 
     override fun openFolder(dir: File): Boolean = runCatching { java.awt.Desktop.getDesktop().open(dir) }.isSuccess
 
+    override fun openLink(url: String): Boolean =
+        runCatching { java.awt.Desktop.getDesktop().browse(java.net.URI(url)) }.isSuccess ||
+            runCatching { ProcessBuilder("xdg-open", url).start() }.isSuccess
+
     override fun automaticUiScale(): Float = automaticZoom()
 
     override val hasPrivateVault = true

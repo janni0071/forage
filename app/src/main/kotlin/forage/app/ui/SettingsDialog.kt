@@ -474,6 +474,8 @@ private fun DataPage(model: AppModel) {
             )
             return@Column
         }
+        Section("Welcome", "The steps Forage starts with: importing from YouTube, pairing another device, choosing a player.")
+        OutlinedButton(onClick = model::showWelcome, shape = RoundedCornerShape(12.dp)) { Text("Show the welcome again") }
         // A phone keeps the data inside the app, where no file manager reaches.
         if (model.platform.isMobile) return@Column
         Section("Your data", "Everything Forage knows lives in one folder on this computer. Nothing is sent anywhere else.")
@@ -520,7 +522,7 @@ private fun Section(title: String, text: String?) {
 }
 
 @Composable
-private fun PlayerCard(player: Player, problem: String?, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+internal fun PlayerCard(player: Player, problem: String?, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = MaterialTheme.colorScheme
     val usable = problem != "not installed"
     val icon = when (player) {

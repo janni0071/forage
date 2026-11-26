@@ -214,7 +214,8 @@ private fun GetStarted(model: AppModel, onImport: () -> Unit) {
                         "and previews come from it. It holds nothing about you."))
             }
         } else {
-            add(Step("Import your YouTube history from Google Takeout", model.imported, "Import", onImport))
+            add(Step("Import your YouTube history from Google Takeout", model.imported, "Import", model::openTakeoutGuide,
+                "Your watch history, playlists and subscriptions. Import shows how, step by step."))
             add(Step("Search for videos you enjoy", model.hasSearched, "Search", model::askForSearch))
             add(
                 Step(

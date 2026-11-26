@@ -116,7 +116,9 @@ fun App(model: AppModel, onImport: () -> Unit, chrome: WindowChrome? = null) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxWidth < 640.dp
         CompositionLocalProvider(LocalCompact provides compact) {
+            val welcome = model.welcome
             if (model.playerFullscreen) FullscreenPlayer(model)
+            else if (welcome != null) WelcomeScreen(model, welcome, onImport, chrome)
             else if (compact) PhoneApp(model, onImport) else WideApp(model, onImport, chrome)
             model.playerFailure?.let { PlayerFailureDialog(model, it) }
             BackupDialogs(model)

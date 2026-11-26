@@ -752,10 +752,11 @@ class AppModel(
     }
 
     /** Whether Back has somewhere to go inside the app: a video page, search results or a library list. */
-    val canGoBack: Boolean get() = playerFullscreen || videoPage != null || searchShown || (screen == Screen.LIBRARY && libraryView != LibraryView.HUB)
+    val canGoBack: Boolean get() = (welcome != null && welcome != WelcomeStep.HELLO) || playerFullscreen || videoPage != null || searchShown || (screen == Screen.LIBRARY && libraryView != LibraryView.HUB)
 
     fun back() {
         when {
+            welcome != null && welcome != WelcomeStep.HELLO -> welcomeBack()
             playerFullscreen -> playerFullscreen = false
             videoPage != null -> closeVideo()
             searchShown -> searchShown = false
@@ -1220,6 +1221,75 @@ class AppModel(
     fun hideGuide() {
         library.setPreference(GUIDE_HIDDEN, "true")
         guideHidden = true
+    }
+
+    /**
+     * The welcome on screen, at a step: at first launch, with an empty library, from the start;
+     * later, Get started's Import opens it at the Takeout steps. Null when it's not shown.
+     */
+    var welcome by mutableStateOf<WelcomeStep?>(null)
+        private set
+    /** The welcome is the one at first launch, which once closed doesn't come back. */
+    var welcomeAtFirstLaunch by mutableStateOf(false)
+        private set
+    private var welcomeChecked = false
+
+    /** At the first load: an empty main library that hasn't been welcomed is welcomed. */
+    private fun checkWelcome() {
+        if (welcomeChecked || isPrivate) return
+        welcomeChecked = true
+        if (settings.welcomeDone) return
+        val empty = historySize == 0L && profileSize == 0 && following.isEmpty() && !imported && library.watchLater().isEmpty()
+        if (empty) {
+            welcomeAtFirstLaunch = true
+            welcome = WelcomeStep.HELLO
+        } else {
+            // A library from before the welcome existed, or one that arrived another way.
+            settings.welcomeDone = true
+        }
+    }
+
+    /** The welcome from the start, from Settings (to go through it again, or after skipping it). */
+    fun showWelcome() {
+        settingsOpen = false
+        welcomeAtFirstLaunch = true
+        welcome = WelcomeStep.HELLO
+    }
+
+    fun welcomeTo(step: WelcomeStep) {
+        welcome = step
+    }
+
+    /** The steps for importing from YouTube, from Get started or the library. */
+    fun openTakeoutGuide() {
+        welcome = WelcomeStep.TAKEOUT
+    }
+
+    /**
+     * A way in was chosen (an import started, paired, starting fresh): at first launch on a
+     * computer, which player to use is next; otherwise the welcome is done.
+     */
+    fun welcomeChosen() {
+        if (welcomeAtFirstLaunch && !platform.isMobile && welcome != WelcomeStep.PLAYER) welcome = WelcomeStep.PLAYER
+        else closeWelcome()
+    }
+
+    fun closeWelcome() {
+        welcome = null
+        if (welcomeAtFirstLaunch) {
+            settings.welcomeDone = true
+            welcomeAtFirstLaunch = false
+        }
+    }
+
+    /** Back within the welcome: a step back, or out of the Takeout steps opened on their own. */
+    fun welcomeBack() {
+        welcome = when (welcome) {
+            WelcomeStep.BRING -> WelcomeStep.HELLO
+            WelcomeStep.TAKEOUT, WelcomeStep.PAIR -> if (welcomeAtFirstLaunch) WelcomeStep.BRING else null
+            WelcomeStep.PLAYER -> WelcomeStep.BRING
+            else -> welcome
+        }
     }
 
     fun changeTheme(value: Theme) {
@@ -2424,6 +2494,7 @@ class AppModel(
         loadUploads()
         knownPictures()
         imported = library.counts().second > 0 || library.playlists().isNotEmpty()
+        checkWelcome()
     }
 
     private fun loadPicks() {
@@ -2637,3 +2708,6 @@ enum class SettingsPage(val title: String) {
     SYNC("Sync"),
     DATA("Backup & data"),
 }
+
+/** The welcome's steps: hello, how to bring a library along, then the way chosen; on a computer, the player. */
+enum class WelcomeStep { HELLO, BRING, TAKEOUT, PAIR, PLAYER }

@@ -66,6 +66,13 @@ class AndroidPlatform(private val context: Context) : Platform {
 
     override fun openFolder(dir: File) = false
 
+    override fun openLink(url: String): Boolean = try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (e: ActivityNotFoundException) {
+        false
+    }
+
     override fun automaticUiScale() = 1f
 
     override val hasPrivateVault = true

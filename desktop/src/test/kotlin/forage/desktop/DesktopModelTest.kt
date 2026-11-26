@@ -437,6 +437,55 @@ class DesktopModelTest {
         }
     }
 
+    @Test
+    fun `an empty library is welcomed once, a library with something in it never`() {
+        val home = Files.createTempDirectory("welcome").toFile()
+        fun open() = AppModel(home, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined, DesktopStorage.plain(home), Models(home, DesktopPlatform), DesktopPlatform) { offline }
+        try {
+            var m = open()
+            runBlocking { m.reload() }
+            assertEquals(forage.app.WelcomeStep.HELLO, m.welcome)
+            assertTrue(m.welcomeAtFirstLaunch)
+            m.welcomeTo(forage.app.WelcomeStep.BRING)
+            m.welcomeTo(forage.app.WelcomeStep.TAKEOUT)
+            // Back goes a step back, and Back is the app's while the welcome is past its first step.
+            assertTrue(m.canGoBack)
+            m.back()
+            assertEquals(forage.app.WelcomeStep.BRING, m.welcome)
+            // A way in chosen: on a computer the player is next, then it's done for good.
+            m.welcomeChosen()
+            assertEquals(forage.app.WelcomeStep.PLAYER, m.welcome)
+            m.closeWelcome()
+            assertEquals(null, m.welcome)
+            m.close()
+            m = open()
+            runBlocking { m.reload() }
+            assertEquals(null, m.welcome)
+            // Get started's Import opens the Takeout steps on their own; closing them leaves the app.
+            m.openTakeoutGuide()
+            assertEquals(forage.app.WelcomeStep.TAKEOUT, m.welcome)
+            assertTrue(!m.welcomeAtFirstLaunch)
+            m.back()
+            assertEquals(null, m.welcome)
+            m.close()
+        } finally {
+            home.deleteRecursively()
+        }
+
+        // A library from before the welcome existed isn't welcomed.
+        val old = Files.createTempDirectory("welcome").toFile()
+        try {
+            val m = AppModel(old, CoroutineScope(Dispatchers.Unconfined), Dispatchers.Unconfined, DesktopStorage.plain(old), Models(old, DesktopPlatform), DesktopPlatform) { offline }
+            m.library.importTakeout(TakeoutData(ImportResult(listOf(WatchEvent(id("a"), "Hand-cut dovetails", null, "Workshop Wren", Instant.parse("2026-11-01T10:00:00Z"))), emptyMap()), emptyMap(), emptyList()))
+            runBlocking { m.reload() }
+            assertEquals(null, m.welcome)
+            assertTrue(Settings(old.resolve("settings.properties")).welcomeDone)
+            m.close()
+        } finally {
+            old.deleteRecursively()
+        }
+    }
+
     private fun waitFor(condition: () -> Boolean) {
         val until = System.currentTimeMillis() + 10_000
         while (!condition()) {

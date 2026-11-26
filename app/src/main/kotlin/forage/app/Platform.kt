@@ -52,6 +52,9 @@ interface Platform {
     /** Opens [dir] in a file manager. False where that isn't possible. */
     fun openFolder(dir: File): Boolean
 
+    /** Opens a web page in the browser; false where it can't. */
+    fun openLink(url: String): Boolean
+
     /** The interface size to use when the user hasn't chosen one. */
     fun automaticUiScale(): Float
 
