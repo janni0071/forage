@@ -55,6 +55,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -78,15 +81,21 @@ import forage.app.SettingsPage
 @Composable
 fun SettingsDialog(model: AppModel) {
     val c = MaterialTheme.colorScheme
-    val compact = LocalCompact.current
+    val phone = LocalCompact.current
     val pages = settingsPages(model)
     val close = { model.settingsOpen = false; model.settingsPage = null }
-    // On a phone, Back goes from a part of Settings to the overview first.
-    val dismiss = { if (compact && model.settingsPage != null) model.settingsPage = null else close() }
+    // One column (the overview, then a part) on a phone and in a window too narrow for the list beside a part.
+    var oneColumn by remember { mutableStateOf(phone) }
+    // In one column, Back goes from a part of Settings to the overview first.
+    val dismiss = { if (oneColumn && model.settingsPage != null) model.settingsPage = null else close() }
     // A plain dialog: Material's alert dialog keeps to 560 dp, too narrow for the list beside a part.
     androidx.compose.ui.window.Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BoxWithConstraints(contentAlignment = Alignment.Center) {
+        val compact = phone || maxWidth < 860.dp
+        SideEffect { oneColumn = compact }
+        CompositionLocalProvider(LocalCompact provides compact) {
         if (compact) {
-            Surface(shape = RoundedCornerShape(28.dp), color = c.surfaceContainerLow, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+            Surface(shape = RoundedCornerShape(28.dp), color = c.surfaceContainerLow, modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().padding(horizontal = 12.dp)) {
                 Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp)) {
                     val page = model.settingsPage
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -126,6 +135,8 @@ fun SettingsDialog(model: AppModel) {
                     }
                 }
             }
+        }
+        }
         }
     }
 }
@@ -588,6 +599,7 @@ internal fun PlayerCard(
         if (recommended) {
             Text(
                 "Recommended",
+                maxLines = 1, softWrap = false,
                 style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = Accent.onAccent,
                 modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(8.dp)).background(Accent.pastelPink).padding(horizontal = 8.dp, vertical = 3.dp),
             )

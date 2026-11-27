@@ -308,8 +308,13 @@ private fun WideApp(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     chrome?.titleBar?.invoke()
                     if (model.screen != Screen.LIBRARY || model.searchShown) TopSearchBar(model)
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        Screens(model, onImport)
+                    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                        // Beside the sidebar, a narrow window leaves a phone's width or less: the screens
+                        // then lay out as on a phone (cards stacked, actions beneath titles) instead of
+                        // squeezing a window's rows until their text breaks letter by letter.
+                        CompositionLocalProvider(LocalCompact provides (maxWidth < 600.dp)) {
+                            Screens(model, onImport)
+                        }
                         StatusToast(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp))
                         // Above the status messages, in the corner.
                         BackFromPlayerCard(model, Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 84.dp))

@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
@@ -118,14 +119,25 @@ fun ScreenHeader(title: String, subtitle: String?, actions: @Composable RowScope
         }
         return
     }
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp)) {
-        Column(Modifier.weight(1f)) {
+    // A window: the actions beside the title where there's room, else beneath it; the title is
+    // never squeezed to make room for them (a narrow window used to break it letter by letter).
+    FlowRow(
+        Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.padding(end = 16.dp).widthIn(max = 520.dp)) {
             Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
             subtitle?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), content = actions)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) { actions() }
     }
 }
 

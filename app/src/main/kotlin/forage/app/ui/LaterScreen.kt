@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -308,6 +309,9 @@ private fun ReorderList(model: AppModel, items: List<LaterItem>) {
 private fun UpNext(model: AppModel, item: LaterItem, actions: QueueActions) {
     val c = MaterialTheme.colorScheme
     if (LocalCompact.current) return UpNextCompact(model, item, actions)
+    // Side by side only where the text keeps a good width beside the big thumbnail; stacked otherwise.
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    if (maxWidth < 900.dp) return@BoxWithConstraints UpNextCompact(model, item, actions)
     Row(
         Modifier
             .fillMaxWidth()
@@ -338,22 +342,27 @@ private fun UpNext(model: AppModel, item: LaterItem, actions: QueueActions) {
                 color = c.onSurfaceVariant,
                 modifier = Modifier.padding(top = 6.dp),
             )
-            Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Buttons go beneath one another rather than breaking their labels.
+            FlowRow(
+                Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
                 AccentButton("Play", Icons.Filled.PlayArrow) { model.open(item.id) }
                 actions.watched?.let { watched ->
                     OutlinedButton(onClick = watched, shape = RoundedCornerShape(12.dp)) {
                         Icon(Icons.Outlined.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Watched")
+                        Text("Watched", maxLines = 1, softWrap = false)
                     }
                 }
                 OutlinedButton(onClick = actions.remove, shape = RoundedCornerShape(12.dp)) {
                     Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Remove")
+                    Text("Remove", maxLines = 1, softWrap = false)
                 }
             }
         }
+    }
     }
 }
 
@@ -488,6 +497,10 @@ private fun QueueRowCompact(model: AppModel, item: LaterItem, actions: QueueActi
 @Composable
 internal fun QueueRow(model: AppModel, item: LaterItem, position: Int?, actions: QueueActions) {
     if (LocalCompact.current) return QueueRowCompact(model, item, actions)
+    // Too narrow for the thumbnail, the text and four buttons in a line: the phone's row instead.
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    if (maxWidth < 720.dp) return@BoxWithConstraints QueueRowCompact(model, item, actions)
+    val thumbnail = (maxWidth * 0.26f).coerceIn(170.dp, 230.dp)
     val c = MaterialTheme.colorScheme
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
@@ -510,7 +523,7 @@ internal fun QueueRow(model: AppModel, item: LaterItem, position: Int?, actions:
                 modifier = Modifier.width(36.dp),
             )
         }
-        BigThumbnail(model, item, width = 230.dp, playIcon = 36.dp)
+        BigThumbnail(model, item, width = thumbnail, playIcon = 36.dp)
         Column(Modifier.weight(1f).padding(horizontal = 20.dp)) {
             Text(
                 item.title ?: "Untitled video",
@@ -533,6 +546,7 @@ internal fun QueueRow(model: AppModel, item: LaterItem, position: Int?, actions:
         }
         Spacer(Modifier.width(8.dp))
         RoundAction(actions.removeIcon, actions.removeHint, filled = actions.removeActive, onClick = actions.remove)
+    }
     }
 }
 

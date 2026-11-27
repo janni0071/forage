@@ -383,7 +383,8 @@ private fun PageAction(icon: ImageVector, label: String, active: Boolean, onClic
     val c = MaterialTheme.colorScheme
     Column(
         Modifier
-            .width(84.dp)
+            // A phone fits four in a row, so a long label takes two lines there; a window has room for one.
+            .width(if (LocalCompact.current) 84.dp else 104.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .pointerHoverIcon(PointerIcon.Hand)
