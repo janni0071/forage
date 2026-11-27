@@ -160,6 +160,7 @@ private fun ColumnScope.Bring(model: AppModel) {
         // The search bar is where starting fresh starts, once the welcome is done.
         if (model.welcome == null) model.askForSearch()
     }
+    TextButton(onClick = { model.welcomeChosen(); model.chooseBackup() }) { Text("Restore from a Forage backup…") }
 }
 
 @Composable

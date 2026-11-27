@@ -141,7 +141,11 @@ private fun PhoneApp(model: AppModel, onImport: () -> Unit) {
                 if (model.isPrivate) {
                     IconButton(onClick = { model.onLock?.invoke() }) { Icon(Icons.Outlined.Lock, contentDescription = "Lock private vault") }
                 }
-                IconButton(onClick = onImport) { Icon(Icons.Outlined.FileDownload, contentDescription = "Import a library") }
+                // The ways to bring a library in (Takeout, another app, another device), for whoever skipped
+                // the welcome; in the vault, its file picker (backups) as before.
+                IconButton(onClick = if (model.isPrivate) onImport else model::openImportGuide) {
+                    Icon(Icons.Outlined.FileDownload, contentDescription = "Import a library")
+                }
                 // How sync stands, always in sight (and a reminder that it's there to set up).
                 model.sync?.let { sync ->
                     IconButton(onClick = { model.openSettings(forage.app.SettingsPage.SYNC) }) {
@@ -367,7 +371,7 @@ private fun Sidebar(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
         if (model.isPrivate) {
             NavItem(Icons.Outlined.Lock, "Lock private vault", selected = false) { model.onLock?.invoke() }
         } else {
-            NavItem(Icons.Outlined.FileDownload, "Import", selected = false, enabled = model.job == null, onClick = onImport)
+            NavItem(Icons.Outlined.FileDownload, "Import", selected = false, enabled = model.job == null, onClick = model::openImportGuide)
         }
         model.sync?.let { SyncItem(model, it) }
         SettingsItem(model)
