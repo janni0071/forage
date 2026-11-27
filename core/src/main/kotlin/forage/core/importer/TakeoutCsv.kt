@@ -4,7 +4,15 @@ import forage.core.PlatformId
 import java.time.Instant
 import java.time.OffsetDateTime
 
-data class PlaylistEntry(val video: PlatformId, val addedAt: Instant?)
+/** A playlist's video; other apps' exports also say what it is, Takeout's only which. */
+data class PlaylistEntry(
+    val video: PlatformId,
+    val addedAt: Instant?,
+    val title: String? = null,
+    val channel: PlatformId? = null,
+    val channelName: String? = null,
+    val durationSeconds: Long? = null,
+)
 
 data class Subscription(val channel: PlatformId, val name: String?)
 

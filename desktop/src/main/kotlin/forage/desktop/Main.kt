@@ -141,9 +141,9 @@ fun main(args: Array<String>) {
                 App(active, chrome = chrome, onImport = {
                     val chooser = JFileChooser().apply {
                         fileSelectionMode = JFileChooser.FILES_AND_DIRECTORIES
-                        dialogTitle = "Choose the Takeout zip, or the folder it was extracted to"
+                        dialogTitle = "Choose an export: Google Takeout (zip or folder), NewPipe (zip), FreeTube (.db) or LibreTube (.json)"
                     }
-                    if (chooser.showOpenDialog(window) == JFileChooser.APPROVE_OPTION) model.importTakeout(chooser.selectedFile)
+                    if (chooser.showOpenDialog(window) == JFileChooser.APPROVE_OPTION) model.importFile(chooser.selectedFile)
                 })
             }
             }

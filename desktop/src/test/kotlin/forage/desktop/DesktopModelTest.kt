@@ -486,6 +486,32 @@ class DesktopModelTest {
         }
     }
 
+    @Test
+    fun `an export from another app imports through the one Import, positions included`() {
+        val ch = "UC" + "x".repeat(22)
+        val history = """{"videoId":"aaaaaaaaaa1","title":"Dovetails by hand","author":"Workshop Wren","authorId":"$ch","published":1700000000000,"lengthSeconds":600,"watchProgress":125,"timeWatched":1710000000000,"isLive":false,"type":"video","_id":"h1"}""" + "\n"
+        val file = dir.resolve("freetube-watch-history-2026-11-27.db").apply { writeText(history) }
+        model.importFile(file)
+        waitFor { model.job == null }
+        assertEquals("Imported from FreeTube: 1 history entry and where you left off in 1 video. Nothing was liked; that's up to you.", model.message)
+        assertEquals(forage.core.library.PlaybackPosition(125, 600), model.library.playbackPositions()[id("aaaaaaaaaa1")])
+        assertEquals("Dovetails by hand", model.library.video(id("aaaaaaaaaa1"))?.title)
+
+        // Something else: what to pick instead.
+        model.importFile(dir.resolve("notes.txt").apply { writeText("just some notes") })
+        waitFor { model.job == null }
+        assertTrue("isn't an export Forage knows" in model.message!!, model.message)
+
+        // The library's Import opens the ways in; Back from one of them returns to the choice, then leaves.
+        model.closeWelcome()
+        model.openImportGuide()
+        model.welcomeTo(forage.app.WelcomeStep.APPS)
+        model.back()
+        assertEquals(forage.app.WelcomeStep.BRING, model.welcome)
+        model.back()
+        assertEquals(null, model.welcome)
+    }
+
     private fun waitFor(condition: () -> Boolean) {
         val until = System.currentTimeMillis() + 10_000
         while (!condition()) {

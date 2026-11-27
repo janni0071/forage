@@ -8,6 +8,7 @@ import forage.core.Platforms
 import forage.core.db.ForageDatabase
 import forage.core.embedding.Embedder
 import forage.core.embedding.EmbeddingStore
+import forage.core.importer.AppExports
 import forage.core.importer.TakeoutData
 import forage.core.importer.TakeoutFolder
 import forage.core.language.LanguageDetector
@@ -1314,9 +1315,33 @@ class AppModel(
         welcome = step
     }
 
-    /** The steps for importing from YouTube, from Get started or the library. */
+    /** The step the welcome was opened at later on (Get started, the library), for where Back goes. */
+    private var welcomeOpenedAt: WelcomeStep? = null
+
+    /** The steps for importing from YouTube, from Get started. */
     fun openTakeoutGuide() {
+        welcomeOpenedAt = WelcomeStep.TAKEOUT
         welcome = WelcomeStep.TAKEOUT
+    }
+
+    /** The ways to bring a library in (Takeout, another app, another device), from the library. */
+    fun openImportGuide() {
+        welcomeOpenedAt = WelcomeStep.BRING
+        welcome = WelcomeStep.BRING
+    }
+
+    /** Where Back goes from [step] within the welcome; null where it leaves the welcome (or, at its start, does nothing). */
+    fun welcomeParent(step: WelcomeStep): WelcomeStep? {
+        val fromChoices = welcomeAtFirstLaunch || welcomeOpenedAt == WelcomeStep.BRING
+        return when (step) {
+            WelcomeStep.BRING -> if (welcomeAtFirstLaunch) WelcomeStep.HELLO else null
+            WelcomeStep.TAKEOUT, WelcomeStep.PAIR, WelcomeStep.APPS -> if (fromChoices) WelcomeStep.BRING else null
+            WelcomeStep.PLAYER -> WelcomeStep.BRING
+            WelcomeStep.VAULT_LOOK -> WelcomeStep.VAULT_HELLO
+            WelcomeStep.VAULT_PLATFORMS -> WelcomeStep.VAULT_LOOK
+            WelcomeStep.VAULT_EXTRAS -> WelcomeStep.VAULT_PLATFORMS
+            WelcomeStep.HELLO, WelcomeStep.VAULT_HELLO -> null
+        }
     }
 
     /**
@@ -1330,6 +1355,7 @@ class AppModel(
 
     fun closeWelcome() {
         welcome = null
+        welcomeOpenedAt = null
         if (welcomeAtFirstLaunch) {
             // The vault's welcome comes once, as it's created; nothing to remember outside it.
             if (!isPrivate) settings.welcomeDone = true
@@ -1337,17 +1363,12 @@ class AppModel(
         }
     }
 
-    /** Back within the welcome: a step back, or out of the Takeout steps opened on their own. */
+    /** Back within the welcome: a step back, or out of steps opened on their own. */
     fun welcomeBack() {
-        welcome = when (welcome) {
-            WelcomeStep.BRING -> WelcomeStep.HELLO
-            WelcomeStep.TAKEOUT, WelcomeStep.PAIR -> if (welcomeAtFirstLaunch) WelcomeStep.BRING else null
-            WelcomeStep.PLAYER -> WelcomeStep.BRING
-            WelcomeStep.VAULT_LOOK -> WelcomeStep.VAULT_HELLO
-            WelcomeStep.VAULT_PLATFORMS -> WelcomeStep.VAULT_LOOK
-            WelcomeStep.VAULT_EXTRAS -> WelcomeStep.VAULT_PLATFORMS
-            else -> welcome
-        }
+        val step = welcome ?: return
+        if (step.first) return
+        welcome = welcomeParent(step)
+        if (welcome == null) closeWelcome()
     }
 
     fun changeTheme(value: Theme) {
@@ -1687,17 +1708,36 @@ class AppModel(
         }
     }
 
-    /** Imports a Takeout export: the extracted folder, or the zip as Google offers it. */
-    fun importTakeout(file: File) = importTakeout(file.name) {
-        if (file.isDirectory) TakeoutFolder.read(file) else file.inputStream().use(TakeoutFolder::readZip)
+    /**
+     * Imports an export: a Takeout folder, or a file, told apart by its contents (a Takeout zip, or
+     * NewPipe's, FreeTube's or LibreTube's export; see [AppExports]).
+     */
+    fun importFile(file: File) =
+        if (file.isDirectory) importData(file.name) { TakeoutFolder.read(file) } else importFile(file.name) { file.inputStream() }
+
+    /** Imports the export [open] opens (afresh each time it's called), wherever it comes from (a phone's file picker, say). */
+    fun importFile(name: String, open: () -> java.io.InputStream) = importData(name) {
+        AppExports.read(name, open, platform::scratchDatabase, File(dataDir, "import-tmp"))
     }
 
-    /** Imports a Takeout export that [read] reads, wherever it comes from (a phone's file picker, say). */
-    fun importTakeout(name: String, read: () -> TakeoutData) = runJob("Importing $name") { _ ->
-        val summary = library.importTakeout(read())
+    private fun importData(name: String, read: () -> TakeoutData) = runJob("Importing $name") { _ ->
+        val data = read()
+        val summary = library.importTakeout(data)
         reload()
-        "Imported ${summary.watchEvents} watch events, ${summary.playlists.size} playlists and " +
-            "${summary.subscriptions} subscriptions. Nothing was liked; that's up to you."
+        describeImport(data.source, summary)
+    }
+
+    private fun describeImport(source: String, s: forage.core.library.ImportSummary): String {
+        fun count(n: Int, one: String, many: String = one + "s") = "$n ${if (n == 1) one else many}"
+        val parts = buildList {
+            if (s.watchEvents > 0) add(count(s.watchEvents, "history entry", "history entries"))
+            if (s.playlists.isNotEmpty()) add(count(s.playlists.size, "playlist"))
+            if (s.subscriptions > 0) add(count(s.subscriptions, "subscription"))
+            if (s.positions > 0) add("where you left off in ${count(s.positions, "video")}")
+        }
+        if (parts.isEmpty()) return "Nothing to import from $source in that file"
+        val list = if (parts.size == 1) parts.single() else parts.dropLast(1).joinToString(", ") + " and " + parts.last()
+        return "Imported from $source: $list." + if (s.watchEvents > 0 || s.playlists.isNotEmpty()) " Nothing was liked; that's up to you." else ""
     }
 
     // Profiles
@@ -2852,6 +2892,6 @@ enum class SettingsPage(val title: String) {
  * work well.
  */
 enum class WelcomeStep(val first: Boolean = false) {
-    HELLO(first = true), BRING, TAKEOUT, PAIR, PLAYER,
+    HELLO(first = true), BRING, TAKEOUT, APPS, PAIR, PLAYER,
     VAULT_HELLO(first = true), VAULT_LOOK, VAULT_PLATFORMS, VAULT_EXTRAS,
 }

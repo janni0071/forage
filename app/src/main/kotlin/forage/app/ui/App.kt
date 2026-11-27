@@ -367,7 +367,7 @@ private fun Sidebar(model: AppModel, onImport: () -> Unit, chrome: WindowChrome?
         if (model.isPrivate) {
             NavItem(Icons.Outlined.Lock, "Lock private vault", selected = false) { model.onLock?.invoke() }
         } else {
-            NavItem(Icons.Outlined.FileDownload, "Import Takeout", selected = false, enabled = model.job == null, onClick = onImport)
+            NavItem(Icons.Outlined.FileDownload, "Import", selected = false, enabled = model.job == null, onClick = onImport)
         }
         model.sync?.let { SyncItem(model, it) }
         SettingsItem(model)

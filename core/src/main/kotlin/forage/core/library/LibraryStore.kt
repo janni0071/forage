@@ -10,7 +10,7 @@ import forage.core.source.VideoStub
 import forage.core.importer.WatchEvent
 import java.time.Instant
 
-data class ImportSummary(val watchEvents: Int, val playlists: Map<String, Int>, val subscriptions: Int)
+data class ImportSummary(val watchEvents: Int, val playlists: Map<String, Int>, val subscriptions: Int, val positions: Int = 0)
 
 /** What the library knows about a video without any metadata fetch. */
 data class LibraryVideo(
@@ -61,7 +61,9 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
     /** Adds a Takeout export. Importing the same or an overlapping export again adds nothing twice. */
     fun importTakeout(data: TakeoutData): ImportSummary {
         val now = clock().epochSecond
+        var positions = 0
         queries.transaction {
+            for (v in data.videos) remember(v.id, v.title, v.channel, v.channelName, v.isShort, v.durationSeconds, v.uploadedAt)
             for (e in data.history.events) {
                 remember(e.video, e.title, e.channel, e.channelName, e.isShort)
                 queries.insertWatchEvent(e.video.toString(), e.watchedAt?.epochSecond ?: 0)
@@ -70,14 +72,14 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
                 // YouTube's Watch later is the queue, not a playlist of its own.
                 if (playlist in TakeoutFolder.WATCH_LATER) {
                     for (entry in entries) {
-                        remember(entry.video)
+                        remember(entry.video, entry.title, entry.channel, entry.channelName, durationSeconds = entry.durationSeconds)
                         queries.insertWatchLater(entry.video.toString(), entry.addedAt?.epochSecond ?: now)
                     }
                     continue
                 }
                 queries.insertPlaylist(playlist, entries.mapNotNull { it.addedAt?.epochSecond }.minOrNull() ?: now)
                 for (entry in entries) {
-                    remember(entry.video)
+                    remember(entry.video, entry.title, entry.channel, entry.channelName, durationSeconds = entry.durationSeconds)
                     queries.upsertPlaylistItem(playlist, entry.video.toString(), entry.addedAt?.epochSecond)
                 }
             }
@@ -85,8 +87,16 @@ class LibraryStore(db: ForageDatabase, private val clock: () -> Instant = Instan
                 queries.insertSubscription(s.channel.toString(), now)
                 queries.updateSubscription(s.name, s.channel.toString())
             }
+            // Where you left off, kept as Forage's own player keeps it: from 10 seconds in, and not
+            // once it's (nearly) played to the end. A position needs the video's length.
+            for ((id, seconds) in data.positions) {
+                val duration = video(id)?.durationSeconds ?: continue
+                if (seconds < 10 || seconds >= duration - 20 || seconds >= duration * 0.95) continue
+                savePlaybackPosition(id, PlaybackPosition(seconds, duration))
+                positions++
+            }
         }
-        return ImportSummary(data.history.events.size, data.playlists.mapValues { it.value.size }, data.subscriptions.size)
+        return ImportSummary(data.history.events.size, data.playlists.mapValues { it.value.size }, data.subscriptions.size, positions)
     }
 
     /** Makes a video known, keeping whatever details were known before where the new ones are missing. */

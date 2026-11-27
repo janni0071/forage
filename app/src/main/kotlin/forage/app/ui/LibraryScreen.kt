@@ -326,7 +326,7 @@ private fun EmptyLibrary(model: AppModel, onImport: () -> Unit) {
                 "Search or add videos by their link and like them. They stay here, encrypted, " +
                     "apart from everything else in Forage."
             } else {
-                "Import a Google Takeout export of your YouTube data, or search for videos and like them. " +
+                "Import your YouTube history from Google Takeout, NewPipe, FreeTube or LibreTube, or search for videos and like them. " +
                     "Imported videos land in your history and playlists; recommendations come only from what you like."
             },
             style = MaterialTheme.typography.bodyLarge,
@@ -335,9 +335,8 @@ private fun EmptyLibrary(model: AppModel, onImport: () -> Unit) {
             modifier = Modifier.padding(vertical = 16.dp).widthIn(max = 640.dp),
         )
         // Side by side in a window; stacked on a phone, where they don't fit next to each other.
-        val importLabel = if (model.platform.isMobile) "Import Takeout zip" else "Import Takeout"
         val buttons: @Composable () -> Unit = {
-            if (!model.isPrivate) AccentButton(importLabel, Icons.Outlined.CloudDownload, onClick = onImport)
+            if (!model.isPrivate) AccentButton("Import", Icons.Outlined.CloudDownload, onClick = model::openImportGuide)
             if (model.isPrivate) AccentButton("Search", Icons.Outlined.Search, onClick = model::askForSearch)
             else OutlinedButton(onClick = model::askForSearch, shape = RoundedCornerShape(12.dp)) { Text("Search for videos", maxLines = 1) }
             TextButton(onClick = { model.addDialogOpen = true }) { Text("Add by link", maxLines = 1) }

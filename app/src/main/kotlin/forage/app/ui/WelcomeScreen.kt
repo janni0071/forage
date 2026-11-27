@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.NoAccounts
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -85,7 +86,7 @@ fun WelcomeScreen(model: AppModel, step: WelcomeStep, onImport: () -> Unit, chro
                 chrome?.titleBar?.invoke()
                 // Back and Skip (or Close), above the step.
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (!step.first && (model.welcomeAtFirstLaunch || step == WelcomeStep.PLAYER)) {
+                    if (model.welcomeParent(step) != null) {
                         IconButton(onClick = model::welcomeBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back") }
                     }
                     Spacer(Modifier.weight(1f))
@@ -102,6 +103,7 @@ fun WelcomeScreen(model: AppModel, step: WelcomeStep, onImport: () -> Unit, chro
                             WelcomeStep.HELLO -> Hello(model)
                             WelcomeStep.BRING -> Bring(model)
                             WelcomeStep.TAKEOUT -> Takeout(model, onImport)
+                            WelcomeStep.APPS -> OtherApps(model, onImport)
                             WelcomeStep.PAIR -> Pair(model)
                             WelcomeStep.PLAYER -> ChoosePlayer(model)
                             WelcomeStep.VAULT_HELLO -> VaultHello(model)
@@ -144,6 +146,10 @@ private fun ColumnScope.Bring(model: AppModel) {
         Icons.Outlined.FileDownload, "Import from YouTube",
         "Your watch history, playlists and subscriptions, through Google Takeout. A few clicks, then Google emails you the file.",
     ) { model.welcomeTo(WelcomeStep.TAKEOUT) }
+    Choice(
+        Icons.Outlined.SwapHoriz, "Import from NewPipe, FreeTube or LibreTube",
+        "Your history, playlists, subscriptions and where you left off, from the app you use now. A minute, no waiting.",
+    ) { model.welcomeTo(WelcomeStep.APPS) }
     model.sync?.let {
         Choice(Icons.Outlined.Devices, "I use Forage on another device", "Pair the two, and your library comes over your Wi-Fi.") {
             model.welcomeTo(WelcomeStep.PAIR)
@@ -197,6 +203,41 @@ private fun ColumnScope.Takeout(model: AppModel, onImport: () -> Unit) {
         TextButton(onClick = model::welcomeChosen) { Text(if (model.welcomeAtFirstLaunch) "Wait for the email" else "Later") }
     }
     Hint("Meanwhile you can search and like videos already. Home's Get started keeps this step until it's done.")
+    TextButton(onClick = { model.welcomeTo(WelcomeStep.APPS) }, modifier = Modifier.padding(top = 4.dp)) {
+        Text("Using NewPipe, FreeTube or LibreTube? Import from there instead")
+    }
+}
+
+@Composable
+private fun ColumnScope.OtherApps(model: AppModel, onImport: () -> Unit) {
+    Title("Import from another app")
+    Lead("Forage reads what NewPipe, FreeTube and LibreTube export: your history, playlists, subscriptions and where you left off in videos.")
+    AppSteps("NewPipe", "Settings, Backup and restore (Content in older versions), Export database.", "Import the zip it saves.")
+    AppSteps(
+        "FreeTube", "Settings, Data settings: Export subscriptions (FreeTube format), Export history and Export playlists.",
+        "Import each of the three files; any one of them is fine too.",
+    )
+    AppSteps("LibreTube", "Settings, Backup and restore, Backup, with everything ticked.", "Import the JSON file it saves.")
+    Spacer(Modifier.height(20.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AccentButton("Choose the export", Icons.Outlined.FileDownload) {
+            onImport()
+            model.welcomeChosen()
+        }
+        TextButton(onClick = model::welcomeChosen) { Text("Later") }
+    }
+    Hint(if (model.platform.isMobile) "Save the export where this device can find it (its Downloads, say), then choose it here." else "Choose the file wherever the app saved it.")
+}
+
+/** Where an app keeps its export, and what to do with the file. */
+@Composable
+private fun AppSteps(app: String, where: String, then: String) {
+    val c = MaterialTheme.colorScheme
+    Column(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surfaceContainer).padding(16.dp)) {
+        Text(app, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text("In $app: $where", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+        Text(then, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+    }
 }
 
 @Composable

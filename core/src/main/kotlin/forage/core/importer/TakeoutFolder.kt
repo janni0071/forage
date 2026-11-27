@@ -1,15 +1,37 @@
 package forage.core.importer
 
+import forage.core.PlatformId
 import java.io.File
+import java.time.Instant
 import java.io.InputStream
 import java.util.zip.ZipInputStream
 
-/** Everything Forage reads from an extracted Takeout archive. */
+/**
+ * Everything Forage reads from an import: a Takeout archive, or another app's export (NewPipe,
+ * FreeTube, LibreTube), which also say more about each video and how far into it you got.
+ */
 data class TakeoutData(
     val history: ImportResult,
     /** Playlist name to its videos. */
     val playlists: Map<String, List<PlaylistEntry>>,
     val subscriptions: List<Subscription>,
+    /** What's known about videos besides the history's own (length, upload date), from apps that keep it. */
+    val videos: List<KnownVideo> = emptyList(),
+    /** How far into each video it was left off, in seconds. */
+    val positions: Map<PlatformId, Long> = emptyMap(),
+    /** Where it came from, for what's said about it ("Google Takeout", "NewPipe"…). */
+    val source: String = "Google Takeout",
+)
+
+/** A video as another app's export describes it. */
+data class KnownVideo(
+    val id: PlatformId,
+    val title: String? = null,
+    val channel: PlatformId? = null,
+    val channelName: String? = null,
+    val durationSeconds: Long? = null,
+    val uploadedAt: Instant? = null,
+    val isShort: Boolean = false,
 )
 
 object TakeoutFolder {

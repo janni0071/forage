@@ -37,7 +37,6 @@ import forage.app.ui.LocalVideoSurface
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import forage.core.importer.TakeoutFolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -57,23 +56,18 @@ class MainActivity : ComponentActivity() {
         if (uri == null) return@registerForActivityResult
         val model = app.model ?: return@registerForActivityResult
         val head = runCatching { contentResolver.openInputStream(uri)?.use { it.readNBytes(16) } }.getOrNull() ?: ByteArray(0)
+        val name = fileName(uri) ?: "the export"
+        val open = { contentResolver.openInputStream(uri) ?: error("Couldn't read $name") }
         when {
-            head.size >= 2 && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte() -> {
-                val name = fileName(uri) ?: "the Takeout export"
-                model.importTakeout(name) {
-                    contentResolver.openInputStream(uri)?.use(TakeoutFolder::readZip) ?: error("Couldn't read $name")
-                }
-            }
             // A Forage backup: restored into what's on screen (the private vault, if it's unlocked).
-            forage.core.backup.Backups.isBackup(head) -> {
-                val name = fileName(uri) ?: "the backup"
-                (model.privateModel ?: model).offerRestore(forage.app.PickedFile(name, -1) {
-                    contentResolver.openInputStream(uri) ?: error("Couldn't read $name")
-                })
-            }
-            head.decodeToString(0, minOf(head.size, 15)) == "SQLite format 3" ->
+            forage.core.backup.Backups.isBackup(head) ->
+                (model.privateModel ?: model).offerRestore(forage.app.PickedFile(name, -1, open))
+            // A forage.db from a computer (NewPipe's own database is imported like its export).
+            head.decodeToString(0, minOf(head.size, 15)) == "SQLite format 3" && !name.contains("newpipe", ignoreCase = true) ->
                 if (model.libraryEmpty) replaceDatabase(uri) else pendingDatabase = uri
-            else -> Toast.makeText(this, "Pick a Takeout zip from Google, a Forage backup, or a forage.db from your computer", Toast.LENGTH_LONG).show()
+            // Takeout, NewPipe, FreeTube, LibreTube: told apart by their contents, and refused with
+            // what to pick instead if they're none of these.
+            else -> model.importFile(name, open)
         }
     }
 
