@@ -9,11 +9,19 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Which version of Forage to build: "full" (the default: Pornhub in the private vault) or
+// "standard" (without it, and without any of its code): gradle -Pedition=standard …
+val edition = (findProperty("edition") ?: "full").toString()
+require(edition == "full" || edition == "standard") { "edition is full or standard, not $edition" }
+/** The Linux package's name: forage, or forage-full. */
+val debName = if (edition == "full") "forage-full" else "forage"
+
 kotlin {
     jvmToolchain(21)
-    // The model and screens shared with the Android app.
+    // The model and screens shared with the Android app, and this version's own part of them.
     sourceSets.main {
         kotlin.srcDir("../app/src/main/kotlin")
+        kotlin.srcDir("../app/src/$edition/kotlin")
         kotlin.srcDir("../build/generated/version")
     }
 }
@@ -21,7 +29,7 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(project(":source-youtube"))
-    implementation(project(":source-pornhub"))
+    if (edition == "full") implementation(project(":source-pornhub"))
     implementation(project(":embedding-onnx"))
     implementation(libs.onnxruntime)
     implementation(project(":language-lingua"))
@@ -61,7 +69,7 @@ compose.desktop {
                 "jdk.dynalink", "jdk.unsupported", "jdk.crypto.ec", "java.naming",
             )
             linux {
-                packageName = "forage"
+                packageName = debName
                 iconFile.set(project.file("icons/forage.png"))
                 shortcut = true
                 menuGroup = "AudioVideo"
@@ -164,4 +172,25 @@ tasks.register<JavaExec>("readmeScreenshots") {
     mainClass = "forage.desktop.ReadmeScreenshotsKt"
     jvmArgs("-Djava.awt.headless=true")
     args((project.findProperty("data") ?: "").toString(), rootProject.file("docs/screenshots").path)
+}
+
+// The Linux package as released: the one packageDeb makes, declaring that it replaces the other
+// version (forage and forage-full install to different places, but are one app with one library),
+// so installing one swaps out the other. Lands in build/release/<name>_<version>_amd64.deb.
+tasks.register("packageReleaseDebFile") {
+    dependsOn("packageDeb")
+    val other = if (edition == "full") "forage" else "forage-full"
+    val version = project.version.toString()
+    val debDir = layout.buildDirectory.dir("compose/binaries/main/deb")
+    val out = layout.buildDirectory.file("release/${debName}_${version}_amd64.deb")
+    outputs.file(out)
+    doLast {
+        val deb = debDir.get().asFile.listFiles { f -> f.name.startsWith("${debName}_") && f.name.endsWith(".deb") }.orEmpty().single()
+        val work = temporaryDir.resolve("root").apply { deleteRecursively() }
+        providers.exec { commandLine("dpkg-deb", "-R", deb.path, work.path) }.result.get()
+        val control = work.resolve("DEBIAN/control")
+        control.writeText(control.readText().trimEnd() + "\nConflicts: $other\nReplaces: $other\n")
+        out.get().asFile.parentFile.mkdirs()
+        providers.exec { commandLine("dpkg-deb", "--root-owner-group", "-b", work.path, out.get().asFile.path) }.result.get()
+    }
 }

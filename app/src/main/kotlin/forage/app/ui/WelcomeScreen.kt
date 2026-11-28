@@ -424,7 +424,8 @@ private fun ColumnScope.VaultLookStep(model: AppModel) {
         }
     }
     Spacer(Modifier.height(28.dp))
-    AccentButton("Continue", null) { model.welcomeTo(WelcomeStep.VAULT_PLATFORMS) }
+    // The vault's platforms are a choice only where it has a site of its own (Full).
+    AccentButton("Continue", null) { model.welcomeTo(if (forage.app.Edition.vaultSite != null) WelcomeStep.VAULT_PLATFORMS else WelcomeStep.VAULT_EXTRAS) }
 }
 
 @Composable
@@ -488,7 +489,7 @@ private fun ColumnScope.VaultExtras(model: AppModel) {
         }
     }
     if (Player.IN_APP in model.platform.players) {
-        Extra(
+        if (model.vaultSite != null) Extra(
             Icons.Outlined.Block, "Ads stay out",
             "Videos play right here, and the player isn't let to load ads, so they start at once. Settings, Playback, can turn that off.",
             done = true,

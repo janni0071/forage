@@ -1,5 +1,7 @@
 package forage.source.pornhub
 
+import forage.core.sql.JdbcSqlFile
+import forage.core.sql.SqlFile
 import forage.core.PlatformId
 import forage.core.source.CatalogueMatch
 import forage.core.source.VideoCatalogue

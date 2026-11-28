@@ -4,7 +4,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import forage.core.PlatformId
 import forage.core.embedding.Embedder
 import forage.core.language.LanguageDetector
-import forage.source.pornhub.SqlFile
+import forage.core.sql.SqlFile
 import java.io.File
 import java.io.InputStream
 

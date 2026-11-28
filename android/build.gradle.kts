@@ -34,6 +34,14 @@ android {
         }
     }
 
+    // Standard (without the private vault's site, and without its code) and Full (with Pornhub
+    // there). One app, one application id and key: installing one over the other keeps the library.
+    flavorDimensions += "edition"
+    productFlavors {
+        create("standard") { dimension = "edition" }
+        create("full") { dimension = "edition" }
+    }
+
     buildTypes {
         release {
             // Strips unused code only (see proguard-rules.pro): mostly the Material icons.
@@ -53,6 +61,8 @@ android {
 
     sourceSets["main"].java.srcDir("../app/src/main/kotlin")
     sourceSets["main"].java.srcDir("../build/generated/version")
+    sourceSets["standard"].java.srcDir("../app/src/standard/kotlin")
+    sourceSets["full"].java.srcDir("../app/src/full/kotlin")
 
     packaging {
         resources {
@@ -68,7 +78,7 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(project(":source-youtube"))
-    implementation(project(":source-pornhub"))
+    "fullImplementation"(project(":source-pornhub"))
     implementation(project(":embedding-onnx"))
     // The update check reads GitHub's answer (shared app code).
     implementation(libs.serialization.json)

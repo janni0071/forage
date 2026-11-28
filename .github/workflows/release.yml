@@ -1,11 +1,12 @@
 # Builds and publishes a release when a version tag is pushed (v0.21.0 for forage.version=0.21.0):
-# the tests, the desktop .deb and the signed Android APK, attached to a GitHub release whose notes
-# come from docs/releases/<version>.md.
+# the tests, then both versions (Standard and Full) as Linux packages and signed Android APKs,
+# attached to a GitHub release whose notes come from docs/releases/<version>.md.
 #
 # Needs two repository secrets (Settings, Secrets and variables, Actions):
 #   FORAGE_KEYSTORE_BASE64   the signing key, base64-encoded (base64 -w0 forage-release.jks)
 #   FORAGE_KEYSTORE_PASSWORD its password
 # Without them the release stops: an APK signed with another key couldn't update installed ones.
+# Packaging the second Linux package needs dpkg-deb, which the runner has.
 name: Release
 
 on:
@@ -67,20 +68,27 @@ jobs:
       - name: Test
         run: ./gradlew test
 
-      - name: Build the desktop package and the Android app
-        run: ./gradlew :desktop:packageDeb :android:assembleRelease
+      # Both versions: Standard (without the private vault's site) and Full.
+      - name: Build the Linux packages and the Android apps
+        run: |
+          ./gradlew :desktop:packageReleaseDebFile :android:assembleStandardRelease :android:assembleFullRelease
+          ./gradlew -Pedition=standard :desktop:packageReleaseDebFile
 
       - name: Collect the files
         run: |
           mkdir out
-          cp desktop/build/compose/binaries/main/deb/*.deb "out/forage_${VERSION}_amd64.deb"
-          cp android/build/outputs/apk/release/*-release.apk "out/forage-${VERSION}.apk"
-          # The APK must carry Forage's own signature, never the debug key's.
-          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "out/forage-${VERSION}.apk" | tee signature.txt
-          if grep -q "CN=Android Debug" signature.txt; then
-            echo "::error::The APK is signed with the debug key"
-            exit 1
-          fi
+          cp "desktop/build/release/forage_${VERSION}_amd64.deb" out/
+          cp "desktop/build/release/forage-full_${VERSION}_amd64.deb" out/
+          cp android/build/outputs/apk/standard/release/android-standard-release.apk "out/forage-${VERSION}.apk"
+          cp android/build/outputs/apk/full/release/android-full-release.apk "out/forage-full-${VERSION}.apk"
+          # The APKs must carry Forage's own signature, never the debug key's.
+          for apk in out/*.apk; do
+            "$(ls -d "$ANDROID_HOME"/build-tools/* | tail -1)"/apksigner verify --print-certs "$apk" | tee signature.txt
+            if grep -q "CN=Android Debug" signature.txt; then
+              echo "::error::$apk is signed with the debug key"
+              exit 1
+            fi
+          done
           (cd out && sha256sum * > SHA256SUMS)
 
       - uses: softprops/action-gh-release@v2

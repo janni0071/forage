@@ -25,7 +25,7 @@ import forage.core.language.LanguageDetector
 import forage.core.db.ForageDatabase
 import forage.core.vault.PrivateVaults
 import forage.core.vault.VaultDamagedException
-import forage.source.pornhub.SqlFile
+import forage.core.sql.SqlFile
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import java.io.File
 

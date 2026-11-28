@@ -17,7 +17,9 @@ class UpdatesTest {
     private fun release(tag: String, prerelease: Boolean = false) = """
         {"tag_name":"$tag","html_url":"https://github.com/${Updates.REPOSITORY}/releases/tag/$tag","draft":false,"prerelease":$prerelease,
          "assets":[{"name":"forage-${tag.removePrefix("v")}.apk","browser_download_url":"https://example.org/forage.apk"},
+                   {"name":"forage-full-${tag.removePrefix("v")}.apk","browser_download_url":"https://example.org/forage-full.apk"},
                    {"name":"forage_${tag.removePrefix("v")}_amd64.deb","browser_download_url":"https://example.org/forage.deb"},
+                   {"name":"forage-full_${tag.removePrefix("v")}_amd64.deb","browser_download_url":"https://example.org/forage-full.deb"},
                    {"name":"SHA256SUMS","browser_download_url":"https://example.org/sums"}]}
     """.trimIndent()
 
@@ -31,13 +33,17 @@ class UpdatesTest {
 
     @Test
     fun `a newer release is found with the file for this device, an older one or a prerelease isn't`() {
-        val update = Updates.newer(release("v99.0.0"), "0.21.0", "_amd64.deb")!!
+        val standardDeb = { v: String -> "forage_${v}_amd64.deb" }
+        val update = Updates.newer(release("v99.0.0"), "0.21.0", standardDeb)!!
         assertEquals("99.0.0", update.version)
         assertEquals("https://example.org/forage.deb", update.download)
-        assertEquals("https://example.org/forage.apk", Updates.newer(release("v99.0.0"), "0.21.0", ".apk")!!.download)
-        assertNull(Updates.newer(release("v0.20.0"), "0.21.0", ".apk"))
-        assertNull(Updates.newer(release("v0.21.0"), "0.21.0", ".apk"))
-        assertNull(Updates.newer(release("v99.0.0", prerelease = true), "0.21.0", ".apk"))
+        // Each version gets its own file: Standard's and Full's APKs both end in .apk.
+        assertEquals("https://example.org/forage.apk", Updates.newer(release("v99.0.0"), "0.21.0") { "forage-$it.apk" }!!.download)
+        assertEquals("https://example.org/forage-full.apk", Updates.newer(release("v99.0.0"), "0.21.0") { "forage-full-$it.apk" }!!.download)
+        assertEquals("https://example.org/forage-full.deb", Updates.newer(release("v99.0.0"), "0.21.0", forage.app.Edition::releaseFile.let { f -> { v: String -> f(v, false) } })!!.download)
+        assertNull(Updates.newer(release("v0.20.0"), "0.21.0", standardDeb))
+        assertNull(Updates.newer(release("v0.21.0"), "0.21.0", standardDeb))
+        assertNull(Updates.newer(release("v99.0.0", prerelease = true), "0.21.0", standardDeb))
     }
 
     @Test

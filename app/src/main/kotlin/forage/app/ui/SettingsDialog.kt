@@ -242,13 +242,15 @@ private fun PlaybackPage(model: AppModel) {
             LaunchedEffect(Unit) { model.checkPlayers() }
             PlayerChoice(model)
             // The vault's videos come from Pornhub too, which FreeTube doesn't play.
-            if (model.isPrivate && model.player == Player.FREETUBE) {
-                Hint("FreeTube plays YouTube only: Pornhub videos open in the browser. mpv plays both, without the website.")
+            val site = model.vaultSite
+            if (model.isPrivate && site != null && model.player == Player.FREETUBE) {
+                Hint("FreeTube plays YouTube only: ${site.name} videos open in the browser. mpv plays both, without the website.")
             }
             MpvSetupCard(model)
         }
         // The vault's videos play in the site's embedded player here: its ads can be kept out.
-        if (model.isPrivate && Player.IN_APP in model.platform.players) {
+        // The site's embedded player is the one with ads (YouTube plays without them here).
+        if (model.isPrivate && model.vaultSite != null && Player.IN_APP in model.platform.players) {
             Section("Ads", null)
             SwitchRow(
                 title = "Block ads in the player",
@@ -427,9 +429,9 @@ private fun CataloguePage(model: AppModel) {
                 Text(
                     if (model.catalogueInfo == null) "Forage downloads the dump from the site (1.6 GB), imports it in a few minutes and deletes " +
                         "the download; the catalogue then takes about 1.3 GB. If the download breaks off, starting it again continues it." +
-                        (if (model.platform.isMobile) " A catalogue made on a computer (its catalogues/pornhub.db) works too." else "")
+                        (if (model.platform.isMobile) " A catalogue made on a computer (in its Forage folder, catalogues) works too." else "")
                     else "The site updates the dump now and then; download it again to catch up." +
-                    (if (model.platform.isMobile) " If a phone runs out of memory importing it, import it on a computer and choose its catalogues/pornhub.db here instead." else ""),
+                    (if (model.platform.isMobile) " If a phone runs out of memory importing it, import it on a computer and choose its catalogue (in its Forage folder, catalogues) here instead." else ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = c.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),

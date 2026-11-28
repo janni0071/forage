@@ -95,7 +95,7 @@ fun UpdateSwitch(model: AppModel) {
 fun UpdateSettings(model: AppModel) {
     val c = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(16.dp)) {
-        Text("Forage $FORAGE_VERSION", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text("Forage $FORAGE_VERSION · ${forage.app.Edition.NAME}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Row(Modifier.padding(top = 8.dp).fillMaxWidth().clickable { model.changeUpdateCheck(model.updateCheck != true) }, verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text("Tell me when there's a new version", style = MaterialTheme.typography.bodyLarge)

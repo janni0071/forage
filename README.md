@@ -22,7 +22,7 @@ like, with the reason for each pick. No account, no server, no tracking.
 - **Sync without a server.** Pair your phone, tablet and computers over your home Wi-Fi, encrypted;
   your library stays the same on all of them.
 - **A private vault.** A second library, encrypted and hidden until you unlock it with a PIN, kept
-  apart from everything else.
+  apart from everything else (in Forage Full, it can also use Pornhub).
 
 <p>
   <img src="docs/screenshots/video-page.png" width="49%" alt="A video's page">
@@ -31,13 +31,25 @@ like, with the reason for each pick. No account, no server, no tracking.
 
 ## Install
 
-Download the latest version from [Releases](https://github.com/janni0071/forage/releases).
+Download the latest version from [Releases](https://github.com/janni0071/forage/releases). Forage
+comes in two versions:
 
-**Android** (15 or newer, 64-bit ARM): download `forage-<version>.apk` on your phone and open it.
-Android asks once to allow installing apps from your browser.
+- **Forage** (Standard), for most people: everything above.
+- **Forage Full** adds one thing: the private vault can also search, recommend and play from
+  Pornhub. Standard doesn't contain any of that code.
 
-**Linux** (Debian, Ubuntu, Pop!_OS and others with `apt`, 64-bit): download
-`forage_<version>_amd64.deb`, then open it with your software installer, or:
+Both are one app with one library: installing one over the other switches versions and keeps
+everything.
+
+| | Standard | Full |
+| --- | --- | --- |
+| Android (15 or newer, 64-bit ARM) | `forage-<version>.apk` | `forage-full-<version>.apk` |
+| Linux with `apt` (Debian, Ubuntu, Pop!_OS…), 64-bit | `forage_<version>_amd64.deb` | `forage-full_<version>_amd64.deb` |
+
+**Android:** download the APK on your phone and open it. Android asks once to allow installing apps
+from your browser.
+
+**Linux:** open the package with your software installer, or:
 
 ```bash
 sudo apt install ./forage_<version>_amd64.deb
@@ -68,7 +80,7 @@ its own. It contacts only:
   and once a day if you allowed the update check.
 - **Your own devices**, on your local network, when you pair them for sync.
 
-The private vault's own site is contacted only while the vault is unlocked and you use it.
+In Forage Full, the private vault's site is contacted only while the vault is unlocked and you use it.
 
 ## Bring your library along
 
@@ -91,11 +103,12 @@ Needs JDK 21. For the Linux package also `fakeroot`, for Android the Android SDK
 ```
 
 ```bash
-./gradlew :desktop:packageDeb :android:assembleRelease
+./gradlew :desktop:packageReleaseDebFile :android:assembleFullRelease
 ```
 
-The package lands in `desktop/build/compose/binaries/main/deb/`, the APK in
-`android/build/outputs/apk/release/`. Release APKs are signed with your own key when
+That builds Forage Full; add `-Pedition=standard` for Standard's Linux package
+(`:android:assembleStandardRelease` for its APK). The packages land in `desktop/build/release/`
+(`:desktop:packageReleaseDebFile`), the APKs in `android/build/outputs/apk/<version>/release/`. Release APKs are signed with your own key when
 `FORAGE_KEYSTORE` and `FORAGE_KEYSTORE_PASSWORD` are set, otherwise with the debug key. To run the
 desktop app from source with its own data folder:
 

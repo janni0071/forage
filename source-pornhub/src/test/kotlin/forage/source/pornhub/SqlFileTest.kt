@@ -1,5 +1,7 @@
 package forage.source.pornhub
 
+import forage.core.sql.JdbcSqlFile
+import forage.core.sql.SqlFile
 import java.nio.file.Files
 import kotlin.random.Random
 import kotlin.test.Test

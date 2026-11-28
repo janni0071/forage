@@ -1,7 +1,7 @@
 package forage.android
 
 import android.database.sqlite.SQLiteDatabase
-import forage.source.pornhub.SqlFile
+import forage.core.sql.SqlFile
 import java.io.File
 
 /** SQLite through Android's own database classes, for the catalogue (an ordinary, unencrypted file). */

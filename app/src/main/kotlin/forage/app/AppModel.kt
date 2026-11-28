@@ -43,9 +43,6 @@ import forage.core.source.SourceException
 import forage.core.source.VideoStub
 import forage.core.source.Capability
 import forage.core.source.Sources
-import forage.source.pornhub.DumpDownload
-import forage.source.pornhub.PornhubCatalogue
-import forage.source.pornhub.PornhubSource
 import forage.source.youtube.YouTubeSource
 import forage.core.vault.VaultDamagedException
 import kotlinx.coroutines.CancellationException
@@ -199,11 +196,12 @@ data class VideoPage(
             val channel = shownChannel
             val name = shownChannelName
             if (channel != null) return listOf(Creator(channel, name ?: "Channel"))
-            if (id.platform == PornhubSource.PLATFORM) {
+            val site = Edition.vaultSite
+            if (site != null && id.platform == site.platform) {
                 // The details list every performer; lists before them carry the first two.
                 val performers = (details?.metadata?.extra?.get("performers") ?: name).orEmpty()
                 val listed = performers.split(", ").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-                    .map { Creator(PornhubSource.performerId(it), it) }
+                    .map { Creator(site.performerId(it), it) }
                 return listed + taggedCreators.filter { t -> listed.none { it.id == t.id } }
             }
             return listOfNotNull(name?.let { Creator(null, it) })
@@ -230,7 +228,7 @@ class AppModel(
     /** What the desktop and Android apps do differently. */
     val platform: Platform,
     /** The private vault also offers the sensitive platform (SPEC, "Sensitive platforms"). */
-    private val privateSourceFactory: () -> ExtractorSource = { Sources(YouTubeSource(), PornhubSource()) },
+    private val privateSourceFactory: () -> ExtractorSource = defaultPrivateSources,
     /** Replaceable for tests; created on first use otherwise, since it starts network clients. Last, so tests can pass it as a trailing lambda. */
     private val sourceFactory: () -> ExtractorSource = { YouTubeSource() },
 ) {
@@ -515,7 +513,7 @@ class AppModel(
     private val source by lazy(sourceFactory)
     val thumbnails = Thumbnails(storage.thumbnailsDir, decodeImage = platform::decodeImage) { id, large, fresh ->
         // The catalogue's links are stable; the platform is asked only when they're refused.
-        val fromCatalogue = if (!large && !fresh && isPrivate && id.platform == PornhubSource.PLATFORM) openCatalogue()?.thumbnailUrl(id) else null
+        val fromCatalogue = if (!large && !fresh && isPrivate && id.platform == vaultSite?.platform) openCatalogue()?.thumbnailUrl(id) else null
         fromCatalogue?.let { listOf(it) } ?: source.thumbnailUrls(id, large, fresh)
     }
 
@@ -525,8 +523,9 @@ class AppModel(
      * the platform instead, for when those don't load. Blocks.
      */
     fun previewFrames(id: PlatformId, fromPlatform: Boolean = false): List<String> {
-        if (!fromPlatform && isPrivate && id.platform == PornhubSource.PLATFORM) {
-            openCatalogue()?.thumbnailUrl(id)?.let(PornhubSource::framesFromImage)?.takeIf { it.isNotEmpty() }?.let { return it }
+        val site = vaultSite
+        if (!fromPlatform && isPrivate && site != null && id.platform == site.platform) {
+            openCatalogue()?.thumbnailUrl(id)?.let(site::framesFromImage)?.takeIf { it.isNotEmpty() }?.let { return it }
         }
         return runCatching { source.previewFrames(id) }.getOrDefault(emptyList())
     }
@@ -951,13 +950,13 @@ class AppModel(
     }
 
     /** Whether the private platform's performers can be followed here (the private vault). */
-    val followsPerformers: Boolean get() = searchPlatforms.any { it.first == PornhubSource.PLATFORM }
+    val followsPerformers: Boolean get() = vaultSite?.let { site -> searchPlatforms.any { it.first == site.platform } } == true
 
     /** Follows a performer by name, e.g. one named only in a video's tags. */
     fun followPerformer(name: String) {
         val clean = name.trim().split(Regex("\\s+")).joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
         if (clean.isEmpty()) return
-        val id = PornhubSource.performerId(clean)
+        val id = vaultSite?.performerId(clean) ?: return
         launchQuiet {
             library.follow(id, clean)
             following = library.following()
@@ -1131,7 +1130,7 @@ class AppModel(
     private fun findRelated(id: PlatformId) {
         val page = videoStack.lastOrNull { it.id == id } ?: return
         val details = page.details ?: return
-        if (details.related.isNotEmpty() || id.platform != PornhubSource.PLATFORM) return
+        if (details.related.isNotEmpty() || id.platform != vaultSite?.platform) return
         val tags = details.metadata.tags
         val related = try {
             val catalogue = openCatalogue()
@@ -1150,9 +1149,10 @@ class AppModel(
 
     /** Performers you follow (on the video's platform) whose name is among [tags]. */
     private fun taggedCreators(tags: List<String>, video: PlatformId): List<Creator> {
-        if (video.platform != PornhubSource.PLATFORM || tags.isEmpty()) return emptyList()
+        val site = vaultSite ?: return emptyList()
+        if (video.platform != site.platform || tags.isEmpty()) return emptyList()
         val given = tags.mapTo(HashSet()) { it.lowercase() }
-        return following.filter { it.channel.platform == video.platform && it.channel.id.startsWith("pornstar/") }
+        return following.filter { site.isPerformer(it.channel) }
             .filter { f -> f.name?.let { n -> nameVariants(n).any { it in given } } == true }
             .map { Creator(it.channel, it.name!!) }
     }
@@ -1348,7 +1348,7 @@ class AppModel(
         updateStatus = "Looking for a new version…"
         launchQuiet {
             val found = try {
-                fetchLatestRelease()?.let { Updates.newer(it, FORAGE_VERSION, if (platform.isMobile) ".apk" else "_amd64.deb") }
+                fetchLatestRelease()?.let { Updates.newer(it, FORAGE_VERSION) { v -> Edition.releaseFile(v, platform.isMobile) } }
             } catch (e: Exception) {
                 updateStatus = "Couldn't look for a new version (${e.message ?: e.javaClass.simpleName})"
                 return@launchQuiet
@@ -1390,7 +1390,7 @@ class AppModel(
             WelcomeStep.PLAYER -> WelcomeStep.BRING
             WelcomeStep.VAULT_LOOK -> WelcomeStep.VAULT_HELLO
             WelcomeStep.VAULT_PLATFORMS -> WelcomeStep.VAULT_LOOK
-            WelcomeStep.VAULT_EXTRAS -> WelcomeStep.VAULT_PLATFORMS
+            WelcomeStep.VAULT_EXTRAS -> if (Edition.vaultSite != null) WelcomeStep.VAULT_PLATFORMS else WelcomeStep.VAULT_LOOK
             WelcomeStep.HELLO, WelcomeStep.VAULT_HELLO -> null
         }
     }
@@ -1899,23 +1899,24 @@ class AppModel(
     // The private platform's catalogue (SPEC, "Sensitive platforms"): its embed dump, imported into an
     // index file of its own. It holds only the site's public catalogue, so it isn't encrypted.
 
-    private val catalogueFile = File(dataDir, "catalogues/${PornhubSource.PLATFORM}.db")
-    private var catalogue: PornhubCatalogue? = null
+    private val catalogueFile = File(dataDir, "catalogues/${vaultSite?.platform ?: "none"}.db")
+    private var catalogue: SiteCatalogue? = null
     private val catalogueLock = Any()
 
     /** Whether this vault can use a catalogue: the private one, which offers the platform. */
-    val offersCatalogue: Boolean get() = isPrivate && searchPlatforms.any { it.first == PornhubSource.PLATFORM }
+    val offersCatalogue: Boolean get() = isPrivate && vaultSite?.let { site -> searchPlatforms.any { it.first == site.platform } } == true
 
     /** What the catalogue holds, e.g. "4.6 million videos, imported 18 Nov 2026"; null when there is none. */
     var catalogueInfo by mutableStateOf<String?>(null)
         private set
 
     /** The catalogue if there is a usable one; one an older Forage built is left alone until it's imported again. */
-    private fun openCatalogue(): PornhubCatalogue? = openAnyCatalogue()?.takeIf { it.current }
+    private fun openCatalogue(): SiteCatalogue? = openAnyCatalogue()?.takeIf { it.current }
 
-    private fun openAnyCatalogue(): PornhubCatalogue? = synchronized(catalogueLock) {
-        if (!isPrivate) return null
-        if (catalogue == null && catalogueFile.isFile) catalogue = runCatching { PornhubCatalogue.open(catalogueFile, platform.sqlFiles) }.getOrNull()
+    private fun openAnyCatalogue(): SiteCatalogue? = synchronized(catalogueLock) {
+        val site = vaultSite
+        if (!isPrivate || site == null) return null
+        if (catalogue == null && catalogueFile.isFile) catalogue = runCatching { site.openCatalogue(catalogueFile, platform.sqlFiles) }.getOrNull()
         catalogue
     }
 
@@ -1936,7 +1937,7 @@ class AppModel(
 
     /** Asks for the dump (or a catalogue made on another device) and imports it. */
     fun chooseCatalogueFile() = platform.chooseFile(
-        "Choose the downloaded embed dump (pornhub.com-db.zip), or a catalogue made on another device (pornhub.db)",
+        "Choose the downloaded embed dump (${vaultSite?.dumpFileName}), or a catalogue made on another device (${catalogueFile.name})",
         listOf("zip", "db"),
         ::importCatalogue,
     )
@@ -1947,6 +1948,7 @@ class AppModel(
      * phones without the memory to import the dump themselves.
      */
     fun importCatalogue(file: PickedFile) {
+        val site = vaultSite ?: return
         settingsOpen = false
         runJob("Importing the catalogue") { update ->
             val head = file.open().use { it.readNBytes(16) }
@@ -1954,7 +1956,7 @@ class AppModel(
                 update("Copying ${file.name}")
                 val incoming = File(catalogueFile.parentFile.apply { mkdirs() }, "${catalogueFile.name}.copying")
                 file.open().use { input -> incoming.outputStream().use { input.copyTo(it, 1 shl 20) } }
-                val usable = runCatching { PornhubCatalogue.open(incoming, platform.sqlFiles).use { it.current && it.size > 0 } }.getOrDefault(false)
+                val usable = runCatching { site.openCatalogue(incoming, platform.sqlFiles).use { it.current && it.size > 0 } }.getOrDefault(false)
                 if (!usable) {
                     incoming.delete()
                     return@runJob "${file.name} isn't a catalogue this version of Forage can use"
@@ -1968,21 +1970,21 @@ class AppModel(
             val job = currentCoroutineContext()[CoroutineJob]
             var shown = -1
             val summary = try {
-                PornhubCatalogue.import(file.open, file.size, catalogueFile, progress = { share ->
+                site.importCatalogue(file.open, file.size, catalogueFile, progress = { share ->
                     val percent = (share * 100).toInt()
                     if (percent != shown) {
                         shown = percent
                         update("$percent % of ${file.name} read")
                     }
                 }, cancelled = { job?.isActive == false }, beforeReplace = ::closeCatalogue, opener = platform.sqlFiles)
-            } catch (e: PornhubCatalogue.LayoutException) {
+            } catch (e: CatalogueLayoutException) {
                 return@runJob "${e.message}. Its layout: ${e.layout}"
             } catch (e: OutOfMemoryError) {
                 return@runJob OUT_OF_MEMORY
             }
             describeCatalogue()
             "Imported %,d videos into the catalogue (%,d left out with under %,d views, %,d lines unreadable; layout: %s). The zip can go now."
-                .format(summary.videos, summary.skippedFewViews, PornhubCatalogue.MIN_VIEWS, summary.skippedUnreadable, summary.layout)
+                .format(summary.videos, summary.skippedFewViews, site.catalogueMinViews, summary.skippedUnreadable, summary.layout)
         }
     }
 
@@ -1991,13 +1993,14 @@ class AppModel(
      * or is stopped continues where it stopped the next time.
      */
     fun downloadCatalogue() {
+        val site = vaultSite ?: return
         settingsOpen = false
         runJob("Downloading the catalogue") { update ->
             val job = currentCoroutineContext()[CoroutineJob]
-            val zip = File(catalogueFile.parentFile, "pornhub.com-db.zip")
+            val zip = File(catalogueFile.parentFile.apply { mkdirs() }, site.dumpFileName)
             var shown = -1L
             try {
-                DumpDownload.download(zip, progress = { done, total ->
+                site.downloadDump(zip, progress = { done, total ->
                     val mb = done / 10_000_000
                     if (mb != shown) {
                         shown = mb
@@ -2009,14 +2012,14 @@ class AppModel(
             }
             var percent = -1
             val summary = try {
-                PornhubCatalogue.import(zip, catalogueFile, progress = { share ->
+                site.importCatalogue({ zip.inputStream() }, zip.length(), catalogueFile, progress = { share ->
                     val p = (share * 100).toInt()
                     if (p != percent) {
                         percent = p
                         update("Importing: $p %")
                     }
                 }, cancelled = { job?.isActive == false }, beforeReplace = ::closeCatalogue, opener = platform.sqlFiles)
-            } catch (e: PornhubCatalogue.LayoutException) {
+            } catch (e: CatalogueLayoutException) {
                 return@runJob "${e.message}. Its layout: ${e.layout}"
             } catch (e: OutOfMemoryError) {
                 return@runJob OUT_OF_MEMORY
@@ -2035,6 +2038,9 @@ class AppModel(
     }
 
     // Search (SPEC, Manual add): find videos to add without leaving Forage for their links.
+
+    /** The private vault's own site, where this version of Forage has one (Full); what's offered for it still needs the vault. */
+    val vaultSite: VaultSite? get() = Edition.vaultSite
 
     /** The vault's own platform (the sensitive one), by name, for what's said about it. */
     val vaultPlatformName: String get() = allSearchPlatforms.firstOrNull { it.first != Platforms.YOUTUBE }?.second ?: "the site"
@@ -2061,7 +2067,8 @@ class AppModel(
         private set
 
     fun changeVaultYouTube(on: Boolean) {
-        if (!isPrivate) return
+        // Without a site of its own (Standard), the vault is for YouTube.
+        if (!isPrivate || Edition.vaultSite == null) return
         library.setPreference(VAULT_YOUTUBE, if (on) "on" else "off")
         vaultYouTube = on
         if (!on) changeDiscoverPlatform(null)
@@ -2070,6 +2077,10 @@ class AppModel(
     /** At the vault's first load: whether it uses YouTube, decided once from what's in it. */
     private fun loadVaultYouTube() {
         if (!isPrivate) return
+        if (Edition.vaultSite == null) {
+            vaultYouTube = true
+            return
+        }
         vaultYouTube = when (library.preference(VAULT_YOUTUBE)) {
             "on" -> true
             "off" -> false
@@ -2923,7 +2934,7 @@ class AppModel(
         const val FETCH_BATCH = 200
         private const val MAX_PLAYLIST_NAME = 60
         private const val OUT_OF_MEMORY = "Not enough memory on this device to import the dump. Import it on a computer instead, " +
-            "then copy catalogues/pornhub.db from its Forage folder here and choose it in Settings."
+            "then copy its catalogue (the catalogues folder in its Forage folder) here and choose it in Settings."
     }
 }
 
@@ -2945,4 +2956,9 @@ enum class SettingsPage(val title: String) {
 enum class WelcomeStep(val first: Boolean = false) {
     HELLO(first = true), BRING, TAKEOUT, APPS, PAIR, PLAYER,
     VAULT_HELLO(first = true), VAULT_LOOK, VAULT_PLATFORMS, VAULT_EXTRAS,
+}
+
+/** The private vault's sources: YouTube, and the vault's own site where this version has one. */
+val defaultPrivateSources: () -> ExtractorSource = {
+    Edition.vaultSite?.let { Sources(YouTubeSource(), it.newSource()) } ?: Sources(YouTubeSource())
 }

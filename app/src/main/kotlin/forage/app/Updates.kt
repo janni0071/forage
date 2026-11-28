@@ -46,16 +46,18 @@ object Updates {
 
     /**
      * The release described by [release] (GitHub's JSON), if it's newer than [current]; the
-     * download is the file whose name ends in [assetSuffix] (".apk", "_amd64.deb").
+     * download is the file [fileFor] names for its version (this version of Forage's APK or
+     * package: Standard and Full have files of their own).
      */
-    fun newer(release: String, current: String, assetSuffix: String): Update? {
+    fun newer(release: String, current: String, fileFor: (String) -> String): Update? {
         val o = json.parseToJsonElement(release) as? JsonObject ?: return null
         val tag = o["tag_name"]?.jsonPrimitive?.contentOrNull ?: return null
         if (o["draft"]?.jsonPrimitive?.contentOrNull == "true" || o["prerelease"]?.jsonPrimitive?.contentOrNull == "true") return null
         val version = tag.removePrefix("v")
         if (compare(version, current) <= 0) return null
+        val file = fileFor(version)
         val download = (o["assets"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.firstOrNull { a ->
-            a["name"]?.jsonPrimitive?.contentOrNull?.endsWith(assetSuffix) == true
+            a["name"]?.jsonPrimitive?.contentOrNull == file
         }?.get("browser_download_url")?.jsonPrimitive?.contentOrNull
         val page = o["html_url"]?.jsonPrimitive?.contentOrNull ?: RELEASES_PAGE
         return Update(version, page, download)

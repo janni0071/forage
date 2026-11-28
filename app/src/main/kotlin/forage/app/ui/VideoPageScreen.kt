@@ -537,9 +537,10 @@ private fun TagChip(model: AppModel, page: VideoPage, tag: String) {
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 onClick = { open = false; model.searchFor(tag) },
             )
-            if (page.id.platform == forage.source.pornhub.PornhubSource.PLATFORM && model.followsPerformers) {
+            val site = model.vaultSite
+            if (site != null && page.id.platform == site.platform && model.followsPerformers) {
                 val name = tag.trim().split(Regex("\\s+")).joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
-                val id = forage.source.pornhub.PornhubSource.performerId(name)
+                val id = site.performerId(name)
                 if (model.following.none { it.channel == id }) {
                     androidx.compose.material3.DropdownMenuItem(
                         text = { Text("Follow \"$name\" as a performer") },

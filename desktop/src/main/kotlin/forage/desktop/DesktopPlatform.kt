@@ -17,9 +17,8 @@ import forage.core.source.ExtractorSource
 import forage.core.source.Sources
 import forage.core.vault.PrivateVaults
 import forage.language.lingua.LinguaDetector
-import forage.source.pornhub.JdbcSqlFile
-import forage.source.pornhub.PornhubSource
-import forage.source.pornhub.SqlFile
+import forage.core.sql.JdbcSqlFile
+import forage.core.sql.SqlFile
 import forage.source.youtube.YouTubeSource
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -142,7 +141,7 @@ fun DesktopModel(
     io: CoroutineDispatcher = Dispatchers.IO,
     storage: Storage = DesktopStorage.plain(dataDir),
     models: Models = Models(dataDir, DesktopPlatform),
-    privateSourceFactory: () -> ExtractorSource = { Sources(YouTubeSource(), PornhubSource()) },
+    privateSourceFactory: () -> ExtractorSource = forage.app.defaultPrivateSources,
     sourceFactory: () -> ExtractorSource = { YouTubeSource() },
 ): AppModel = AppModel(dataDir, scope, io, storage, models, DesktopPlatform, privateSourceFactory, sourceFactory)
 
@@ -191,16 +190,5 @@ class PlayerOutput(process: Process, log: File?) {
     }
 }
 
-/** What a player's last lines mean, where it's a known case worth explaining; null otherwise. */
-internal fun explainPlayerFailure(lines: List<String>): String? {
-    val text = lines.joinToString("\n")
-    return when {
-        "premium" in text.lowercase() ->
-            "This video is for Pornhub Premium members only; Forage can't play it."
-        "[PornHub]" in text && "HTTP Error 410" in text ->
-            "Pornhub turns yt-dlp away (\"410 Gone\") unless it can pass for a browser, which takes the curl_cffi add-on. " +
-                "With yt-dlp from pipx: pipx inject yt-dlp curl_cffi (from pip: pip install curl_cffi). " +
-                "If the video still won't play, it may be for Premium members only."
-        else -> null
-    }
-}
+/** What a player's last lines mean, where it's a known case worth explaining (the vault's site's cases); null otherwise. */
+internal fun explainPlayerFailure(lines: List<String>): String? = forage.app.Edition.vaultSite?.explainPlayerFailure(lines)
