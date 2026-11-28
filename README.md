@@ -104,19 +104,7 @@ desktop app from source with its own data folder:
 ```
 
 The `cli` module does what the app does from a terminal (`./gradlew :cli:installDist`). The
-design, and why it is the way it is, is in [docs/SPEC.md](docs/SPEC.md). The screenshots come from a
-made-up library (`./gradlew :desktop:demoScreenshots`).
-
-## Making a release
-
-1. Set the new version in `gradle.properties` (`forage.version`); both apps take it from there.
-2. Write what's new in `docs/releases/<version>.md`.
-3. Merge to `main`, then tag and push: `git tag v<version>` and `git push origin v<version>`.
-
-GitHub then runs the tests, builds the Linux package and the signed APK, and publishes the release
-with those notes. It needs two repository secrets, `FORAGE_KEYSTORE_BASE64` (the signing key,
-base64-encoded) and `FORAGE_KEYSTORE_PASSWORD`; without them, it stops rather than sign with
-another key.
+design, and why it is the way it is, is in [docs/SPEC.md](docs/SPEC.md).
 
 ## Licence
 

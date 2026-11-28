@@ -158,10 +158,10 @@ tasks.matching { it.name == "proguardReleaseJars" }.configureEach {
     }
 }
 
-// The README's screenshots, from a made-up library: gradle :desktop:demoScreenshots
-tasks.register<JavaExec>("demoScreenshots") {
+// The README's screenshots, from a copy of a library: gradle :desktop:readmeScreenshots -Pdata=DIR
+tasks.register<JavaExec>("readmeScreenshots") {
     classpath = sourceSets.test.get().runtimeClasspath
-    mainClass = "forage.desktop.DemoScreenshotsKt"
+    mainClass = "forage.desktop.ReadmeScreenshotsKt"
     jvmArgs("-Djava.awt.headless=true")
-    args(rootProject.file("docs/screenshots").path)
+    args((project.findProperty("data") ?: "").toString(), rootProject.file("docs/screenshots").path)
 }
