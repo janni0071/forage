@@ -1,0 +1,8 @@
+-- Version 2 adds stored embeddings.
+CREATE TABLE embedding (
+    video_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    text_hash TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    PRIMARY KEY (video_id, model)
+);

@@ -1,0 +1,13 @@
+-- Version 10 turns the profile states into likes (SPEC, "A simpler model"): "included" becomes
+-- liked, "not for me" becomes not interested, and "excluded" becomes no decision at all.
+UPDATE profile_video SET state = 'liked' WHERE state = 'included';
+UPDATE profile_video SET state = 'not_interested' WHERE state = 'negative';
+DELETE FROM profile_video WHERE state = 'excluded';
+
+-- Playlists get a row of their own, so one can exist while empty and be renamed.
+CREATE TABLE playlist (
+    name TEXT NOT NULL PRIMARY KEY,
+    created_at INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO playlist (name, created_at)
+SELECT playlist, coalesce(min(added_at), 0) FROM playlist_item GROUP BY playlist;

@@ -1,0 +1,3 @@
+-- Version 20: which installation the sync identity belongs to, to notice a library copied over
+-- from another computer (it brings that computer's identity, which two devices can't share).
+ALTER TABLE sync_state ADD COLUMN installation TEXT;

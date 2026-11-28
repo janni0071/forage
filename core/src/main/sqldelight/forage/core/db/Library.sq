@@ -1,0 +1,397 @@
+-- The library: every video Forage knows about in this vault, what was watched and saved,
+-- and each profile's view of it. One database file is one vault; nothing reads across files.
+--
+-- library_video    what an import or the user told us about a video, before any metadata fetch
+-- watch_event      watching alone never changes a profile (SPEC: curated, not tracked)
+-- playlist         the vault's playlists, imported or made in Forage
+-- playlist_item    the videos in each playlist
+-- profile_video    a profile's like or "not interested"; no row means neither
+-- pick             the latest Discover batch per profile, so feedback can refer to it
+
+CREATE TABLE library_video (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT,
+    channel_id TEXT,
+    channel_name TEXT,
+    is_short INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0,
+    added_at INTEGER NOT NULL,
+    duration_seconds INTEGER,
+    uploaded_at INTEGER
+);
+
+CREATE TABLE watch_event (
+    video_id TEXT NOT NULL,
+    watched_at INTEGER NOT NULL,     -- 0 when the import carried no time
+    PRIMARY KEY (video_id, watched_at)
+);
+
+CREATE TABLE playlist (
+    name TEXT NOT NULL PRIMARY KEY,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE playlist_item (
+    playlist TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    added_at INTEGER,
+    position INTEGER NOT NULL DEFAULT 0,   -- the playlist's own order, from 0
+    PRIMARY KEY (playlist, video_id)
+);
+
+CREATE TABLE subscription (
+    channel_id TEXT NOT NULL PRIMARY KEY,
+    name TEXT,
+    added_at INTEGER NOT NULL,
+    avatar_url TEXT,
+    checked_at INTEGER,      -- when its uploads were last looked up
+    seen_at INTEGER,         -- uploads after this are new; set at the first check, so its back catalogue isn't
+    gone TEXT                -- why the platform no longer has the channel, when it doesn't
+);
+
+-- A vault's own preferences, kept inside it (encrypted with the private vault).
+CREATE TABLE preference (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+-- Sync: one row per row of the library that changed (its table and key, when, on which device;
+-- origin is null for this one), numbered in the order this device learned of the change.
+CREATE TABLE sync_row (
+    tbl TEXT NOT NULL,
+    row_key TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    origin TEXT,
+    seq INTEGER NOT NULL,
+    PRIMARY KEY (tbl, row_key)
+);
+CREATE INDEX sync_row_seq ON sync_row(seq);
+CREATE INDEX sync_row_ts ON sync_row(ts);
+
+-- The devices this one syncs with: the key they share, where it was last found, and how far each
+-- side has got (received: their changes up to; acked: ours they have, up to).
+CREATE TABLE sync_peer (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    key BLOB NOT NULL,
+    address TEXT,
+    port INTEGER,
+    received INTEGER NOT NULL DEFAULT 0,
+    acked INTEGER NOT NULL DEFAULT 0,
+    paired_at INTEGER NOT NULL,
+    synced_at INTEGER,
+    host TEXT,              -- the computer it's on, as found on the network (a vault has an id of its own)
+    kind TEXT               -- phone, tablet or computer
+);
+
+-- This device's side of sync. While changes from another device are being applied, the log
+-- leaves them out (they're logged as theirs instead).
+CREATE TABLE sync_state (
+    one INTEGER NOT NULL PRIMARY KEY CHECK (one = 1),
+    applying INTEGER NOT NULL DEFAULT 0,
+    counter INTEGER NOT NULL DEFAULT 0,     -- the last seq given out
+    clock INTEGER NOT NULL DEFAULT 0,       -- the latest change time seen, in ms: the next is later
+    device TEXT,                            -- this device's id, made when sync starts
+    installation TEXT                       -- the installation it belongs to (a copied library is noticed)
+);
+INSERT INTO sync_state (one, applying, counter, clock) VALUES (1, 0, 0, 0);
+
+-- Where each video was left off in Forage's own player.
+CREATE TABLE playback_position (
+    video_id TEXT NOT NULL PRIMARY KEY,
+    position_seconds INTEGER NOT NULL,
+    duration_seconds INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- Channels' pictures for video pages, also of channels nobody follows.
+CREATE TABLE channel_picture (
+    channel_id TEXT NOT NULL PRIMARY KEY,
+    url TEXT,                -- null when the platform had none
+    checked_at INTEGER NOT NULL
+);
+
+-- The latest uploads of each followed channel, as its feed listed them.
+CREATE TABLE subscription_video (
+    channel_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    channel_name TEXT,
+    duration_seconds INTEGER,
+    uploaded_at INTEGER,
+    found_at INTEGER NOT NULL,
+    PRIMARY KEY (channel_id, video_id)
+);
+
+CREATE TABLE watch_later (
+    video_id TEXT NOT NULL PRIMARY KEY,
+    added_at INTEGER NOT NULL
+);
+
+CREATE TABLE profile (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE profile_video (
+    profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
+    video_id TEXT NOT NULL,
+    state TEXT NOT NULL,             -- liked or not_interested
+    weight REAL NOT NULL DEFAULT 1,
+    source TEXT NOT NULL,            -- manual, more_like_this, not_for_me, discover
+    changed_at INTEGER NOT NULL,
+    PRIMARY KEY (profile_id, video_id)
+);
+
+CREATE TABLE pick (
+    profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    video_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    channel_id TEXT,
+    channel_name TEXT,
+    score REAL NOT NULL,
+    reason TEXT NOT NULL,
+    found_via TEXT NOT NULL,
+    exploration INTEGER AS kotlin.Boolean NOT NULL,
+    created_at INTEGER NOT NULL,
+    duration_seconds INTEGER,
+    uploaded_at INTEGER,
+    PRIMARY KEY (profile_id, position)
+);
+
+-- Insert-then-update instead of ON CONFLICT, which older Android SQLite versions lack.
+insertLibraryVideo:
+INSERT OR IGNORE INTO library_video (id, added_at) VALUES (?, ?);
+
+-- Fills in details without erasing ones already known.
+updateLibraryVideo:
+UPDATE library_video SET
+    title = coalesce(:title, title),
+    channel_id = coalesce(:channel_id, channel_id),
+    channel_name = coalesce(:channel_name, channel_name),
+    is_short = max(is_short, :is_short),
+    duration_seconds = coalesce(:duration_seconds, duration_seconds),
+    uploaded_at = coalesce(:uploaded_at, uploaded_at)
+WHERE id = :id;
+
+selectLibraryVideos:
+SELECT * FROM library_video;
+
+selectLibraryVideosNewestFirst:
+SELECT * FROM library_video ORDER BY added_at DESC, id;
+
+countWatchedVideos:
+SELECT count(DISTINCT video_id) FROM watch_event;
+
+selectLibraryVideo:
+SELECT * FROM library_video WHERE id = ?;
+
+countLibraryVideos:
+SELECT count(*) FROM library_video;
+
+insertWatchEvent:
+INSERT OR IGNORE INTO watch_event VALUES (?, ?);
+
+selectWatchEvents:
+SELECT * FROM watch_event;
+
+countWatchEvents:
+SELECT count(*) FROM watch_event;
+
+deleteWatchEventsOfVideo:
+DELETE FROM watch_event WHERE video_id = ?;
+
+deleteWatchEvents:
+DELETE FROM watch_event;
+
+upsertPlaylistItem:
+INSERT OR IGNORE INTO playlist_item (playlist, video_id, added_at, position)
+VALUES (:playlist, :video_id, :added_at, (SELECT coalesce(max(position), -1) + 1 FROM playlist_item WHERE playlist = :playlist));
+
+selectPlaylistItems:
+SELECT * FROM playlist_item WHERE playlist = ?;
+
+-- In the playlist's own order.
+selectPlaylistItemsInOrder:
+SELECT video_id, added_at FROM playlist_item WHERE playlist = ?
+ORDER BY position, rowid;
+
+selectPlaylists:
+SELECT p.name, count(i.video_id) AS videos
+FROM playlist p LEFT JOIN playlist_item i ON i.playlist = p.name
+GROUP BY p.name ORDER BY p.created_at DESC, p.name;
+
+insertPlaylist:
+INSERT OR IGNORE INTO playlist (name, created_at) VALUES (?, ?);
+
+renamePlaylist:
+UPDATE playlist SET name = :new WHERE name = :old;
+
+renamePlaylistItems:
+UPDATE playlist_item SET playlist = :new WHERE playlist = :old;
+
+deletePlaylist:
+DELETE FROM playlist WHERE name = ?;
+
+deletePlaylistItems:
+DELETE FROM playlist_item WHERE playlist = ?;
+
+deletePlaylistItem:
+DELETE FROM playlist_item WHERE playlist = ? AND video_id = ?;
+
+insertPlaylistItem:
+INSERT OR IGNORE INTO playlist_item (playlist, video_id, added_at, position)
+VALUES (:playlist, :video_id, :added_at, (SELECT coalesce(max(position), -1) + 1 FROM playlist_item WHERE playlist = :playlist));
+
+setPlaylistItemPosition:
+UPDATE playlist_item SET position = :position WHERE playlist = :playlist AND video_id = :video_id;
+
+-- The first video of each playlist, in its own order, for the playlists' covers.
+selectPlaylistCovers:
+SELECT playlist, video_id FROM playlist_item i
+WHERE position = (SELECT min(position) FROM playlist_item WHERE playlist = i.playlist);
+
+insertSubscription:
+INSERT OR IGNORE INTO subscription (channel_id, added_at) VALUES (?, ?);
+
+updateSubscription:
+UPDATE subscription SET name = coalesce(:name, name) WHERE channel_id = :channel_id;
+
+selectSubscriptions:
+SELECT * FROM subscription ORDER BY name;
+
+selectSubscription:
+SELECT * FROM subscription WHERE channel_id = ?;
+
+deleteSubscription:
+DELETE FROM subscription WHERE channel_id = ?;
+
+deleteSubscriptionVideos:
+DELETE FROM subscription_video WHERE channel_id = ?;
+
+insertSubscriptionVideo:
+INSERT OR IGNORE INTO subscription_video VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- A later look may know a video better (its length, a fixed title); the time it was found stays.
+updateSubscriptionVideo:
+UPDATE subscription_video SET
+    title = :title,
+    channel_name = coalesce(:channel_name, channel_name),
+    duration_seconds = coalesce(:duration_seconds, duration_seconds),
+    uploaded_at = coalesce(uploaded_at, :uploaded_at)
+WHERE channel_id = :channel_id AND video_id = :video_id;
+
+-- Keeps each channel's newest uploads only.
+pruneSubscriptionVideos:
+DELETE FROM subscription_video WHERE channel_id = :channel_id AND video_id NOT IN (
+    SELECT video_id FROM subscription_video WHERE channel_id = :channel_id
+    ORDER BY coalesce(uploaded_at, found_at) DESC LIMIT :keep
+);
+
+markSubscriptionChecked:
+UPDATE subscription SET
+    gone = NULL,
+    checked_at = :now,
+    seen_at = coalesce(seen_at, :now),
+    name = coalesce(:name, name),
+    avatar_url = coalesce(:avatar_url, avatar_url)
+WHERE channel_id = :channel_id;
+
+markSubscriptionGone:
+UPDATE subscription SET gone = :reason, checked_at = :now WHERE channel_id = :channel_id;
+
+selectPreference:
+SELECT value FROM preference WHERE key = ?;
+
+setPreference:
+INSERT OR REPLACE INTO preference VALUES (?, ?);
+
+selectPlaybackPositions:
+SELECT video_id, position_seconds, duration_seconds FROM playback_position;
+
+upsertPlaybackPosition:
+INSERT OR REPLACE INTO playback_position VALUES (?, ?, ?, ?);
+
+deletePlaybackPosition:
+DELETE FROM playback_position WHERE video_id = ?;
+
+deletePlaybackPositions:
+DELETE FROM playback_position;
+
+selectChannelPicture:
+SELECT * FROM channel_picture WHERE channel_id = ?;
+
+upsertChannelPicture:
+INSERT OR REPLACE INTO channel_picture VALUES (?, ?, ?);
+
+markSubscriptionsSeen:
+UPDATE subscription SET seen_at = ? WHERE checked_at IS NOT NULL;
+
+-- Everyone's uploads, newest first. New ones were found after their channel was last seen: the
+-- platform's upload dates can be rough ("2 days ago"), the time Forage found a video isn't.
+selectUploads:
+SELECT v.*, s.name AS followed_name,
+    (s.seen_at IS NOT NULL AND v.found_at > s.seen_at) AS is_new
+FROM subscription_video v JOIN subscription s ON s.channel_id = v.channel_id
+ORDER BY coalesce(v.uploaded_at, v.found_at) DESC, v.found_at DESC
+LIMIT ?;
+
+-- The playlists a video is in.
+selectPlaylistsOfVideo:
+SELECT playlist FROM playlist_item WHERE video_id = ? ORDER BY playlist;
+
+selectWatchEventsOfVideo:
+SELECT watched_at FROM watch_event WHERE video_id = ?;
+
+isSavedForLater:
+SELECT count(*) FROM watch_later WHERE video_id = ?;
+
+insertWatchLater:
+INSERT OR IGNORE INTO watch_later VALUES (?, ?);
+
+deleteWatchLater:
+DELETE FROM watch_later WHERE video_id = ?;
+
+selectWatchLater:
+SELECT video_id, added_at FROM watch_later ORDER BY added_at DESC;
+
+-- Every video that must never be suggested again, whatever the profile.
+selectKnownVideoIds:
+SELECT video_id FROM watch_event
+UNION SELECT video_id FROM playlist_item
+UNION SELECT video_id FROM watch_later;
+
+insertProfile:
+INSERT INTO profile (name, created_at) VALUES (?, ?);
+
+selectProfileByName:
+SELECT * FROM profile WHERE name = ?;
+
+selectProfiles:
+SELECT * FROM profile ORDER BY id;
+
+upsertProfileVideo:
+INSERT OR REPLACE INTO profile_video VALUES (?, ?, ?, ?, ?, ?);
+
+deleteProfileVideo:
+DELETE FROM profile_video WHERE profile_id = ? AND video_id = ?;
+
+selectProfileVideos:
+SELECT * FROM profile_video WHERE profile_id = ? ORDER BY changed_at, video_id;
+
+deletePicks:
+DELETE FROM pick WHERE profile_id = ?;
+
+insertPick:
+INSERT INTO pick VALUES ?;
+
+selectPicks:
+SELECT * FROM pick WHERE profile_id = ? ORDER BY position;
+
+-- Deleting a profile removes only its own decisions and picks; the library stays.
+deleteProfileVideos:
+DELETE FROM profile_video WHERE profile_id = ?;
+
+deleteProfile:
+DELETE FROM profile WHERE id = ?;

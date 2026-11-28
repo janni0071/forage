@@ -1,0 +1,665 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package forage.app.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.BrightnessAuto
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.OndemandVideo
+import androidx.compose.material.icons.outlined.SmartDisplay
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import forage.app.AppModel
+import forage.app.Player
+import forage.app.Theme
+import forage.app.SettingsPage
+
+@Composable
+fun SettingsDialog(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val phone = LocalCompact.current
+    val pages = settingsPages(model)
+    val close = { model.settingsOpen = false; model.settingsPage = null }
+    // One column (the overview, then a part) on a phone and in a window too narrow for the list beside a part.
+    var oneColumn by remember { mutableStateOf(phone) }
+    // In one column, Back goes from a part of Settings to the overview first.
+    val dismiss = { if (oneColumn && model.settingsPage != null) model.settingsPage = null else close() }
+    // A plain dialog: Material's alert dialog keeps to 560 dp, too narrow for the list beside a part.
+    androidx.compose.ui.window.Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BoxWithConstraints(contentAlignment = Alignment.Center) {
+        val compact = phone || maxWidth < 860.dp
+        SideEffect { oneColumn = compact }
+        CompositionLocalProvider(LocalCompact provides compact) {
+        if (compact) {
+            Surface(shape = RoundedCornerShape(28.dp), color = c.surfaceContainerLow, modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().padding(horizontal = 12.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp)) {
+                    val page = model.settingsPage
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (page != null) {
+                            IconButton(onClick = { model.settingsPage = null }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "All settings") }
+                        }
+                        Text(page?.title ?: "Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        IconButton(onClick = close) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
+                    }
+                    if (page == null) {
+                        Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (p in pages) OverviewRow(model, p) { model.settingsPage = p }
+                        }
+                    } else {
+                        PageContent(model, page)
+                    }
+                }
+            }
+        } else {
+            val page = model.settingsPage?.takeIf { it in pages } ?: pages.first()
+            // One size whichever part shows, so it doesn't jump about between them.
+            Surface(
+                shape = RoundedCornerShape(28.dp), color = c.surfaceContainerLow,
+                modifier = Modifier.padding(24.dp).widthIn(max = 920.dp).fillMaxWidth().fillMaxHeight(0.88f).heightIn(max = 700.dp),
+            ) {
+                Row(Modifier.fillMaxHeight()) {
+                    Column(Modifier.width(280.dp).fillMaxHeight().background(c.surfaceContainer).padding(vertical = 24.dp, horizontal = 14.dp)) {
+                        Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 10.dp, bottom = 18.dp))
+                        for (p in pages) PageTab(model, p, selected = p == page) { model.settingsPage = p }
+                    }
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 28.dp, end = 20.dp, top = 20.dp, bottom = 28.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(page.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            IconButton(onClick = close) { Icon(Icons.Outlined.Close, contentDescription = "Close") }
+                        }
+                        PageContent(model, page)
+                    }
+                }
+            }
+        }
+        }
+        }
+    }
+}
+
+/** The parts of Settings this library has: the catalogue only where there is one, playback only where there's a choice. */
+private fun settingsPages(model: AppModel): List<SettingsPage> = SettingsPage.entries.filter {
+    when (it) {
+        SettingsPage.PLAYBACK -> model.platform.players.isNotEmpty()
+        SettingsPage.CATALOGUE -> model.offersCatalogue
+        SettingsPage.SYNC -> model.sync != null
+        else -> true
+    }
+}
+
+private fun pageIcon(page: SettingsPage): ImageVector = when (page) {
+    SettingsPage.PLAYBACK -> Icons.Outlined.PlayCircle
+    SettingsPage.APPEARANCE -> Icons.Outlined.Palette
+    SettingsPage.PRIVACY -> Icons.Outlined.Shield
+    SettingsPage.CATALOGUE -> Icons.Outlined.Inventory2
+    SettingsPage.SYNC -> Icons.Outlined.Sync
+    SettingsPage.DATA -> Icons.Outlined.Backup
+}
+
+/** How a part of Settings stands, in a line, for the overview. */
+@Composable
+private fun pageSummary(model: AppModel, page: SettingsPage): String = when (page) {
+    SettingsPage.PLAYBACK -> model.player.label
+    SettingsPage.APPEARANCE -> listOfNotNull(
+        model.vaultLook?.let { "${it.name.lowercase().replaceFirstChar(Char::uppercase)} look" } ?: when (model.theme) {
+            Theme.SYSTEM -> "System theme"
+            Theme.LIGHT -> "Light"
+            Theme.DARK -> "Dark"
+        },
+        if (!model.platform.isMobile) "size " + (model.uiScale?.let { forage.app.Zoom.label(it) } ?: "Auto") else null,
+    ).joinToString(" · ")
+    SettingsPage.PRIVACY -> (if (model.recordHistory) "History on" else "History paused") + " · " + (if (model.showThumbnails) "thumbnails on" else "no thumbnails")
+    SettingsPage.CATALOGUE -> model.catalogueInfo ?: "Not imported yet"
+    SettingsPage.SYNC -> model.sync?.let { syncLine(it) } ?: ""
+    SettingsPage.DATA -> model.automaticBackups.firstOrNull()?.let {
+        "Last backup " + (formatAge(java.time.Instant.ofEpochMilli(it.lastModified())) ?: "recently")
+    } ?: if (model.isPrivate) "Encrypted backups, exports" else "Backups, exports"
+}
+
+/** A part of Settings in the window's list: its icon, name and how it stands. */
+@Composable
+private fun PageTab(model: AppModel, page: SettingsPage, selected: Boolean, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(14.dp))
+            .background(if (selected) c.primaryContainer else Color.Transparent)
+            .clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(pageIcon(page), contentDescription = null, tint = if (selected) c.onPrimaryContainer else c.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        Column(Modifier.padding(start = 14.dp)) {
+            Text(page.title, style = MaterialTheme.typography.labelLarge, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = if (selected) c.onPrimaryContainer else c.onSurface)
+            Text(pageSummary(model, page), style = MaterialTheme.typography.bodySmall, color = if (selected) c.onPrimaryContainer.copy(alpha = 0.8f) else c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** A part of Settings in the phone's overview: a card to open. */
+@Composable
+private fun OverviewRow(model: AppModel, page: SettingsPage, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).clickable(onClick = onClick).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(c.primaryContainer), contentAlignment = Alignment.Center) {
+            Icon(pageIcon(page), contentDescription = null, tint = c.onPrimaryContainer, modifier = Modifier.size(22.dp))
+        }
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(page.title, style = MaterialTheme.typography.titleSmall)
+            Text(pageSummary(model, page), style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = c.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun PageContent(model: AppModel, page: SettingsPage) = when (page) {
+    SettingsPage.PLAYBACK -> PlaybackPage(model)
+    SettingsPage.APPEARANCE -> AppearancePage(model)
+    SettingsPage.PRIVACY -> PrivacyPage(model)
+    SettingsPage.CATALOGUE -> CataloguePage(model)
+    SettingsPage.SYNC -> SyncPage(model)
+    SettingsPage.DATA -> DataPage(model)
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PlaybackPage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        if (model.platform.players.isNotEmpty()) {
+            Intro(
+                if (Player.IN_APP in model.platform.players) "Play videos here, on their page, or hand them to another app (LibreTube, NewPipe, a browser)."
+                else "Where videos open. Forage only finds and organizes them.",
+            )
+            // Checking for players starts small processes: once per opening, and after installing.
+            LaunchedEffect(Unit) { model.checkPlayers() }
+            PlayerChoice(model)
+            // The vault's videos come from Pornhub too, which FreeTube doesn't play.
+            val site = model.vaultSite
+            if (model.isPrivate && site != null && model.player == Player.FREETUBE) {
+                Hint("FreeTube plays YouTube only: ${site.name} videos open in the browser. mpv plays both, without the website.")
+            }
+            MpvSetupCard(model)
+        }
+        // The vault's videos play in the site's embedded player here: its ads can be kept out.
+        // The site's embedded player is the one with ads (YouTube plays without them here).
+        if (model.isPrivate && model.vaultSite != null && Player.IN_APP in model.platform.players) {
+            Section("Ads", null)
+            SwitchRow(
+                title = "Block ads in the player",
+                text = "The embedded player isn't let to load from ad and tracking servers, nor to ask for video ads, so pre-roll " +
+                    "ads have nothing to show and the video starts. The video itself comes from the site's own servers.",
+                checked = model.blockAds,
+                onChange = model::changeBlockAds,
+            )
+            AdServers()
+        }
+    }
+}
+
+/**
+ * The servers the embedded player asked since Forage started, those kept out first: to see what
+ * an ad that got through came from. In memory only.
+ */
+@Composable
+private fun AdServers() {
+    val c = MaterialTheme.colorScheme
+    // Read again every couple of seconds while showing, as the player goes on asking.
+    var servers by remember { mutableStateOf(forage.app.AdBlocking.servers()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(2_000)
+            servers = forage.app.AdBlocking.servers()
+        }
+    }
+    if (servers.isEmpty()) {
+        Text(
+            "Once a video has played, the servers its player contacted show here.",
+            style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp),
+        )
+        return
+    }
+    Column(Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(14.dp)) {
+        Text(
+            "Servers the player contacted since Forage started (${servers.sumOf { it.blocked }} requests kept out). If an ad still plays, " +
+                "a screenshot of this list shows where it came from.",
+            style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp),
+        )
+        for (s in servers.take(30)) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    s.host, style = MaterialTheme.typography.bodySmall, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    color = if (s.blocked > 0) c.error else c.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (s.blocked > 0) "kept out ${s.blocked}×" else "${s.asked}×",
+                    style = MaterialTheme.typography.labelSmall, color = if (s.blocked > 0) c.error else c.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
+        TextButton(onClick = { forage.app.AdBlocking.clear(); servers = emptyList() }) { Text("Clear the list") }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun AppearancePage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        val look = model.vaultLook
+        if (look != null) {
+            // The private vault wears a look of its own, always dark, kept inside the vault.
+            Section("Look", "The private vault's own colours, apart from the rest of Forage.")
+            Segmented(
+                options = listOf(
+                    Triple(forage.app.VaultLook.NEON, "Neon", null),
+                    Triple(forage.app.VaultLook.VELVET, "Velvet", null),
+                    Triple(forage.app.VaultLook.NOIR, "Noir", null),
+                ),
+                selected = look,
+                onSelect = model::changeVaultLook,
+            )
+        } else {
+            Section("Theme", null)
+            Segmented(
+                options = listOf(
+                    Triple(Theme.SYSTEM, "System", Icons.Outlined.BrightnessAuto),
+                    Triple(Theme.LIGHT, "Light", Icons.Outlined.LightMode),
+                    Triple(Theme.DARK, "Dark", Icons.Outlined.DarkMode),
+                ),
+                selected = model.theme,
+                onSelect = model::changeTheme,
+            )
+        }
+
+        if (!model.isPrivate && !model.platform.isMobile) {
+            SwitchRow(
+                title = "Forage's own title bar",
+                text = "Window buttons in the top corner instead of the system's title bar. Turn off if moving or resizing " +
+                    "the window misbehaves on your desktop. Takes effect when Forage starts next.",
+                checked = !model.systemTitleBar,
+                onChange = { model.useSystemTitleBar(!it) },
+            )
+        }
+
+        // Phones size the interface through the system's display settings.
+        if (!model.platform.isMobile) {
+            Section("Interface size", "Also Ctrl + Plus, Ctrl + Minus, and Ctrl + 0 for automatic.")
+            Segmented(
+                options = listOf<Triple<Float?, String, androidx.compose.ui.graphics.vector.ImageVector?>>(
+                    Triple(null, "Auto", null),
+                ) + forage.app.Zoom.choices.map { Triple(it, forage.app.Zoom.label(it), null) },
+                selected = model.uiScale,
+                onSelect = model::changeUiScale,
+            )
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PrivacyPage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        Section("Thumbnails", null)
+        SwitchRow(
+            title = "Show thumbnails",
+            text = if (model.isPrivate) "Loaded from each site's image server, one request per video, and kept in memory only. " +
+                "Turn off to send no requests for them."
+            else "Loaded from YouTube's image server (i.ytimg.com), one request per video, then kept on disk. " +
+                "Turn off to send no requests for them.",
+            checked = model.showThumbnails,
+            onChange = model::setThumbnails,
+        )
+        val thumbnailProblems = remember { model.thumbnails.problems() }
+        if (thumbnailProblems.isNotEmpty()) {
+            Hint(
+                "Some didn't load since Forage started: " +
+                    thumbnailProblems.joinToString("; ") { (reason, n) -> "$n × $reason" } + ".",
+            )
+        }
+
+        Section("History", null)
+        SwitchRow(
+            title = "Record history",
+            text = "Videos you open from Forage go into the history in your library, and aren't recommended again. " +
+                "Remove single videos or clear it all there." +
+                (if (model.isPrivate) " This vault's history stays in the vault, encrypted." else ""),
+            checked = model.recordHistory,
+            onChange = model::changeRecordHistory,
+        )
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun CataloguePage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        if (model.isPrivate) {
+            SwitchRow(
+                title = "Also use YouTube in this vault",
+                text = "For YouTube videos you'd rather keep out of your main library: search then lets you choose, and Discover " +
+                    "can show either or both. Off, the vault searches and recommends from ${model.vaultPlatformName} only; YouTube " +
+                    "videos already in it stay.",
+                checked = model.vaultYouTube,
+                onChange = model::changeVaultYouTube,
+            )
+            Spacer(Modifier.height(16.dp))
+        }
+        if (model.offersCatalogue) {
+            Intro(
+                "The site's public list of all its videos (its \"embed dump\"), imported once: Discover then matches " +
+                    "your taste against millions of videos instead of a few searches, and related videos and previews come " +
+                    "from it. Kept unencrypted in Forage's data folder; it holds only the site's catalogue, nothing about you.",
+            )
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(16.dp)) {
+                Text(model.catalogueInfo ?: "Not imported yet", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (model.catalogueInfo == null) "Forage downloads the dump from the site (1.6 GB), imports it in a few minutes and deletes " +
+                        "the download; the catalogue then takes about 1.3 GB. If the download breaks off, starting it again continues it." +
+                        (if (model.platform.isMobile) " A catalogue made on a computer (in its Forage folder, catalogues) works too." else "")
+                    else "The site updates the dump now and then; download it again to catch up." +
+                    (if (model.platform.isMobile) " If a phone runs out of memory importing it, import it on a computer and choose its catalogue (in its Forage folder, catalogues) here instead." else ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+                )
+                // Wrapped on a phone, where the three don't fit side by side.
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AccentButton(if (model.catalogueInfo == null) "Download and import" else "Download again", null, enabled = model.job == null) {
+                        model.downloadCatalogue()
+                    }
+                    OutlinedButton(onClick = { model.chooseCatalogueFile() }, enabled = model.job == null, shape = RoundedCornerShape(12.dp)) {
+                        Text(if (compact) "Choose a file…" else "Choose a downloaded file…", maxLines = 1)
+                    }
+                    if (model.catalogueInfo != null) TextButton(onClick = model::removeCatalogue) { Text("Remove") }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun SyncPage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        model.sync?.let { sync ->
+            Intro(
+                when {
+                    sync.vault -> "Keep this vault and the ones on your other devices in step."
+                    else -> "Keep this ${sync.kind} and your other devices in step."
+                },
+            )
+            SyncCard(sync)
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun DataPage(model: AppModel) {
+    val c = MaterialTheme.colorScheme
+    val compact = LocalCompact.current
+    Column {
+        Section("Backup", if (model.isPrivate) "Everything in this vault, in one encrypted file, to restore if anything goes wrong." else "Everything in your library, in one file, to restore if anything goes wrong, here or on another device.")
+        BackupCard(model)
+        Section("Export", null)
+        ExportCard(model)
+
+        if (model.isPrivate) {
+            Section("Welcome", "What the vault is, its look, its platforms and what makes it work well, as when it was created.")
+            OutlinedButton(onClick = model::showWelcome, shape = RoundedCornerShape(12.dp)) { Text("Show the welcome again") }
+            Section(
+                "This private vault",
+                "Stored encrypted; nothing from it is written to disk in the clear, not even thumbnails or settings. " +
+                    "Changes to these settings last until you lock the vault.",
+            )
+            return@Column
+        }
+        Section("Updates", null)
+        UpdateSettings(model)
+        Section("Welcome", "The steps Forage starts with: importing from YouTube, pairing another device, choosing a player.")
+        OutlinedButton(onClick = model::showWelcome, shape = RoundedCornerShape(12.dp)) { Text("Show the welcome again") }
+        // A phone keeps the data inside the app, where no file manager reaches.
+        if (model.platform.isMobile) return@Column
+        Section("Your data", "Everything Forage knows lives in one folder on this computer. Nothing is sent anywhere else.")
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val home = System.getProperty("user.home")
+            Text(
+                model.dataDir.absolutePath.let { if (it.startsWith(home)) "~" + it.removePrefix(home) else it },
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                maxLines = 3,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(12.dp))
+            OutlinedButton(onClick = model::openDataFolder, shape = RoundedCornerShape(12.dp)) {
+                Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Open folder")
+            }
+        }
+    }
+}
+
+/** What a part of Settings is about, at its top. */
+@Composable
+private fun Intro(text: String) {
+    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
+}
+
+@Composable
+private fun Section(title: String, text: String?) {
+    Text(
+        title.uppercase(),
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 26.dp, bottom = if (text == null) 10.dp else 2.dp),
+    )
+    text?.let {
+        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
+    }
+}
+
+@Composable
+internal fun PlayerCard(
+    player: Player, problem: String?, selected: Boolean, modifier: Modifier,
+    /** The one to pick: never greyed out, labelled so. */
+    recommended: Boolean = false,
+    /** Missing parts Forage can install: a click sets it up instead of choosing it. */
+    canSetUp: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    val usable = problem != "not installed" || canSetUp
+    val icon = when (player) {
+        Player.FREETUBE -> Icons.Outlined.SmartDisplay
+        Player.MPV -> Icons.Outlined.OndemandVideo
+        Player.BROWSER -> Icons.Outlined.Language
+        Player.IN_APP -> Icons.Outlined.PlayCircle
+        Player.OTHER_APP -> Icons.Outlined.OpenInNew
+    }
+    Column(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (selected) c.primaryContainer else c.surfaceContainer)
+            .border(2.dp, if (selected) c.primary else Color.Transparent, RoundedCornerShape(18.dp))
+            .clickable(enabled = usable, onClick = onClick)
+            .pointerHoverIcon(if (usable) PointerIcon.Hand else PointerIcon.Default)
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).background(if (selected) Accent.pastelPink else c.surfaceContainerHigh),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    // The pastel circle is light in both themes, so the icon on it stays dark.
+                    tint = when {
+                        selected -> Accent.onAccent
+                        usable -> c.onSurface
+                        else -> c.onSurfaceVariant.copy(alpha = 0.5f)
+                    },
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            if (selected) Icon(Icons.Filled.CheckCircle, contentDescription = "Selected", tint = c.primary, modifier = Modifier.size(22.dp))
+        }
+        Text(
+            player.label,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = if (usable) c.onSurface else c.onSurfaceVariant.copy(alpha = 0.6f),
+            modifier = Modifier.padding(top = 12.dp),
+        )
+        val (status, color) = when {
+            problem == null -> "Ready" to c.primary
+            canSetUp -> "Click to set up" to c.primary
+            problem == "needs yt-dlp" -> "Needs yt-dlp" to c.error
+            else -> "Not installed" to c.onSurfaceVariant.copy(alpha = 0.6f)
+        }
+        Text(status, style = MaterialTheme.typography.bodySmall, color = color)
+        if (recommended) {
+            Text(
+                "Recommended",
+                maxLines = 1, softWrap = false,
+                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = Accent.onAccent,
+                modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(8.dp)).background(Accent.pastelPink).padding(horizontal = 8.dp, vertical = 3.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun <T> Segmented(options: List<Triple<T, String, ImageVector?>>, selected: T, onSelect: (T) -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).padding(4.dp)) {
+        for ((value, label, icon) in options) {
+            val on = value == selected
+            Row(
+                Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (on) c.surfaceContainerLowest else Color.Transparent)
+                    .clickable { onSelect(value) }
+                    .pointerHoverIcon(PointerIcon.Hand),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, tint = if (on) c.primary else c.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium, color = if (on) c.onSurface else c.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwitchRow(title: String, text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surfaceContainer).clickable { onChange(!checked) }.padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(text, style = MaterialTheme.typography.bodySmall, color = c.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+@Composable
+private fun Hint(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onErrorContainer,
+        modifier = Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.errorContainer).padding(12.dp),
+    )
+}

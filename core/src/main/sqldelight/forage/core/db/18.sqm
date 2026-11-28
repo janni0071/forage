@@ -1,0 +1,2 @@
+-- Version 19: what a paired device is (phone, tablet or computer), to show and say it rightly.
+ALTER TABLE sync_peer ADD COLUMN kind TEXT;

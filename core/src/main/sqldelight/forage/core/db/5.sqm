@@ -1,0 +1,9 @@
+-- Version 6 remembers pinned and muted topics.
+CREATE TABLE topic_preference (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
+    preference TEXT NOT NULL,
+    label TEXT NOT NULL,
+    members TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);

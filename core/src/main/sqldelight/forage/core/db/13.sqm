@@ -1,0 +1,6 @@
+-- Version 14 remembers channels' pictures for video pages, also of channels nobody follows.
+CREATE TABLE channel_picture (
+    channel_id TEXT NOT NULL PRIMARY KEY,
+    url TEXT,                -- null when the platform had none
+    checked_at INTEGER NOT NULL
+);

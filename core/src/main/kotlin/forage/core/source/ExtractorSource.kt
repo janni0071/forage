@@ -1,0 +1,162 @@
+package forage.core.source
+
+import forage.core.PlatformId
+import java.time.Instant
+
+/**
+ * One implementation per platform (SPEC, "Future: other platforms"). Core, profile and ranking
+ * code talk to platforms only through this interface.
+ *
+ * Calls block and do network I/O. They throw [SourceException] when the platform can't be reached
+ * or refuses to answer; a video that is simply gone is reported as [SourceException.NotAvailable].
+ */
+interface ExtractorSource {
+    /** Platform prefix of the IDs this source handles, e.g. `youtube`. */
+    val platform: String
+
+    /** The platform's name as people know it, for messages. */
+    val displayName: String get() = platform
+
+    /** What this source can do. Callers check before calling and skip what's missing. */
+    val capabilities: Set<Capability>
+
+    /** Metadata for one video, plus its related videos when the platform offers them in the same request. */
+    fun video(id: PlatformId): VideoDetails
+
+    /** Requires [Capability.SEARCH]. */
+    fun search(query: String): List<VideoStub>
+
+    /** Link that opens the video in a browser or external player. */
+    fun watchUrl(id: PlatformId): String
+
+    /**
+     * A preview image for the video, if the platform has a stable address for one. [large] asks
+     * for one sharp enough for a big card; it may not exist for every video, so callers fall back
+     * to the small one. [fresh] asks for a new address when the last one was refused, for
+     * platforms whose image links expire.
+     */
+    fun thumbnailUrl(id: PlatformId, large: Boolean = false, fresh: Boolean = false): String? = null
+
+    /**
+     * Every preview image the platform offers for the video, best first: callers try the next
+     * when one won't load. Most platforms have just the one from [thumbnailUrl].
+     */
+    fun thumbnailUrls(id: PlatformId, large: Boolean = false, fresh: Boolean = false): List<String> =
+        listOfNotNull(thumbnailUrl(id, large, fresh))
+
+    /**
+     * Still frames from across the video, in order, for a preview on hover; empty where the
+     * platform has none. May ask the platform.
+     */
+    fun previewFrames(id: PlatformId): List<String> = emptyList()
+
+    /**
+     * The latest uploads of a channel (or a performer, on platforms without channels), newest
+     * first, with its name and picture where the platform has them. [name] is what the channel
+     * was called when followed, for platforms that find uploads by name. Requires
+     * [Capability.CHANNEL_FEED].
+     */
+    fun channelFeed(channel: PlatformId, name: String?): ChannelFeed =
+        throw SourceException("$displayName can't list a channel's uploads")
+
+    /**
+     * The channel (or performer) a pasted link points to, with its name where known; null when it
+     * isn't a link to one of this platform's. May ask the platform, e.g. to resolve a handle.
+     */
+    fun channelFromLink(text: String): Pair<PlatformId, String?>? = null
+
+    /** A channel's picture, for a video page; null where the platform has none. May ask the platform. */
+    fun channelPicture(channel: PlatformId): String? = null
+
+    /**
+     * What a player inside Forage needs to play the video: its streams, or a page the platform
+     * offers for embedding. Null where the platform offers neither. Asks the platform.
+     */
+    fun playback(id: PlatformId): Playback? = null
+
+    /** The video a pasted link (or bare ID) points to, if it is one of this platform's. */
+    fun parseLink(text: String): PlatformId? = null
+
+    /**
+     * The source that handles [platform]: this one, or for a [Sources] the matching member.
+     * Lets callers that work per platform (searches) accept either.
+     */
+    fun forPlatform(platform: String): ExtractorSource? = takeIf { it.platform == platform }
+}
+
+enum class Capability {
+    RELATED_VIDEOS,
+    SEARCH,
+
+    /**
+     * The platform's tags describe what a video is about better than its title does, so topics
+     * are grouped by shared tags and named after them.
+     */
+    DESCRIPTIVE_TAGS,
+
+    /** [ExtractorSource.channelFeed]: a followed channel's or performer's latest uploads. */
+    CHANNEL_FEED,
+}
+
+/**
+ * How to play a video inside Forage: a video stream with a separate [audioUrl] (or one with both),
+ * or else a page made for embedding, which plays in a web view with the platform's own controls.
+ */
+data class Playback(
+    val videoUrl: String? = null,
+    val audioUrl: String? = null,
+    val embedUrl: String? = null,
+    /** "1080p", say, for the player to show. */
+    val quality: String? = null,
+    /** Headers the streams want with every request (YouTube's answer to whichever client asked). */
+    val headers: Map<String, String> = emptyMap(),
+    /** Every audio track there is to choose from, when there's more than one (dubbed ones, say); [audioUrl] is the one playing. */
+    val audioTracks: List<AudioTrack> = emptyList(),
+)
+
+/** One of a video's audio tracks: its stream, its name ("English (original)", say), and whether it's the one it was made with. */
+data class AudioTrack(val url: String, val label: String, val original: Boolean)
+
+/** A channel's latest uploads, newest first, with what the platform says about the channel. */
+data class ChannelFeed(val videos: List<VideoStub>, val name: String? = null, val avatarUrl: String? = null)
+
+/** Platform-neutral video model. Platform-specific odds and ends go into [extra]. */
+data class VideoMetadata(
+    val id: PlatformId,
+    val title: String,
+    val description: String,
+    val tags: List<String>,
+    val durationSeconds: Long?,
+    val channel: PlatformId?,
+    val channelName: String?,
+    /** BCP 47 language tag when the platform reports one. */
+    val language: String?,
+    val thumbnailUrl: String?,
+    val uploadedAt: Instant?,
+    val isShort: Boolean,
+    val extra: Map<String, String> = emptyMap(),
+)
+
+/** The little that list results (related videos, search hits) carry about a video. */
+data class VideoStub(
+    val id: PlatformId,
+    val title: String,
+    val channel: PlatformId?,
+    val channelName: String?,
+    val durationSeconds: Long?,
+    val isShort: Boolean,
+    /** Often only approximate: list results say "3 months ago". */
+    val uploadedAt: Instant? = null,
+    /** Platforms whose list results carry tags (see [Capability.DESCRIPTIVE_TAGS]). */
+    val tags: List<String> = emptyList(),
+)
+
+data class VideoDetails(val metadata: VideoMetadata, val related: List<VideoStub>)
+
+open class SourceException(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    /** The video was removed, is private, or is otherwise permanently unavailable. */
+    class NotAvailable(message: String, cause: Throwable? = null) : SourceException(message, cause)
+
+    /** The platform is refusing this client (captcha, bot check, rate limit, IP block). */
+    class Blocked(message: String, cause: Throwable? = null) : SourceException(message, cause)
+}

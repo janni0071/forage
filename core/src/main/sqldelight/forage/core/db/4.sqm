@@ -1,0 +1,8 @@
+-- Version 5 caches search results, so repeated Discover visits on the same day don't search again.
+CREATE TABLE search_cache (
+    platform TEXT NOT NULL,
+    query TEXT NOT NULL,
+    results TEXT NOT NULL,
+    fetched_at INTEGER NOT NULL,
+    PRIMARY KEY (platform, query)
+);

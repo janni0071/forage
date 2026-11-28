@@ -1,0 +1,3 @@
+-- Version 18: a paired device's computer, as it's found on the network. A private vault syncs
+-- under an id of its own, so the phone looks for the computer by this one.
+ALTER TABLE sync_peer ADD COLUMN host TEXT;

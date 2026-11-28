@@ -1,0 +1,2 @@
+-- Version 9 lets topics carry a name the user chose.
+ALTER TABLE topic_preference ADD COLUMN custom_name TEXT;

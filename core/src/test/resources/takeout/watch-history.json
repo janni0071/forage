@@ -1,0 +1,79 @@
+[{
+  "header": "YouTube",
+  "title": "Watched Hand-cut dovetails for beginners",
+  "titleUrl": "https://www.youtube.com/watch?v=aaaaaaaaaa1",
+  "subtitles": [{
+    "name": "Workshop Wren",
+    "url": "https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa"
+  }],
+  "time": "2026-10-30T19:12:44.123Z",
+  "products": ["YouTube"],
+  "activityControls": ["YouTube watch history"]
+},{
+  "header": "YouTube",
+  "title": "Watched Buy our mattress",
+  "titleUrl": "https://www.youtube.com/watch?v=adadadadad1",
+  "subtitles": [{
+    "name": "Mattress Co",
+    "url": "https://www.youtube.com/channel/UCdddddddddddddddddddddd"
+  }],
+  "time": "2026-10-30T19:10:01.000Z",
+  "products": ["YouTube"],
+  "details": [{
+    "name": "From Google Ads"
+  }],
+  "activityControls": ["Web & App Activity", "YouTube watch history"]
+},{
+  "header": "YouTube",
+  "title": "Watched a video that has been removed",
+  "time": "2026-10-29T08:00:00.000Z",
+  "products": ["YouTube"],
+  "activityControls": ["YouTube watch history"]
+},{
+  "header": "YouTube",
+  "title": "Sauerteig für Anfänger angesehen",
+  "titleUrl": "https://www.youtube.com/watch?v=bbbbbbbbbb2",
+  "subtitles": [{
+    "name": "Brotzeit",
+    "url": "https://www.youtube.com/channel/UCbbbbbbbbbbbbbbbbbbbbbb"
+  }],
+  "time": "2026-10-28T17:30:00Z",
+  "products": ["YouTube"],
+  "activityControls": ["YouTube watch history"]
+},{
+  "header": "YouTube",
+  "title": "Watched https://www.youtube.com/watch?v=cccccccccc3",
+  "titleUrl": "https://www.youtube.com/watch?v=cccccccccc3",
+  "time": "2026-10-27T12:00:00.000Z",
+  "products": ["YouTube"],
+  "activityControls": ["YouTube watch history"]
+},{
+  "header": "YouTube",
+  "title": "Viewed A post from Workshop Wren",
+  "titleUrl": "https://www.youtube.com/post/UgkxAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "time": "2026-10-26T12:00:00.000Z",
+  "products": ["YouTube"],
+  "activityControls": ["YouTube watch history"]
+},{
+  "header": "YouTube Music",
+  "title": "Watched Night Drive",
+  "titleUrl": "https://music.youtube.com/watch?v=dddddddddd4",
+  "subtitles": [{
+    "name": "Some Artist - Topic",
+    "url": "https://www.youtube.com/channel/UCeeeeeeeeeeeeeeeeeeeeee"
+  }],
+  "time": "2026-10-25T22:00:00.000Z",
+  "products": ["YouTube"],
+  "activityControls": ["YouTube watch history"]
+},{
+  "header": "YouTube",
+  "title": "Watched Hand-cut dovetails for beginners",
+  "titleUrl": "https://www.youtube.com/watch?v=aaaaaaaaaa1",
+  "subtitles": [{
+    "name": "Workshop Wren",
+    "url": "https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa"
+  }],
+  "time": "2026-10-20T19:12:44.123Z",
+  "products": ["YouTube"],
+  "activityControls": ["YouTube watch history"]
+}]

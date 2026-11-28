@@ -1,0 +1,64 @@
+-- Version 4 adds the library, profiles, feedback and the last batch of picks.
+CREATE TABLE library_video (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT,
+    channel_id TEXT,
+    channel_name TEXT,
+    is_short INTEGER NOT NULL DEFAULT 0,
+    added_at INTEGER NOT NULL
+);
+
+CREATE TABLE watch_event (
+    video_id TEXT NOT NULL,
+    watched_at INTEGER NOT NULL,     -- 0 when the import carried no time
+    PRIMARY KEY (video_id, watched_at)
+);
+
+CREATE TABLE playlist_item (
+    playlist TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    added_at INTEGER,
+    PRIMARY KEY (playlist, video_id)
+);
+
+CREATE TABLE subscription (
+    channel_id TEXT NOT NULL PRIMARY KEY,
+    name TEXT,
+    added_at INTEGER NOT NULL
+);
+
+CREATE TABLE watch_later (
+    video_id TEXT NOT NULL PRIMARY KEY,
+    added_at INTEGER NOT NULL
+);
+
+CREATE TABLE profile (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE profile_video (
+    profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
+    video_id TEXT NOT NULL,
+    state TEXT NOT NULL,             -- included, excluded or negative
+    weight REAL NOT NULL DEFAULT 1,
+    source TEXT NOT NULL,            -- manual, more_like_this, not_for_me
+    changed_at INTEGER NOT NULL,
+    PRIMARY KEY (profile_id, video_id)
+);
+
+CREATE TABLE pick (
+    profile_id INTEGER NOT NULL REFERENCES profile(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    video_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    channel_id TEXT,
+    channel_name TEXT,
+    score REAL NOT NULL,
+    reason TEXT NOT NULL,
+    found_via TEXT NOT NULL,
+    exploration INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (profile_id, position)
+);

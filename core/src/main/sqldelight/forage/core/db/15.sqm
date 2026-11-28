@@ -1,0 +1,8 @@
+-- Version 16 remembers where each video was left off in Forage's own player, to carry on from
+-- there and to show how far it got.
+CREATE TABLE playback_position (
+    video_id TEXT NOT NULL PRIMARY KEY,
+    position_seconds INTEGER NOT NULL,
+    duration_seconds INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
