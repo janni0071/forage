@@ -42,6 +42,21 @@ class Settings(private val file: File?, copyOf: Settings? = null) {
         get() = properties.getProperty("welcome.done", "false").toBoolean()
         set(value) = set("welcome.done", value.toString())
 
+    /** Whether to look for a new version once a day: null until asked (the welcome, or once on Home). */
+    var updateCheck: Boolean?
+        get() = properties.getProperty("updates.check")?.toBooleanStrictOrNull()
+        set(value) = if (value == null) Unit.also { remove("updates.check") } else set("updates.check", value.toString())
+
+    /** When it last looked, in epoch seconds. */
+    var lastUpdateCheck: Long
+        get() = properties.getProperty("updates.checked")?.toLongOrNull() ?: 0L
+        set(value) = set("updates.checked", value.toString())
+
+    /** A version put away from Home's note, not to be mentioned again. */
+    var skippedUpdate: String?
+        get() = properties.getProperty("updates.skipped")
+        set(value) = if (value == null) Unit.also { remove("updates.skipped") } else set("updates.skipped", value)
+
     /** Whether a search was ever made here, for Home's "Get started". */
     var hasSearched: Boolean
         get() = properties.getProperty("search.used", "false").toBoolean()

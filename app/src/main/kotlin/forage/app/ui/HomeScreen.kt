@@ -70,6 +70,7 @@ fun HomeScreen(model: AppModel, onImport: () -> Unit) {
             ),
         ) {
             if (!compact) item { ScreenHeader("Home", "Your queue, your picks and what you watched lately") }
+            item { UpdateNotes(model) }
             item { GetStarted(model, onImport) }
 
             if (model.later.isNotEmpty()) {

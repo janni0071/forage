@@ -134,6 +134,7 @@ private fun ColumnScope.Hello(model: AppModel) {
         if (Player.IN_APP in model.platform.players) "Videos play right here, without ads, or in another app you choose."
         else "Videos play in mpv, FreeTube or your browser, whichever you like.",
     )
+    UpdateSwitch(model)
     Spacer(Modifier.height(28.dp))
     AccentButton("Get started", null) { model.welcomeTo(WelcomeStep.BRING) }
 }

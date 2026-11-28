@@ -13,8 +13,9 @@ android {
         // The shared code is built for Java 21; Android has all of its library methods from Android 15 (API 35) on.
         minSdk = 35
         targetSdk = 36
-        versionCode = 47
-        versionName = "0.18.1"
+        // One version for both apps (gradle.properties); the code counts up with it: 0.21.0 is 2100.
+        versionName = project.version.toString()
+        versionCode = versionName!!.split(".").map(String::toInt).let { (major, minor, patch) -> major * 10_000 + minor * 100 + patch }
         // Phones of the last decade; leaving out the other processor types saves over 100 MB of ONNX Runtime.
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -51,6 +52,7 @@ android {
     buildFeatures { compose = true }
 
     sourceSets["main"].java.srcDir("../app/src/main/kotlin")
+    sourceSets["main"].java.srcDir("../build/generated/version")
 
     packaging {
         resources {
@@ -68,6 +70,8 @@ dependencies {
     implementation(project(":source-youtube"))
     implementation(project(":source-pornhub"))
     implementation(project(":embedding-onnx"))
+    // The update check reads GitHub's answer (shared app code).
+    implementation(libs.serialization.json)
     implementation(libs.onnxruntime.android)
     implementation(libs.sqldelight.android.driver)
     implementation(libs.sqlcipher.android)

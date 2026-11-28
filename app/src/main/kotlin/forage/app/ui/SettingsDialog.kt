@@ -488,6 +488,8 @@ private fun DataPage(model: AppModel) {
             )
             return@Column
         }
+        Section("Updates", null)
+        UpdateSettings(model)
         Section("Welcome", "The steps Forage starts with: importing from YouTube, pairing another device, choosing a player.")
         OutlinedButton(onClick = model::showWelcome, shape = RoundedCornerShape(12.dp)) { Text("Show the welcome again") }
         // A phone keeps the data inside the app, where no file manager reaches.

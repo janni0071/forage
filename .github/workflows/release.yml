@@ -1,0 +1,91 @@
+# Builds and publishes a release when a version tag is pushed (v0.21.0 for forage.version=0.21.0):
+# the tests, the desktop .deb and the signed Android APK, attached to a GitHub release whose notes
+# come from docs/releases/<version>.md.
+#
+# Needs two repository secrets (Settings, Secrets and variables, Actions):
+#   FORAGE_KEYSTORE_BASE64   the signing key, base64-encoded (base64 -w0 forage-release.jks)
+#   FORAGE_KEYSTORE_PASSWORD its password
+# Without them the release stops: an APK signed with another key couldn't update installed ones.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the version
+        run: |
+          version=$(grep '^forage.version=' gradle.properties | cut -d= -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match forage.version=$version in gradle.properties"
+            exit 1
+          fi
+          if [ ! -f "docs/releases/$version.md" ]; then
+            echo "::error::No release notes: docs/releases/$version.md"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Set up the signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FORAGE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.FORAGE_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::The signing key secrets (FORAGE_KEYSTORE_BASE64, FORAGE_KEYSTORE_PASSWORD) aren't set"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/forage-release.jks"
+          echo "FORAGE_KEYSTORE=$RUNNER_TEMP/forage-release.jks" >> "$GITHUB_ENV"
+          echo "FORAGE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "::add-mask::$KEYSTORE_PASSWORD"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y fakeroot
+
+      - name: Test
+        run: ./gradlew test
+
+      - name: Build the desktop package and the Android app
+        run: ./gradlew :desktop:packageDeb :android:assembleRelease
+
+      - name: Collect the files
+        run: |
+          mkdir out
+          cp desktop/build/compose/binaries/main/deb/*.deb "out/forage_${VERSION}_amd64.deb"
+          cp android/build/outputs/apk/release/*-release.apk "out/forage-${VERSION}.apk"
+          # The APK must carry Forage's own signature, never the debug key's.
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "out/forage-${VERSION}.apk" | tee signature.txt
+          if grep -q "CN=Android Debug" signature.txt; then
+            echo "::error::The APK is signed with the debug key"
+            exit 1
+          fi
+          (cd out && sha256sum * > SHA256SUMS)
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Forage ${{ env.VERSION }}
+          body_path: docs/releases/${{ env.VERSION }}.md
+          files: out/*
+
+      - name: Remove the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/forage-release.jks"

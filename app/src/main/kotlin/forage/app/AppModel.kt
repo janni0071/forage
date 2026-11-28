@@ -575,6 +575,7 @@ class AppModel(
      * someone has imported and liked a few videos it's there.
      */
     fun warmUp() {
+        checkForUpdates()
         if (!models.downloaded) {
             prepareModels()
             return
@@ -1313,6 +1314,56 @@ class AppModel(
 
     fun welcomeTo(step: WelcomeStep) {
         welcome = step
+    }
+
+    // Updates (opt-in): Forage's latest release on GitHub, once a day.
+
+    /** Whether to look for new versions: null until asked. Per device, never in the private vault. */
+    var updateCheck by mutableStateOf(if (isPrivate) false else settings.updateCheck)
+        private set
+
+    /** A newer version than this one, while it hasn't been put away. */
+    var availableUpdate by mutableStateOf<Update?>(null)
+        private set
+
+    /** How the last look went, for Settings ("Up to date", or why it couldn't look). */
+    var updateStatus by mutableStateOf<String?>(null)
+        private set
+
+    /** Where the latest release is read from; tests give their own. */
+    internal var fetchLatestRelease: () -> String? = Updates::fetchLatest
+
+    fun changeUpdateCheck(on: Boolean) {
+        if (isPrivate) return
+        settings.updateCheck = on
+        updateCheck = on
+        if (on) checkForUpdates(manual = true) else availableUpdate = null
+    }
+
+    /** Looks for a new version: once a day by itself (when allowed), or now ([manual], from Settings). */
+    fun checkForUpdates(manual: Boolean = false) {
+        if (isPrivate || (!manual && updateCheck != true)) return
+        val now = java.time.Instant.now().epochSecond
+        if (!manual && now - settings.lastUpdateCheck < 20 * 3600) return
+        updateStatus = "Looking for a new version…"
+        launchQuiet {
+            val found = try {
+                fetchLatestRelease()?.let { Updates.newer(it, FORAGE_VERSION, if (platform.isMobile) ".apk" else "_amd64.deb") }
+            } catch (e: Exception) {
+                updateStatus = "Couldn't look for a new version (${e.message ?: e.javaClass.simpleName})"
+                return@launchQuiet
+            }
+            settings.lastUpdateCheck = now
+            updateStatus = if (found == null) "Forage $FORAGE_VERSION is the latest version" else "Forage ${found.version} is out"
+            // A version put away on Home isn't mentioned there again; Settings still says it's out.
+            availableUpdate = found?.takeIf { manual || it.version != settings.skippedUpdate }
+        }
+    }
+
+    /** Home's note put away: this version isn't mentioned again. */
+    fun skipUpdate() {
+        availableUpdate?.let { settings.skippedUpdate = it.version }
+        availableUpdate = null
     }
 
     /** The step the welcome was opened at later on (Get started, the library), for where Back goes. */

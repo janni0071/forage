@@ -12,7 +12,10 @@ plugins {
 kotlin {
     jvmToolchain(21)
     // The model and screens shared with the Android app.
-    sourceSets.main { kotlin.srcDir("../app/src/main/kotlin") }
+    sourceSets.main {
+        kotlin.srcDir("../app/src/main/kotlin")
+        kotlin.srcDir("../build/generated/version")
+    }
 }
 
 dependencies {
@@ -48,7 +51,7 @@ compose.desktop {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.Dmg, TargetFormat.Msi)
             // The name people see; Debian's package name below must be lowercase.
             packageName = "Forage"
-            packageVersion = "0.20.1"
+            packageVersion = project.version.toString()
             description = "Local-first video recommendations you control"
             vendor = "Forage"
             licenseFile.set(rootProject.file("LICENSE"))
@@ -153,4 +156,12 @@ tasks.matching { it.name == "proguardReleaseJars" }.configureEach {
     doLast {
         outputs.files.asFileTree.matching { include("**/*.jar") }.forEach(::slimJar)
     }
+}
+
+// The README's screenshots, from a made-up library: gradle :desktop:demoScreenshots
+tasks.register<JavaExec>("demoScreenshots") {
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass = "forage.desktop.DemoScreenshotsKt"
+    jvmArgs("-Djava.awt.headless=true")
+    args(rootProject.file("docs/screenshots").path)
 }
